@@ -57,9 +57,10 @@ find_package(Eigen3 REQUIRED)
 # dl, and pthread (KORTEX is built with C++14 but links fine into a C++17
 # consumer). For now the library only contains the Pinocchio Dynamics wrapper.
 add_library(kinova_lowlevel
-    src/dynamics.cpp)
+    src/dynamics.cpp
+    src/telemetry.cpp)
 target_include_directories(kinova_lowlevel PUBLIC include)
-target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio)
+target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
 # --- tests --------------------------------------------------------------------
 enable_testing()
@@ -68,7 +69,8 @@ find_package(GTest REQUIRED)
 add_executable(unit_tests
     tests/smoke_test.cpp
     tests/joint_types_test.cpp
-    tests/dynamics_test.cpp)
+    tests/dynamics_test.cpp
+    tests/telemetry_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
