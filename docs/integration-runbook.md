@@ -15,24 +15,40 @@ load-bearing. An **e-stop must be within reach** for the entire session.
 
 ## 0. Prerequisites (do these before powering the robot)
 
-1. **Install an aarch64 build of the KORTEX C++ SDK.** The vendored lib on
-   `abra` (`~/rtos_testing/cpp/kortex_hardware/lib/.../libKortexApiCpp.a`) is
-   **x86-64 only** and will NOT link into a Jetson binary. Until an aarch64
-   KORTEX lib exists on the box, the real path cannot be built. (Symptom of the
-   wrong arch: `ld: ... Relocations in generic ELF (EM: 62) ... file in wrong
-   format`.)
-
-2. **Build with the real path enabled**, pointing at the aarch64 SDK:
+1. **aarch64 KORTEX C++ SDK — INSTALLED & VERIFIED (2026-06-02).** The lib
+   vendored in `~/rtos_testing/cpp/kortex_hardware/` is **x86-64 only** (and
+   Kortex `2.3.0`, the version of the prototype, ships *no* aarch64 C++ build —
+   only x86-64 and 32-bit armv7). We therefore use **Kortex C++ API 2.6.0
+   aarch64**, installed to a user dir on `abra` (no sudo, no system install):
 
    ```sh
-   ssh abra 'cd ~/kinova-gen3-driver/build && cmake .. \
+   ssh abra '
+     DEST=~/kortex_api_2.6.0_aarch64
+     mkdir -p "$DEST"
+     curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.6.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
+     unzip -q -o /tmp/k.zip -d "$DEST"   # -> $DEST/include/{client,client_stubs,common,google,messages} + $DEST/lib/release/libKortexApiCpp.a
+   '
+   ```
+
+   The 2.6.0 layout matches our `KORTEX_HW_DIR` expectations exactly, and the lib
+   is confirmed `AArch64`. (If you ever see `ld: ... Relocations in generic ELF
+   (EM: 62) ... file in wrong format`, you've pointed at the x86-64 lib again.)
+   Note: moving 2.3.0 → 2.6.0 is safe — `kortex_transport.cpp` compiles against
+   2.6.0 headers with no changes, and the low-level cyclic API we use is stable.
+
+2. **Build with the real path enabled** (verified to link cleanly on abra):
+
+   ```sh
+   ssh abra 'cd ~/kinova-gen3-driver && rm -rf build_kortex && mkdir build_kortex && cd build_kortex && cmake .. \
      -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
      -DKINOVA_ENABLE_KORTEX=ON \
-     -DKORTEX_HW_DIR=/path/to/aarch64/kortex_hardware \
+     -DKORTEX_HW_DIR=$HOME/kortex_api_2.6.0_aarch64 \
      && cmake --build . -j'
    ```
 
-   Confirm `benchmark_grav_comp` **links cleanly** (no x86/aarch64 mismatch).
+   `benchmark_grav_comp` links against the aarch64 lib and runs the `--sim` path;
+   the real `--ip` path is now compiled in and ready (untested on hardware — that
+   is this session).
 
 3. **Confirm the URDF matches the physical arm**, including any tool/gripper.
    See [`integration/grav_comp_static_check.md`](integration/grav_comp_static_check.md)
