@@ -58,7 +58,8 @@ find_package(Eigen3 REQUIRED)
 # consumer). For now the library only contains the Pinocchio Dynamics wrapper.
 add_library(kinova_lowlevel
     src/dynamics.cpp
-    src/telemetry.cpp)
+    src/telemetry.cpp
+    src/telemetry_consumers.cpp)
 target_include_directories(kinova_lowlevel PUBLIC include)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
