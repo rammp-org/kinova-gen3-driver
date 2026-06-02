@@ -15,34 +15,46 @@ load-bearing. An **e-stop must be within reach** for the entire session.
 
 ## 0. Prerequisites (do these before powering the robot)
 
-1. **aarch64 KORTEX C++ SDK — INSTALLED & VERIFIED (2026-06-02).** The lib
-   vendored in `~/rtos_testing/cpp/kortex_hardware/` is **x86-64 only** (and
-   Kortex `2.3.0`, the version of the prototype, ships *no* aarch64 C++ build —
-   only x86-64 and 32-bit armv7). We therefore use **Kortex C++ API 2.6.0
-   aarch64**, installed to a user dir on `abra` (no sudo, no system install):
+1. **CONFIRM THE ROBOT'S FIRMWARE VERSION FIRST.** Kinova couples the Kortex API
+   version to robot firmware — pick the API that matches the firmware, not simply
+   the newest. Read it at power-on via the Kinova web app (robot IP in a browser)
+   or `GetDeviceInformation`. The choice:
+   - **firmware 2.x → use Kortex C++ API 2.8.0 aarch64** (the default below).
+   - **firmware 3.x → 2.8.0 will likely refuse/misbehave.** The public 3.x C++
+     bundle (`API/3.4.0/jetson.zip`) does **not** build — its `ClientService.h`
+     includes `CoreBenchmarker.h`, which Kinova does not ship in the package
+     (verified 2026-06-02). You'd need a *complete* 3.x C++ SDK from Kinova, or
+     match the firmware's own 2.x API. Decide at bring-up.
+
+   For low-level cyclic control (our use case) the API surface is stable across
+   2.3–2.8, so we are not missing control features by being on 2.x.
+
+2. **aarch64 KORTEX C++ SDK — INSTALLED & VERIFIED (2026-06-02): Kortex 2.8.0.**
+   The lib vendored in `~/rtos_testing/cpp/kortex_hardware/` is **x86-64 only**,
+   and 2.3.0 ships no aarch64 build at all. We use **2.8.0 aarch64** (newest
+   *buildable* C++ version; built + linked clean against our code), installed to
+   a user dir (no sudo):
 
    ```sh
    ssh abra '
-     DEST=~/kortex_api_2.6.0_aarch64
+     DEST=~/kortex_api_2.8.0_aarch64
      mkdir -p "$DEST"
-     curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.6.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
+     curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
      unzip -q -o /tmp/k.zip -d "$DEST"   # -> $DEST/include/{client,client_stubs,common,google,messages} + $DEST/lib/release/libKortexApiCpp.a
    '
    ```
 
-   The 2.6.0 layout matches our `KORTEX_HW_DIR` expectations exactly, and the lib
-   is confirmed `AArch64`. (If you ever see `ld: ... Relocations in generic ELF
-   (EM: 62) ... file in wrong format`, you've pointed at the x86-64 lib again.)
-   Note: moving 2.3.0 → 2.6.0 is safe — `kortex_transport.cpp` compiles against
-   2.6.0 headers with no changes, and the low-level cyclic API we use is stable.
+   The layout matches our `KORTEX_HW_DIR` exactly; the lib is confirmed `AArch64`.
+   (Symptom of pointing at the x86-64 lib again: `ld: ... Relocations in generic
+   ELF (EM: 62) ... file in wrong format`.)
 
-2. **Build with the real path enabled** (verified to link cleanly on abra):
+3. **Build with the real path enabled** (verified to link cleanly on abra):
 
    ```sh
    ssh abra 'cd ~/kinova-gen3-driver && rm -rf build_kortex && mkdir build_kortex && cd build_kortex && cmake .. \
      -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
      -DKINOVA_ENABLE_KORTEX=ON \
-     -DKORTEX_HW_DIR=$HOME/kortex_api_2.6.0_aarch64 \
+     -DKORTEX_HW_DIR=$HOME/kortex_api_2.8.0_aarch64 \
      && cmake --build . -j'
    ```
 
@@ -50,7 +62,7 @@ load-bearing. An **e-stop must be within reach** for the entire session.
    the real `--ip` path is now compiled in and ready (untested on hardware — that
    is this session).
 
-3. **Confirm the URDF matches the physical arm**, including any tool/gripper.
+4. **Confirm the URDF matches the physical arm**, including any tool/gripper.
    See [`integration/grav_comp_static_check.md`](integration/grav_comp_static_check.md)
    — if `models/gen3_7dof.urdf` is missing the real end-effector payload
    inertia, gravity-comp will visibly **sag or push**. Verify before trusting
