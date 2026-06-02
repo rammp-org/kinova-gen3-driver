@@ -101,7 +101,8 @@ add_executable(unit_tests
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
-    tests/gravity_comp_mode_test.cpp)
+    tests/gravity_comp_mode_test.cpp
+    tests/rt_safety_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
