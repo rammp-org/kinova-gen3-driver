@@ -60,9 +60,18 @@ add_library(kinova_lowlevel
     src/dynamics.cpp
     src/telemetry.cpp
     src/telemetry_consumers.cpp
-    src/rt_system.cpp)
+    src/rt_system.cpp
+    src/sim_transport.cpp
+    src/kortex_transport.cpp)
 target_include_directories(kinova_lowlevel PUBLIC include)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
+
+# KORTEX SDK: only kortex_transport.cpp pulls these headers in (pimpl keeps them
+# out of public headers). KORTEX is built C++14; links into our C++17 build.
+# _OS_UNIX selects the POSIX socket headers inside the KORTEX transport headers.
+target_include_directories(kinova_lowlevel PRIVATE ${KORTEX_INCLUDE_DIRS})
+target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
+target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
 
 # --- tests --------------------------------------------------------------------
 enable_testing()
@@ -73,7 +82,8 @@ add_executable(unit_tests
     tests/joint_types_test.cpp
     tests/dynamics_test.cpp
     tests/telemetry_test.cpp
-    tests/rt_system_test.cpp)
+    tests/rt_system_test.cpp
+    tests/sim_transport_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
