@@ -50,6 +50,7 @@ set(KORTEX_LIB ${KORTEX_HW_DIR}/lib/release/libKortexApiCpp.a)
 # --- pinocchio ----------------------------------------------------------------
 # Requires -DCMAKE_PREFIX_PATH pointing at the cmeel.prefix (see header above).
 find_package(pinocchio REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 # --- driver library -----------------------------------------------------------
 # NOTE: Task 0 only. The driver library sources (src/*.cpp) do not exist yet;
@@ -62,9 +63,11 @@ find_package(pinocchio REQUIRED)
 enable_testing()
 find_package(GTest REQUIRED)
 
-# Task 0: smoke test only. Later tasks will add more test sources here.
-add_executable(unit_tests tests/smoke_test.cpp)
-target_link_libraries(unit_tests PRIVATE GTest::gtest_main)
+add_executable(unit_tests
+    tests/smoke_test.cpp
+    tests/joint_types_test.cpp)
+target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen)
+target_include_directories(unit_tests PRIVATE include)
 
 # URDF path for tests that load the Gen3 model (used by later tasks).
 target_compile_definitions(unit_tests PRIVATE
