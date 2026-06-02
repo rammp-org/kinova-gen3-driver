@@ -62,7 +62,8 @@ add_library(kinova_lowlevel
     src/telemetry_consumers.cpp
     src/rt_system.cpp
     src/sim_transport.cpp
-    src/kortex_transport.cpp)
+    src/kortex_transport.cpp
+    src/gravity_comp_mode.cpp)
 target_include_directories(kinova_lowlevel PUBLIC include)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
@@ -83,7 +84,8 @@ add_executable(unit_tests
     tests/dynamics_test.cpp
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
-    tests/sim_transport_test.cpp)
+    tests/sim_transport_test.cpp
+    tests/gravity_comp_mode_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
