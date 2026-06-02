@@ -1,6 +1,7 @@
 #include "kinova_lowlevel/telemetry_consumers.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 namespace kinova {
@@ -39,10 +40,12 @@ uint32_t NanoHistogram::percentile(double p) const noexcept {
   for (int k = 0; k < 64; ++k) {
     acc += buckets_[k];
     if (acc >= target) {
-      return 1u << k;
+      // Return the bucket lower bound 2^k. Shift on uint32_t and clamp k<=31
+      // so the shift can never be UB or overflow the uint32_t return type.
+      return std::uint32_t(1) << (k > 31 ? 31 : k);
     }
   }
-  return 1u << 31;  // unreachable in practice (all counts accounted for above)
+  return std::uint32_t(1) << 31;  // unreachable (all counts accounted for above)
 }
 
 std::string NanoHistogram::dump() const {
@@ -97,17 +100,20 @@ void TelemetrySink::consume(const CycleSample& s) {
 }
 
 std::string TelemetrySink::console_line() const {
-  char buf[256];
+  char buf[384];
   std::snprintf(
       buf, sizeof(buf),
-      "n=%llu p50=%.1fus p99=%.1fus max=%.1fus jitter=%.1fus compute=%.1fus "
+      "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
+      "comm[p99=%.1f]us compute[p99=%.1f]us jitter[p99=%.1f]us "
       "overruns=%llu faults=%llu",
       static_cast<unsigned long long>(n_),
       cycle_.percentile(0.5) / 1000.0,
       cycle_.percentile(0.99) / 1000.0,
+      cycle_.percentile(0.999) / 1000.0,
       cycle_.max() / 1000.0,
-      jitter_.percentile(0.99) / 1000.0,
+      comm_.percentile(0.99) / 1000.0,
       compute_.percentile(0.99) / 1000.0,
+      jitter_.percentile(0.99) / 1000.0,
       static_cast<unsigned long long>(overruns_),
       static_cast<unsigned long long>(faults_));
   return std::string(buf);
