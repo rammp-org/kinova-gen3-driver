@@ -9,10 +9,13 @@
 #include "kinova_lowlevel/rt_system.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <fcntl.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <unistd.h>
 
 namespace kinova {
 
@@ -29,6 +32,14 @@ const char* policy_name(int policy) {
       return "UNKNOWN";
   }
 }
+
+// Held open for the process lifetime. Writing 0 to /dev/cpu_dma_latency places a
+// PM-QoS request that forbids CPU idle states with non-zero exit latency (kills
+// the ~5 ms 'c7' deep-idle wakeup hit) — the same thing cyclictest does. The QoS
+// is released when the fd closes, so we keep it open until exit. Per-process: no
+// global sysfs writes, no sudo (given a udev rule granting the device to our
+// user/group). -1 = not pinned.
+int g_cpu_dma_latency_fd = -1;
 }  // namespace
 
 RtReport enable_rt(const RtConfig& cfg) {
@@ -64,6 +75,30 @@ RtReport enable_rt(const RtConfig& cfg) {
       rep.note += std::strerror(errno);
       rep.note += "; ";
     }
+  }
+
+  if (cfg.pin_cpu_latency && g_cpu_dma_latency_fd < 0) {
+    int fd = ::open("/dev/cpu_dma_latency", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+      const int32_t target_us = 0;
+      if (::write(fd, &target_us, sizeof(target_us)) == sizeof(target_us)) {
+        g_cpu_dma_latency_fd = fd;  // hold open for process lifetime
+        rep.cpu_latency_pinned = true;
+      } else {
+        ::close(fd);
+        rep.note += "cpu_dma_latency write failed: ";
+        rep.note += std::strerror(errno);
+        rep.note += "; ";
+      }
+    } else {
+      rep.note += "cpu_dma_latency open failed: ";
+      rep.note += std::strerror(errno);
+      rep.note +=
+          " (deep C-states NOT pinned; add a udev rule granting "
+          "/dev/cpu_dma_latency to your user/group); ";
+    }
+  } else if (g_cpu_dma_latency_fd >= 0) {
+    rep.cpu_latency_pinned = true;  // already pinned by a prior call
   }
 
   rep.policy = sched_getscheduler(0);
@@ -107,6 +142,8 @@ std::string introspect() {
   out += "  majflt:   " + std::to_string(u.majflt) + "\n";
   out += "  nvcsw:    " + std::to_string(u.nvcsw) + "\n";
   out += "  nivcsw:   " + std::to_string(u.nivcsw) + "\n";
+  out += "  cpu_dma_latency: ";
+  out += (g_cpu_dma_latency_fd >= 0) ? "pinned@0us\n" : "not pinned\n";
   return out;
 }
 

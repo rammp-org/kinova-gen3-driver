@@ -151,13 +151,32 @@ CPU idle (`c7`, 5 ms exit latency), missing core isolation, and unlocked clocks
 will all show up as jitter. **Tune the platform before trusting any timing
 numbers.**
 
+**The driver runs without `sudo`.** Scheduling (`SCHED_FIFO`), `mlockall`, core
+affinity, and the C-state pin are all done *inside* `rt_system::enable_rt()`;
+they only need a **one-time** permission grant (not per-run sudo, and unlike
+`setcap` it survives rebuilds):
+
 ```sh
-sudo ./scripts/rt_setup.sh 11      # governor, clocks, C-states, RT throttling, ... (runtime)
+sudo ./scripts/rt_grant_once.sh    # once: 'realtime' group + rtprio/memlock limits
+                                    # + udev rule for /dev/cpu_dma_latency. Re-login after.
+```
+
+After that the driver gets real RT as a normal user — confirm `policy: FIFO` and
+`cpu_dma_latency: pinned@0us` in its report. (Without the grant it still runs,
+degrading to `SCHED_OTHER`.) Notably the driver pins `/dev/cpu_dma_latency` to
+0 µs itself, suppressing the deep `c7` (~5 ms) idle state for our process — the
+same trick cyclictest uses.
+
+The remaining knobs are CPU-/system-global (not driver-local) — they need root
+or a boot edit and mainly tighten the tail under load:
+
+```sh
+sudo ./scripts/rt_setup.sh 11      # governor, clocks, deep-idle, RT throttling (runtime)
 ```
 
 Core **isolation** (`isolcpus=11 nohz_full=11 rcu_nocbs=11`) is a boot-time
 kernel-cmdline change, and you should **measure** the result with `cyclictest`.
-The full checklist — current state, every setting with rationale, the
+The full checklist — privilege model, every setting with rationale, the
 bootloader edit, per-run flags, validation, and persistence — is in
 [`docs/rt-tuning.md`](docs/rt-tuning.md).
 
@@ -242,7 +261,8 @@ apps/                      benchmark_grav_comp.cpp
 models/                    gen3_7dof.urdf
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
-scripts/                   build_on_abra.sh  sync_to_abra.sh  rt_setup.sh
+scripts/                   build_on_abra.sh  sync_to_abra.sh
+                           rt_grant_once.sh  rt_setup.sh
 docs/                      rt-tuning.md  integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)

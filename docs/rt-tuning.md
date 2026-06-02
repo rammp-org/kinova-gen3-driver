@@ -30,6 +30,41 @@ trusting any timing numbers.
 
 ---
 
+## Privilege model — run the driver without `sudo`
+
+The driver must run as a normal user (no `sudo` at run time). What needs
+privilege, and how each is granted *once* so the driver itself does the work:
+
+| RT action | Where it happens | Privilege (granted once) |
+|---|---|---|
+| Core affinity (`--cpu`) | in `rt_system` | none |
+| `mlockall` + lock memory | in `rt_system` | `memlock` rlimit |
+| `SCHED_FIFO` priority | in `rt_system` | `rtprio` rlimit |
+| Pin C-states (`/dev/cpu_dma_latency`) | in `rt_system` | udev rule on the device |
+
+All four are **driver-local** (done in `rt_system::enable_rt()`); they only need
+the user to *have permission*. Grant it once with:
+
+```sh
+sudo ./scripts/rt_grant_once.sh        # creates 'realtime' group, rtprio/memlock
+                                        # limits, and the cpu_dma_latency udev rule
+# log out + back in (group membership), then run the driver with NO sudo.
+```
+
+This is preferred over `setcap cap_sys_nice,cap_ipc_lock+ep` because the grant is
+on the *user/group*, so it **survives every rebuild** — `setcap` is on the binary
+inode and is wiped each time you recompile (painful in the build-on-abra loop).
+
+`enable_rt()` is best-effort: if the grant isn't in place it logs a note and runs
+at `SCHED_OTHER` (the driver still *runs* without sudo, just without hard-RT
+guarantees). Confirm success in the report: `policy: FIFO` and
+`cpu_dma_latency: pinned@0us`.
+
+The settings below (governor, clocks, isolation, throttling) are **not**
+driver-local — they are CPU-/system-global and need root or a boot edit. They
+improve the tail (especially under load) but aren't required for the driver to
+run.
+
 ## A. Runtime tunings (scripted, non-persistent)
 
 Run the provided script with `sudo`. It sets the governor, locks clocks,
@@ -92,26 +127,25 @@ cores removes them from the general scheduler pool.
 > original `APPEND` line as a second `LABEL` entry so you can fall back. Do this
 > step with physical/console access, not over a flaky SSH link.
 
-## C. Per-run (the binary)
+## C. Per-run (the binary) — no sudo
 
-The RT loop needs scheduling privileges and should be pinned to the isolated
-core. Grant capabilities once (preferred over running the whole app as root):
-
-```sh
-sudo setcap cap_sys_nice,cap_ipc_lock+ep ./benchmark_grav_comp
-```
-
-Then run pinned to the isolated core with a high RT priority:
+After the one-time grant (privilege-model section above), run pinned to the
+isolated core with a high RT priority — **as a normal user, no sudo**:
 
 ```sh
 ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf \
   --rate 1000 --cpu 11 --rt-priority 80 --pacing sleepspin --duration 60
 ```
 
-Confirm in the final `introspect()` report: `policy: FIFO`, the expected
-`priority`/`cpu`, and `majflt+=0` (proves `mlockall` locked memory). A non-zero
-**involuntary context-switch** count on the RT thread means something still
-preempted it — revisit isolation.
+The driver sets `SCHED_FIFO`, `mlockall`, affinity, and pins `/dev/cpu_dma_latency`
+to 0 µs itself (the last one suppresses deep C-states for our process — the same
+trick cyclictest uses — so we don't depend on the system-wide cpuidle disable in
+§A). Confirm in the final `introspect()` report:
+- `policy: FIFO`, the expected `priority`/`cpu`
+- `majflt+=0` (proves `mlockall` locked memory)
+- `cpu_dma_latency: pinned@0us` (deep idle suppressed for our process)
+- low **involuntary context-switch** count — a non-zero count means something
+  still preempted the RT thread; revisit isolation (§B).
 
 ## D. Validate — measure, don't assume
 
@@ -158,10 +192,16 @@ in the bootloader config.)
 
 ## Quick order of operations
 
-1. `sudo ./scripts/rt_setup.sh 11` (runtime tunings)
-2. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot, then
-   re-run step 1 (or enable the systemd unit).
-3. `sudo setcap cap_sys_nice,cap_ipc_lock+ep ./benchmark_grav_comp`
-4. `sudo cyclictest ... -a 11` → record max latency baseline.
-5. Run the driver `--cpu 11 --rt-priority 80`; confirm `policy: FIFO`,
-   `majflt+=0`, zero overruns, low involuntary context switches.
+1. `sudo ./scripts/rt_grant_once.sh` — one-time: lets the driver use FIFO / mlock
+   / cpu_dma_latency **without sudo** (survives rebuilds). Log out + back in.
+2. `sudo ./scripts/rt_setup.sh 11` — system-global runtime tunings (governor,
+   clocks, C-states, throttling). Re-run after reboot, or enable the systemd unit.
+3. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot.
+4. `sudo cyclictest -m -a 11 -p 90 -i 1000 -D 1h` → record max-latency baseline.
+5. Run the driver (NO sudo) `--cpu 11 --rt-priority 80`; confirm `policy: FIFO`,
+   `cpu_dma_latency: pinned@0us`, `majflt+=0`, zero overruns, low involuntary
+   context switches.
+
+Steps 2–4 are system/boot-global (governor, isolation) and improve the tail,
+especially under load. Step 1 is the only one required for the driver to get
+real RT, and it's a one-time grant — no per-run sudo.
