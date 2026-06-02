@@ -63,7 +63,8 @@ add_library(kinova_lowlevel
     src/rt_system.cpp
     src/sim_transport.cpp
     src/kortex_transport.cpp
-    src/gravity_comp_mode.cpp)
+    src/gravity_comp_mode.cpp
+    src/rt_executor.cpp)
 target_include_directories(kinova_lowlevel PUBLIC include)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
