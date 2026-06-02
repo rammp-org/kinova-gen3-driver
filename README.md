@@ -95,31 +95,71 @@ ssh abra 'cd ~/kinova-gen3-driver/build && cmake .. \
 - **GoogleTest** — for the unit tests.
 - **KORTEX C++ SDK** — only required for the real-robot build (see below).
 
-## Real robot status — IMPORTANT
+## KORTEX C++ SDK (for the real-robot build)
 
-**The driver currently builds SIM-ONLY.** The vendored KORTEX C++ SDK on `abra`
-(`~/rtos_testing/cpp/kortex_hardware/lib/release/libKortexApiCpp.a`) is
-**x86-64 only**. There is **no aarch64 KORTEX C++ lib on the box**, so the real
-`KortexTransport` path cannot link into a Jetson (aarch64) binary yet.
+The **default build is sim-only** and needs no KORTEX SDK — `kortex_transport.cpp`
+is not compiled and the app's `--ip` path is `#ifdef`'d out. The real-robot path
+is opt-in via `-DKINOVA_ENABLE_KORTEX=ON`.
 
-By default the build does not compile or link `kortex_transport.cpp`, and the
-benchmark app is built with the real `--ip` path `#ifdef`'d out (sim-only).
+**Architecture matters.** The KORTEX C++ lib vendored in the old prototype
+(`~/rtos_testing/cpp/kortex_hardware/`) is **x86-64** and will not link into a
+Jetson (aarch64) binary. Kortex `2.3.0` (the prototype's version) publishes *no*
+aarch64 C++ build at all. We use **Kortex C++ API 2.8.0 aarch64** — the newest
+version that actually builds against our code (the newest overall, 3.4.0, ships
+broken headers: its `ClientService.h` includes a `CoreBenchmarker.h` that isn't
+in the package).
 
-**To enable the real-robot path later** (after installing an aarch64 build of
-the KORTEX C++ SDK):
+### Install (on `abra`, no sudo — it's just a user-dir extract)
 
 ```sh
-cmake .. -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
-  -DKINOVA_ENABLE_KORTEX=ON \
-  -DKORTEX_HW_DIR=/path/to/aarch64/kortex_hardware
+ssh abra '
+  DEST=~/kortex_api_2.8.0_aarch64
+  mkdir -p "$DEST"
+  curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
+  unzip -q -o /tmp/k.zip -d "$DEST"
+'
+# yields $DEST/include/{client,client_stubs,common,google,messages} + $DEST/lib/release/libKortexApiCpp.a (AArch64)
 ```
 
-With `-DKINOVA_ENABLE_KORTEX=ON`, `KortexTransport` is compiled and linked and
-the `--ip` path is active. `KORTEX_HW_DIR` is only required/validated when this
-option is ON, so a box without KORTEX headers can still build and run the sim.
+### Build the real path against it
+
+```sh
+ssh abra 'cd ~/kinova-gen3-driver && rm -rf build_kortex && mkdir build_kortex && cd build_kortex && cmake .. \
+  -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
+  -DKINOVA_ENABLE_KORTEX=ON \
+  -DKORTEX_HW_DIR=$HOME/kortex_api_2.8.0_aarch64 \
+  && cmake --build . -j'
+```
+
+`KORTEX_HW_DIR` is only required/validated when `KINOVA_ENABLE_KORTEX=ON`, so a
+box without the SDK still builds the sim. (Symptom of pointing at the x86-64 lib:
+`ld: ... Relocations in generic ELF (EM: 62) ... file in wrong format`.)
+
+> **Version vs firmware:** Kinova couples the API version to robot firmware.
+> 2.8.0 suits 2.x firmware; confirm the arm's firmware at bring-up (browse to the
+> robot IP) before locking it in. For our low-level cyclic use the control API is
+> stable across 2.3–2.8, so no control features are lost on 2.x.
 
 > Do not enable this and connect to hardware unattended. See
 > [`docs/integration-runbook.md`](docs/integration-runbook.md).
+
+## Real-time tuning — REQUIRED for steady timing
+
+A PREEMPT_RT kernel alone does **not** give a steady loop. `abra` has the RT
+kernel and MAXN power, but as of 2026-06-02 the CPU governor (`schedutil`), deep
+CPU idle (`c7`, 5 ms exit latency), missing core isolation, and unlocked clocks
+will all show up as jitter. **Tune the platform before trusting any timing
+numbers.**
+
+```sh
+sudo ./scripts/rt_setup.sh 11      # governor, clocks, C-states, RT throttling, ... (runtime)
+```
+
+Core **isolation** (`isolcpus=11 nohz_full=11 rcu_nocbs=11`) is a boot-time
+kernel-cmdline change, and you should **measure** the result with `cyclictest`.
+The full checklist — current state, every setting with rationale, the
+bootloader edit, per-run flags, validation, and persistence — is in
+[`docs/rt-tuning.md`](docs/rt-tuning.md).
 
 ## Run the sim benchmark
 
@@ -157,9 +197,11 @@ overruns = 0, faults = 0, dropped = 0
 ```
 
 > **Caveat:** these are sim-transport numbers under `SCHED_OTHER` without
-> privileges. True RT determinism requires a privileged run
-> (`SCHED_FIFO` via `sudo`, or `setcap cap_sys_nice,cap_ipc_lock+ep` on the
-> binary) **and** the real robot's UDP round-trip in the `comm` measurement.
+> privileges, on an **untuned** box. True RT determinism requires the platform
+> tuning in [`docs/rt-tuning.md`](docs/rt-tuning.md) (governor, C-states, core
+> isolation, clock lock), a privileged run (`SCHED_FIFO` via `sudo` or
+> `setcap cap_sys_nice,cap_ipc_lock+ep`), **and** the real robot's UDP round-trip
+> in the `comm` measurement.
 
 ## Tests
 
@@ -200,8 +242,8 @@ apps/                      benchmark_grav_comp.cpp
 models/                    gen3_7dof.urdf
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
-scripts/                   build_on_abra.sh  sync_to_abra.sh
-docs/                      integration-runbook.md
+scripts/                   build_on_abra.sh  sync_to_abra.sh  rt_setup.sh
+docs/                      rt-tuning.md  integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)
 ```
