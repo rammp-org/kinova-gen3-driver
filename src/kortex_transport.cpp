@@ -1,8 +1,11 @@
 #include "kinova_lowlevel/kortex_transport.h"
 
+#include <chrono>
 #include <cmath>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <thread>
 
 #include "kinova_lowlevel/units.h"
 
@@ -93,9 +96,9 @@ struct KortexTransport::Impl {
     cmd_.set_frame_id(frame_id_);
     for (int i = 0; i < n_; ++i) {
       auto* a = cmd_.mutable_actuators(i);
-      // Always pass measured position through (KORTEX requires a sane position
-      // setpoint even in torque mode to avoid a step on mode revert).
-      a->set_position(float(rad_to_deg(cmd.position)[i]));
+      // KORTEX requires a sane position setpoint in every mode (avoids a step on
+      // mode revert); each branch sets it — commanded position in kPosition,
+      // measured-position passthrough otherwise.
       switch (cmd.mode) {
         case ActuatorMode::kPosition:
           a->set_position(float(rad_to_deg(cmd.position)[i]));
@@ -109,6 +112,10 @@ struct KortexTransport::Impl {
           a->set_torque_joint(float(cmd.torque[i]));
           break;
         case ActuatorMode::kCurrent:
+          // NOTE: JointCommand has no dedicated current field yet, so kCurrent
+          // reuses cmd.torque as the motor-current setpoint [A]. kCurrent is not
+          // exercised by any ControlMode today; add a `current` field to
+          // JointCommand before relying on this path. See no-silent-footgun.
           a->set_position(fb_.actuators(i).position());
           a->set_current_motor(float(cmd.torque[i]));
           break;
@@ -161,6 +168,14 @@ void KortexTransport::connect() {
   }
 
   I.n_ = I.base->GetActuatorCount().count();
+  // Guard the fixed-size JointVec: this build is compiled for kNumJoints DOF.
+  // A robot reporting a different count would otherwise index out of bounds in
+  // fill_feedback/write_command. Hard throw (see no-silent-footgun principle).
+  if (I.n_ != kNumJoints) {
+    throw std::runtime_error(
+        "KortexTransport: robot reports " + std::to_string(I.n_) +
+        " actuators but this build expects kNumJoints=" + std::to_string(kNumJoints));
+  }
   I.connected_ = true;
 }
 
@@ -214,25 +229,34 @@ void KortexTransport::receive(JointFeedback& fb) {
 
 void KortexTransport::safe_shutdown() {
   auto& I = *impl_;
-  if (!I.connected_) return;
+  // NOTE: we do NOT early-return on !connected_. A connect() that threw partway
+  // leaves some network objects alive; they must still be torn down. We only
+  // skip the robot-STATE revert (below) when we never entered low-level mode.
 
-  if (I.act_cfg && I.n_ > 0) {
-    k_api::ActuatorConfig::ControlModeInformation cm_msg;
-    cm_msg.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
-    for (int idx = 1; idx <= I.n_; ++idx) {
+  // Revert the robot to a safe state only if we actually put it in low-level
+  // servoing / changed actuator control modes.
+  if (I.low_level_) {
+    if (I.act_cfg && I.n_ > 0) {
+      k_api::ActuatorConfig::ControlModeInformation cm_msg;
+      cm_msg.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
+      for (int idx = 1; idx <= I.n_; ++idx) {
+        try {
+          I.act_cfg->SetControlMode(cm_msg, idx);
+        } catch (...) {
+        }
+      }
+    }
+    if (I.base) {
+      k_api::Base::ServoingModeInformation sm;
+      sm.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
       try {
-        I.act_cfg->SetControlMode(cm_msg, idx);
+        I.base->SetServoingMode(sm);
       } catch (...) {
       }
     }
-  }
-  if (I.base) {
-    k_api::Base::ServoingModeInformation sm;
-    sm.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
-    try {
-      I.base->SetServoingMode(sm);
-    } catch (...) {
-    }
+    // Let the mode/servoing revert settle before tearing the session down
+    // (mirrors the validated prototype; avoids closing mid-transition).
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
   }
 
   if (I.tcp_sess) {
