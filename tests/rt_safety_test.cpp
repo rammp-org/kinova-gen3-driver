@@ -71,3 +71,30 @@ TEST(RtSafety, NoMajorFaultsSteadyState) {
   EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
 }
+
+// Smoke test for the clock_nanosleep(ABSTIME) pacing path (the default benchmark
+// and the test above exercise kSleepSpin; this confirms the other strategy runs
+// the loop and produces samples without crashing).
+TEST(RtSafety, NanosleepPacingProducesSamples) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  GravityCompTorqueMode mode(dyn);
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {1000.0, Pacing::kClockNanosleep, {0, -1, true}});
+  ex.request_mode(&mode);
+
+  std::atomic<bool> stop{false};
+  uint64_t consumed = 0;
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) ++consumed; } });
+  std::thread watch([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    stop.store(true);
+  });
+  ex.run(stop);
+  watch.join();
+  drain.join();
+  // ~300 cycles at 1 kHz; allow generous slack for scheduling on a shared box.
+  EXPECT_GT(consumed, 50u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
