@@ -7,10 +7,18 @@
 //
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --rate 1000
 //       --duration 5 --csv /tmp/bench.csv
+//
+// --dry-run: READ-ONLY gravity validation. Connects and reads feedback only —
+// never enters low-level servoing, never commands torque. Prints measured joint
+// torque vs gravity(q) per joint so the URDF/dynamics can be checked against the
+// real arm BEFORE any torque is commanded. Move the arm by pendant between reads.
+//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf --duration 0
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -42,6 +50,7 @@ int main(int argc, char** argv) {
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
+  bool dry_run = false;
   double rate_hz = 1000.0;
   int cpu = -1;
   int rt_priority = 80;
@@ -61,6 +70,7 @@ int main(int argc, char** argv) {
     };
     if (a == "--ip") ip = next("--ip");
     else if (a == "--sim") use_sim = true;
+    else if (a == "--dry-run") dry_run = true;
     else if (a == "--urdf") urdf = next("--urdf");
     else if (a == "--rate") rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
@@ -110,6 +120,51 @@ int main(int argc, char** argv) {
   }
   Transport& t = *transport;
 
+  std::signal(SIGINT, on_sigint);
+
+  // --- dry-run: read-only gravity validation, ZERO torque commanded ----------
+  // Connects and reads feedback only (never enters LOW_LEVEL_SERVOING, never
+  // commands torque). Prints measured joint torque vs gravity(q) per joint so
+  // you can verify the URDF/dynamics against the real arm before trusting any
+  // torque. Move the arm by hand/pendant between readings.
+  if (dry_run) {
+    t.connect();
+    std::cout << "[dry-run] READ-ONLY gravity check — NO torque commanded, arm "
+                 "stays under its own control.\n"
+                 "          Move it to a few poses (pendant/web app); residual "
+                 "should be small if the URDF matches.\n";
+    JointFeedback fb;
+    JointVec tau_g;
+    const auto start = std::chrono::steady_clock::now();
+    auto last_print = start - std::chrono::seconds(1);
+    while (!g_stop.load(std::memory_order_acquire)) {
+      t.receive(fb);
+      dyn.gravity(fb.q, tau_g);
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_print >= std::chrono::milliseconds(500)) {
+        double max_res = 0.0;
+        std::printf("  j |   q[deg] | meas[Nm] | grav[Nm] |  resid[Nm]\n");
+        for (int i = 0; i < kNumJoints; ++i) {
+          const double res = fb.tau[i] - tau_g[i];
+          if (std::abs(res) > max_res) max_res = std::abs(res);
+          std::printf("  %d | %8.2f | %8.2f | %8.2f | %+9.3f\n", i + 1,
+                      fb.q[i] * kRad2Deg, fb.tau[i], tau_g[i], res);
+        }
+        std::printf("  -> max|residual| = %.3f Nm  (large/growing toward the tip "
+                    "=> URDF payload mismatch)\n\n", max_res);
+        last_print = now;
+      }
+      if (duration_s > 0.0 &&
+          std::chrono::duration<double>(now - start).count() >= duration_s) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));  // ~50 Hz read
+    }
+    t.safe_shutdown();  // no-op revert (never went low-level); just closes session
+    std::cout << "[dry-run] done — no torque was ever commanded.\n";
+    return 0;
+  }
+
   SampleRing ring(1 << 16);
   TelemetrySink sink(csv_path);
 
@@ -137,8 +192,6 @@ int main(int argc, char** argv) {
 
   RtExecutor ex(t, ring, {rate_hz, pacing, {rt_priority, cpu, true}});
   ex.request_mode(&mode);
-
-  std::signal(SIGINT, on_sigint);
 
   std::thread watchdog;
   if (duration_s > 0.0) {
