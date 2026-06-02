@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include "kinova_lowlevel/joint_types.h"
 namespace kinova {
@@ -11,6 +12,6 @@ class Dynamics {
   int nq() const;
  private:
   struct Impl;
-  Impl* impl_;
+  std::unique_ptr<Impl> impl_;  // move-only; never double-frees
 };
 }  // namespace kinova

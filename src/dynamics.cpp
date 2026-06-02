@@ -1,5 +1,7 @@
 #include "kinova_lowlevel/dynamics.h"
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
@@ -14,8 +16,17 @@ struct Dynamics::Impl {
     qcfg = pinocchio::neutral(model);
   }
 };
-Dynamics::Dynamics(const std::string& urdf_path) : impl_(new Impl(urdf_path)) {}
-Dynamics::~Dynamics() { delete impl_; }
+Dynamics::Dynamics(const std::string& urdf_path) : impl_(std::make_unique<Impl>(urdf_path)) {
+  // Guard against loading a model whose DOF count doesn't match our fixed-size
+  // JointVec — a wrong/mismatched URDF would otherwise silently corrupt memory.
+  // A hard throw (not assert) so it fires in Release too. See no-silent-footgun.
+  if (impl_->model.nv != kNumJoints) {
+    throw std::runtime_error(
+        "Dynamics: URDF nv=" + std::to_string(impl_->model.nv) +
+        " != kNumJoints=" + std::to_string(kNumJoints) + " (wrong URDF for this build)");
+  }
+}
+Dynamics::~Dynamics() = default;
 int Dynamics::nv() const { return impl_->model.nv; }
 int Dynamics::nq() const { return impl_->model.nq; }
 void Dynamics::gravity(const JointVec& q, JointVec& tau_out) {
