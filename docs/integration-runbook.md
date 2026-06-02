@@ -64,9 +64,17 @@ load-bearing. An **e-stop must be within reach** for the entire session.
 
 4. **Confirm the URDF matches the physical arm**, including any tool/gripper.
    See [`integration/grav_comp_static_check.md`](integration/grav_comp_static_check.md)
-   — if `models/gen3_7dof.urdf` is missing the real end-effector payload
-   inertia, gravity-comp will visibly **sag or push**. Verify before trusting
-   any torque output.
+   — if the URDF is missing the real end-effector payload inertia, gravity-comp
+   will visibly **sag** (under-comp) or push. Verify before trusting torque output.
+   - **Bare arm:** `models/gen3_7dof.urdf`.
+   - **With a Robotiq 2F-85 (the lab arm, confirmed 2026-06-02):** use
+     `models/gen3_7dof_2f85.urdf`. It is Kinova's `kortex_description/gen3_2f85`
+     with the 6 gripper finger joints converted to **`fixed`**, so the gripper is
+     a rigid payload (+1.36 kg incl. coupler) and Pinocchio still reports `nv=7`
+     (Dynamics requires exactly 7). **Lesson learned:** running the bare-arm URDF
+     with the gripper mounted under-compensated by ~1.4 kg at the tip and the arm
+     sagged on the first live torque run — always match the URDF to the mounted
+     hardware, and verify read-only (Phase 2 / `--dry-run`) before torque.
 
 ---
 
