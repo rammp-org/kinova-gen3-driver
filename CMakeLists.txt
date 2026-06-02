@@ -25,27 +25,44 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 add_compile_options(-O2 -Wall -Wextra -Wno-deprecated-declarations)
 
-# --- locate kortex_hardware (vendored KORTEX SDK) -----------------------------
-# Override with -DKORTEX_HW_DIR=/path/to/kortex_hardware if it lives elsewhere.
-set(KORTEX_HW_DIR "$ENV{HOME}/rtos_testing/cpp/kortex_hardware" CACHE PATH
-    "Path to kortex_hardware (KORTEX API headers + static lib)")
+# --- real-robot (KORTEX) build switch -----------------------------------------
+# OFF (default): SIM-ONLY build. KortexTransport is NOT compiled or linked, no
+# KORTEX headers are required, and the app gets -DKINOVA_NO_KORTEX so the real
+# --ip path is #ifdef'd out. This is the only configuration that links on the
+# Jetson today, because the vendored libKortexApiCpp.a is x86-64 ONLY (there is
+# no aarch64 KORTEX C++ lib on abra yet).
+#
+# ON: compile + link the real KortexTransport path. Requires an aarch64 build of
+# the KORTEX C++ SDK with KORTEX_HW_DIR pointing at it. Enable later for the
+# robot-in-the-loop bring-up:
+#     cmake .. -DKINOVA_ENABLE_KORTEX=ON -DKORTEX_HW_DIR=/path/to/aarch64/kortex_hardware
+option(KINOVA_ENABLE_KORTEX
+    "Compile/link the real KortexTransport path (needs an aarch64 KORTEX C++ SDK)" OFF)
 
-# Guard on a header that actually exists in this SDK layout.
-if(NOT EXISTS "${KORTEX_HW_DIR}/include/client/RouterClient.h")
-    message(FATAL_ERROR
-        "Cannot find KORTEX API headers under ${KORTEX_HW_DIR}/include. "
-        "Pass -DKORTEX_HW_DIR=/path/to/kortex_hardware.")
+if(KINOVA_ENABLE_KORTEX)
+    # --- locate kortex_hardware (vendored KORTEX SDK) -------------------------
+    # Override with -DKORTEX_HW_DIR=/path/to/kortex_hardware if it lives elsewhere.
+    set(KORTEX_HW_DIR "$ENV{HOME}/rtos_testing/cpp/kortex_hardware" CACHE PATH
+        "Path to kortex_hardware (KORTEX API headers + static lib)")
+
+    # Guard on a header that actually exists in this SDK layout. Only validated
+    # when KORTEX is enabled, so a box without KORTEX headers can still build sim.
+    if(NOT EXISTS "${KORTEX_HW_DIR}/include/client/RouterClient.h")
+        message(FATAL_ERROR
+            "KINOVA_ENABLE_KORTEX=ON but cannot find KORTEX API headers under "
+            "${KORTEX_HW_DIR}/include. Pass -DKORTEX_HW_DIR=/path/to/kortex_hardware.")
+    endif()
+
+    set(KORTEX_INCLUDE_DIRS
+        ${KORTEX_HW_DIR}/include
+        ${KORTEX_HW_DIR}/include/client
+        ${KORTEX_HW_DIR}/include/client_stubs
+        ${KORTEX_HW_DIR}/include/common
+        ${KORTEX_HW_DIR}/include/messages
+        ${KORTEX_HW_DIR}/include/google
+    )
+    set(KORTEX_LIB ${KORTEX_HW_DIR}/lib/release/libKortexApiCpp.a)
 endif()
-
-set(KORTEX_INCLUDE_DIRS
-    ${KORTEX_HW_DIR}/include
-    ${KORTEX_HW_DIR}/include/client
-    ${KORTEX_HW_DIR}/include/client_stubs
-    ${KORTEX_HW_DIR}/include/common
-    ${KORTEX_HW_DIR}/include/messages
-    ${KORTEX_HW_DIR}/include/google
-)
-set(KORTEX_LIB ${KORTEX_HW_DIR}/lib/release/libKortexApiCpp.a)
 
 # --- pinocchio ----------------------------------------------------------------
 # Requires -DCMAKE_PREFIX_PATH pointing at the cmeel.prefix (see header above).
@@ -53,27 +70,33 @@ find_package(pinocchio REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 # --- driver library -----------------------------------------------------------
-# Later tasks will add KORTEX-dependent sources here, linking ${KORTEX_LIB},
-# dl, and pthread (KORTEX is built with C++14 but links fine into a C++17
-# consumer). For now the library only contains the Pinocchio Dynamics wrapper.
-add_library(kinova_lowlevel
+# The KORTEX-dependent source (kortex_transport.cpp) is only compiled into the
+# library when KINOVA_ENABLE_KORTEX=ON. The rest of the units are KORTEX-free
+# (pimpl keeps KORTEX headers out of the public interface).
+set(KINOVA_LIB_SOURCES
     src/dynamics.cpp
     src/telemetry.cpp
     src/telemetry_consumers.cpp
     src/rt_system.cpp
     src/sim_transport.cpp
-    src/kortex_transport.cpp
     src/gravity_comp_mode.cpp
     src/rt_executor.cpp)
+if(KINOVA_ENABLE_KORTEX)
+    list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
+endif()
+
+add_library(kinova_lowlevel ${KINOVA_LIB_SOURCES})
 target_include_directories(kinova_lowlevel PUBLIC include)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
-# KORTEX SDK: only kortex_transport.cpp pulls these headers in (pimpl keeps them
-# out of public headers). KORTEX is built C++14; links into our C++17 build.
-# _OS_UNIX selects the POSIX socket headers inside the KORTEX transport headers.
-target_include_directories(kinova_lowlevel PRIVATE ${KORTEX_INCLUDE_DIRS})
-target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
-target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
+if(KINOVA_ENABLE_KORTEX)
+    # KORTEX SDK: only kortex_transport.cpp pulls these headers in. KORTEX is
+    # built C++14; links into our C++17 build. _OS_UNIX selects the POSIX socket
+    # headers inside the KORTEX transport headers.
+    target_include_directories(kinova_lowlevel PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
+    target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
+endif()
 
 # --- apps ---------------------------------------------------------------------
 # benchmark_grav_comp runs the gravity-comp mode through the RtExecutor and
@@ -82,13 +105,19 @@ target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
 add_executable(benchmark_grav_comp apps/benchmark_grav_comp.cpp)
 target_link_libraries(benchmark_grav_comp PRIVATE kinova_lowlevel Eigen3::Eigen)
 target_include_directories(benchmark_grav_comp PRIVATE include)
-# The vendored libKortexApiCpp.a is x86-64 only, so it cannot link into an
-# aarch64 executable on the Jetson. Build the app SIM-ONLY: KINOVA_NO_KORTEX
-# compiles out the KortexTransport reference so no x86 symbols are pulled in.
-# (kortex_transport.cpp still compiles into the static lib for the real-robot
-# build on a host with an aarch64 KORTEX lib.) The static lib links KORTEX
-# PRIVATE, so symbols are only demanded if an executable references them.
-target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
+if(KINOVA_ENABLE_KORTEX)
+    # Real-robot build: KortexTransport is compiled into the library and the
+    # KORTEX include dirs / -D_OS_UNIX are needed where the app references the
+    # KortexTransport header. The real --ip path is active (no KINOVA_NO_KORTEX).
+    target_include_directories(benchmark_grav_comp PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(benchmark_grav_comp PRIVATE _OS_UNIX)
+else()
+    # SIM-ONLY build (default). KINOVA_NO_KORTEX #ifdef's out the KortexTransport
+    # reference so no KORTEX symbols are demanded -- required on the Jetson, where
+    # the vendored libKortexApiCpp.a is x86-64 only and would fail to link into an
+    # aarch64 executable.
+    target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
+endif()
 
 # --- tests --------------------------------------------------------------------
 enable_testing()
