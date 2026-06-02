@@ -53,11 +53,13 @@ find_package(pinocchio REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 # --- driver library -----------------------------------------------------------
-# NOTE: Task 0 only. The driver library sources (src/*.cpp) do not exist yet;
-# later tasks will add them and create the library target here, linking
-# ${KORTEX_LIB}, pinocchio::pinocchio, dl, and pthread (KORTEX is built with
-# C++14 but links fine into a C++17 consumer). For now there is no library
-# target so the project configures and builds with only the smoke test.
+# Later tasks will add KORTEX-dependent sources here, linking ${KORTEX_LIB},
+# dl, and pthread (KORTEX is built with C++14 but links fine into a C++17
+# consumer). For now the library only contains the Pinocchio Dynamics wrapper.
+add_library(kinova_lowlevel
+    src/dynamics.cpp)
+target_include_directories(kinova_lowlevel PUBLIC include)
+target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio)
 
 # --- tests --------------------------------------------------------------------
 enable_testing()
@@ -65,8 +67,9 @@ find_package(GTest REQUIRED)
 
 add_executable(unit_tests
     tests/smoke_test.cpp
-    tests/joint_types_test.cpp)
-target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen)
+    tests/joint_types_test.cpp
+    tests/dynamics_test.cpp)
+target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
 # URDF path for tests that load the Gen3 model (used by later tasks).
