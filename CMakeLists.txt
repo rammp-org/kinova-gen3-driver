@@ -75,6 +75,21 @@ target_include_directories(kinova_lowlevel PRIVATE ${KORTEX_INCLUDE_DIRS})
 target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
 target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
 
+# --- apps ---------------------------------------------------------------------
+# benchmark_grav_comp runs the gravity-comp mode through the RtExecutor and
+# reports timing. Verified with --sim (SimTransport); the real KORTEX path is
+# compiled in but only built/linked, never exercised while the robot is off.
+add_executable(benchmark_grav_comp apps/benchmark_grav_comp.cpp)
+target_link_libraries(benchmark_grav_comp PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(benchmark_grav_comp PRIVATE include)
+# The vendored libKortexApiCpp.a is x86-64 only, so it cannot link into an
+# aarch64 executable on the Jetson. Build the app SIM-ONLY: KINOVA_NO_KORTEX
+# compiles out the KortexTransport reference so no x86 symbols are pulled in.
+# (kortex_transport.cpp still compiles into the static lib for the real-robot
+# build on a host with an aarch64 KORTEX lib.) The static lib links KORTEX
+# PRIVATE, so symbols are only demanded if an executable references them.
+target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
+
 # --- tests --------------------------------------------------------------------
 enable_testing()
 find_package(GTest REQUIRED)
