@@ -180,6 +180,11 @@ The full checklist — privilege model, every setting with rationale, the
 bootloader edit, per-run flags, validation, and persistence — is in
 [`docs/rt-tuning.md`](docs/rt-tuning.md).
 
+**Validated on `abra`** (see [`docs/rt-validation-results.md`](docs/rt-validation-results.md)):
+after tuning + isolating core 11, `cyclictest` worst-case wake latency dropped
+from **48 µs → 7 µs** and *held at 7 µs under loadavg ~19.6*; the driver's own
+cycle p99.9 = 1 µs with zero steady-state major faults — all without runtime sudo.
+
 ## Run the sim benchmark
 
 ```sh
@@ -263,7 +268,8 @@ tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
 scripts/                   build_on_abra.sh  sync_to_abra.sh
                            rt_grant_once.sh  rt_setup.sh
-docs/                      rt-tuning.md  integration-runbook.md
+docs/                      rt-tuning.md  rt-validation-results.md
+                           integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)
 ```

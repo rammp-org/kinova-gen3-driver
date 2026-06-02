@@ -153,14 +153,24 @@ Install the standard RT latency probe and get a number:
 
 ```sh
 sudo apt install rt-tests
-sudo cyclictest -m -S -p 90 -i 1000 -d 0 -D 60     # 1 kHz, 60 s, all cores
-# or target the isolated core:
-sudo cyclictest -m -t 1 -a 11 -p 90 -i 1000 -D 60
+sudo cyclictest -m -S -p 90 -i 1000 -d 0 -D 60     # all cores
+# Target the ISOLATED core — must use taskset, NOT -a (see gotcha below):
+sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 60
 ```
 
-Read the **Max** latency. Rough expectations on a well-tuned Orin:
-- Untuned (current state): max can spike into the **hundreds of µs–ms**.
-- After A+B+C: max should be **tens of µs**, ideally < ~50 µs.
+> **Gotcha — isolated core + `cyclictest -a`:** `isolcpus=11` removes core 11 from
+> the *default* affinity mask (a normal process shows `Cpus_allowed_list: 0-10` —
+> this is the fence working). `cyclictest -a 11` (V2.20) intersects `-a 11` with
+> that inherited `0-10` mask, gets nothing, and dies with `WARN: Couldn't
+> setaffinity ... Invalid argument` / `FATAL: No allowable cpus to run on`.
+> **Use `taskset -c 11 cyclictest -t1 …`** instead — it sets the mask explicitly.
+> The driver is unaffected: `--cpu 11` calls `sched_setaffinity` explicitly.
+
+Read the **Max** latency. Measured on `abra` (see
+[`rt-validation-results.md`](rt-validation-results.md)):
+- Untuned: **48 µs** idle / 34 µs under load.
+- Tuned + isolated: **7 µs** even under loadavg ~19.6 — and it *holds* under load
+  because nothing else can schedule onto the isolated core.
 
 `cyclictest` validates the platform independent of our code. Then cross-check
 with the driver's own `--pacing sleepspin` vs `--pacing nanosleep` cycle-time
