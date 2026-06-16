@@ -22,3 +22,11 @@ TEST(Dynamics, GravityFiniteAndLoadsJointOffAxis) {
   JointVec tau2; dyn.gravity(q2, tau2);
   EXPECT_GT(tau2.cwiseAbs().maxCoeff(), 1.0);
 }
+TEST(Dynamics, DefaultEeFrameResolvesOn2f85) {
+  Dynamics dyn(URDF_PATH);                 // default frame "gen3_end_effector_link"
+  EXPECT_EQ(dyn.nv(), kNumJoints);         // ctor did not throw
+}
+
+TEST(Dynamics, UnknownFrameThrows) {
+  EXPECT_THROW(Dynamics(URDF_PATH, "no_such_frame_xyz"), std::runtime_error);
+}
