@@ -130,3 +130,41 @@ TEST(CartesianImpedanceNullspace, PostureTorqueProducesNoTaskWrench) {
   EXPECT_GT(dtau.norm(), 1e-3);                  // the posture term is actually active
   EXPECT_NEAR((J * dtau).norm(), 0.0, 1e-5);     // ...and produces no task wrench
 }
+
+TEST(CartesianImpedanceRamp, GravityHeldFullDuringRampButWrenchScales) {
+  Dynamics dyn(URDF_PATH);
+  CartesianImpedanceParams p; p.gain_ramp_s = 1.0; p.nullspace_on = false;
+  CartesianImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+  Pose tgt = dyn.fk(fb.q); tgt.p.x() += 0.05; m.set_target(tgt);
+
+  JointVec g; dyn.gravity(fb.q, g);
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  Vector6 e = pose_error(tgt, dyn.fk(fb.q));
+  JointVec wrench = J.transpose() * (p.Kx.cwiseProduct(e));   // full active term, qd=0
+
+  // First cycle: elapsed=0 -> ramp 0 -> torque == gravity only.
+  JointCommand c0; m.compute(fb, 0.25, c0);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c0.torque[i], g[i], 1e-6);
+
+  // After ~0.25s accumulated: ramp ≈ 0.25 -> active term partially applied.
+  JointCommand c1; m.compute(fb, 0.25, c1);
+  JointVec expected1 = g + 0.25 * wrench;
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c1.torque[i], expected1[i], 1e-5);
+}
+
+TEST(CartesianImpedanceRamp, ZeroRampMeansFullImmediately) {
+  Dynamics dyn(URDF_PATH);
+  CartesianImpedanceParams p; p.gain_ramp_s = 0.0; p.nullspace_on = false;
+  CartesianImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+  Pose tgt = dyn.fk(fb.q); tgt.p.x() += 0.05; m.set_target(tgt);
+  JointCommand c; m.compute(fb, 0.001, c);
+  JointVec g; dyn.gravity(fb.q, g);
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  Vector6 e = pose_error(tgt, dyn.fk(fb.q));
+  JointVec expected = g + J.transpose() * (p.Kx.cwiseProduct(e));
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], expected[i], 1e-5);
+}
