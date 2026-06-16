@@ -57,8 +57,15 @@ void Dynamics::gravity(const JointVec& q, JointVec& tau_out) {
   for (int i = 0; i < impl_->model.nv; ++i) tau_out[i] = g[i];
 }
 Pose Dynamics::fk(const JointVec& q) {
-  (void)q;                       // implemented in Task 3; stub returns identity Pose
-  return Pose{};
+  impl_->pack(q);
+  pinocchio::forwardKinematics(impl_->model, impl_->data, impl_->qcfg);
+  pinocchio::updateFramePlacement(impl_->model, impl_->data, impl_->frame_id);
+  const pinocchio::SE3& M = impl_->data.oMf[impl_->frame_id];
+  Pose x;
+  x.p = M.translation();
+  x.R = Eigen::Quaterniond(M.rotation());
+  x.R.normalize();
+  return x;
 }
 void Dynamics::jacobian(const JointVec& q, Jacobian6& J_out) {
   (void)q;                       // implemented in Task 4; stub returns a zero Jacobian

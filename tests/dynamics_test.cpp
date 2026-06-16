@@ -30,3 +30,30 @@ TEST(Dynamics, DefaultEeFrameResolvesOn2f85) {
 TEST(Dynamics, UnknownFrameThrows) {
   EXPECT_THROW(Dynamics(URDF_PATH, "no_such_frame_xyz"), std::runtime_error);
 }
+
+TEST(DynamicsFk, NeutralPoseIsFiniteUnitQuatInReach) {
+  Dynamics dyn(URDF_PATH);
+  JointVec q = JointVec::Zero();
+  Pose x = dyn.fk(q);
+  EXPECT_TRUE(x.p.allFinite());
+  EXPECT_NEAR(x.R.norm(), 1.0, 1e-9);              // unit quaternion
+  EXPECT_GT(x.p.norm(), 0.05);                     // tip is away from base origin
+  EXPECT_LT(x.p.norm(), 1.5);                      // within physical reach
+}
+
+TEST(DynamicsFk, BaseYawRotatesTipAboutVerticalAxis) {
+  // Joint 0 is the base yaw about a vertical (world-Z) axis. Rotating it must
+  // leave the tip HEIGHT unchanged while MOVING it horizontally. We deliberately
+  // do NOT assert a rotation direction or an exact origin-radius: the base axis
+  // is offset from the world origin, so origin-radius is not exactly conserved.
+  // Height-invariance + horizontal motion is the robust, physically-honest check;
+  // fk's full numeric correctness is pinned by the finite-difference Jacobian
+  // test (Task 4). Independent of exact link lengths.
+  Dynamics dyn(URDF_PATH);
+  JointVec q = JointVec::Zero();
+  Pose a = dyn.fk(q);
+  q[0] = M_PI / 2.0;
+  Pose b = dyn.fk(q);
+  EXPECT_NEAR(b.p.z(), a.p.z(), 1e-6);                          // vertical axis: height held
+  EXPECT_GT((b.p.head<2>() - a.p.head<2>()).norm(), 0.01);     // tip moved horizontally
+}
