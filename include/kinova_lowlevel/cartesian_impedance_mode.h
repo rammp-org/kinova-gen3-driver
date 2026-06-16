@@ -8,9 +8,7 @@ namespace kinova {
 struct CartesianImpedanceParams {
   Vector6 Kx = (Vector6() << 300,300,300, 30,30,30).finished();  // N/m | N·m/rad
   Vector6 Dx = (Vector6() << 35,35,35, 5,5,5).finished();        // N·s/m | N·m·s/rad
-  // NOTE: nullspace_* / pinv_damping are wired in by Task 7 and gain_ramp_s by
-  // Task 8 (the next commits on this branch). The defaults below are the intended
-  // FINAL values; until those commits land, compute() applies neither term.
+  // Defaults are sensible starting points; tune Kx/Dx on hardware.
   double  nullspace_kp = 5.0;     // joint posture stiffness (N·m/rad)
   double  nullspace_kd = 1.0;     // joint posture damping (N·m·s/rad)
   bool    nullspace_on = true;
@@ -20,7 +18,8 @@ struct CartesianImpedanceParams {
 };
 
 // Task-space impedance: tau = gravity + ramp * (Jᵀ F + nullspace),
-//   F = Kx ∘ pose_error(x_d, fk(q)) - Dx ∘ (J qd).
+//   F = Kx ∘ pose_error(x_d, fk(q)) - Dx ∘ (J qd).  Gravity is always applied in
+//   full; the entry ramp fades in only the active wrench over gain_ramp_s.
 // Holds the entry pose by default. Live setters publish via a single-writer
 // (non-RT) double-buffer; compute() (RT thread) reads one snapshot per cycle.
 class CartesianImpedanceMode : public ControlMode {

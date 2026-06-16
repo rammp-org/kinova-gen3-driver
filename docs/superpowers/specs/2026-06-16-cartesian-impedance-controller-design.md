@@ -183,10 +183,12 @@ J   = dyn.jacobian(fb.q)          // 6×7, LOCAL_WORLD_ALIGNED
 xd  = J * fb.qd                    // 6×1 spatial velocity
 e   = pose_error(x_d, x)           // 6×1 decoupled error
 F   = Kx.cwiseProduct(e) + Dx.cwiseProduct(-xd)        // 6×1 task wrench
-tau = Jᵀ * F + dyn.gravity(fb.q)
+tau_active = Jᵀ * F
 if (nullspace_on)
-    tau += N * ( nullspace_kp*(q_rest - fb.q) - nullspace_kd*fb.qd )
-tau *= ramp(dt)                    // entry ramp 0→1
+    tau_active += N * ( nullspace_kp*(q_rest - fb.q) - nullspace_kd*fb.qd )
+// Ramp scales ONLY the active wrench; gravity is ALWAYS applied in full so the
+// arm never sags while compliance fades in.
+tau = dyn.gravity(fb.q) + ramp(dt) * tau_active        // entry ramp 0→1
 out.mode = kTorque
 out.torque = clamp(tau, ±torque_limit)
 ```
