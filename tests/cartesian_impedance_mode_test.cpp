@@ -65,3 +65,68 @@ TEST(CartesianImpedance, TorqueIsClamped) {
   JointCommand c; m.compute(fb, 0.001, c);
   for (int i = 0; i < kNumJoints; ++i) EXPECT_LE(std::abs(c.torque[i]), 2.0 + 1e-9);
 }
+
+TEST(CartesianImpedanceNullspace, ProjectorAnnihilatesTaskSpace) {
+  // Verify the projector FORMULA N = I - Jᵀ (Jᵀ)⁺ exactly annihilates task space
+  // and is idempotent. This uses the UNDAMPED pseudo-inverse so the projector is
+  // exact (sample_q is non-singular, so J Jᵀ is well-conditioned). The live mode
+  // adds a small pinv_damping for singularity robustness — that approximate path
+  // is validated separately by PostureTorqueProducesNoTaskWrench (J·dtau ≈ 0).
+  Dynamics dyn(URDF_PATH);
+  JointVec q = sample_q();
+  Jacobian6 J; dyn.jacobian(q, J);
+  Eigen::Matrix<double,6,6> JJt = J * J.transpose();             // no damping: exact projector
+  Eigen::Matrix<double,6,kNumJoints> JtPinv = JJt.ldlt().solve(J);   // (JJt)^-1 J
+  Eigen::Matrix<double,kNumJoints,kNumJoints> N =
+      Eigen::Matrix<double,kNumJoints,kNumJoints>::Identity() - J.transpose() * JtPinv;
+  EXPECT_NEAR((J * N).norm(), 0.0, 1e-9);          // task rows killed (exact)
+  EXPECT_NEAR((N * N - N).norm(), 0.0, 1e-9);      // idempotent (exact)
+}
+
+TEST(CartesianImpedanceNullspace, NoEffectAtRestPostureZeroVel) {
+  // At q == q_rest (entry config) with zero velocity, the posture torque is 0,
+  // so nullspace_on and nullspace_off must agree.
+  Dynamics dyn(URDF_PATH);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+
+  CartesianImpedanceParams off; off.gain_ramp_s = 0.0; off.nullspace_on = false;
+  CartesianImpedanceMode m_off(dyn, off);
+  m_off.on_enter(fb);
+  JointCommand c_off; m_off.compute(fb, 0.001, c_off);
+
+  CartesianImpedanceParams on = off; on.nullspace_on = true;
+  CartesianImpedanceMode m_on(dyn, on);
+  m_on.on_enter(fb);
+  JointCommand c_on; m_on.compute(fb, 0.001, c_on);
+
+  EXPECT_NEAR((c_on.torque - c_off.torque).norm(), 0.0, 1e-9);
+}
+
+TEST(CartesianImpedanceNullspace, PostureTorqueProducesNoTaskWrench) {
+  // With nonzero posture error, the EXTRA torque from the nullspace term must lie
+  // in null(J): J * (tau_on - tau_off) ≈ 0.  Disable the task term by putting the
+  // arm exactly at target (zero error) so the only difference is the posture term.
+  Dynamics dyn(URDF_PATH);
+  CartesianImpedanceParams off; off.gain_ramp_s = 0.0; off.nullspace_on = false;
+  CartesianImpedanceMode m_off(dyn, off);
+  CartesianImpedanceParams on = off; on.nullspace_on = true; on.nullspace_kp = 8.0;
+  CartesianImpedanceMode m_on(dyn, on);
+
+  JointFeedback enter; enter.q = sample_q(); enter.qd.setZero();
+  m_off.on_enter(enter); m_on.on_enter(enter);            // q_rest := sample_q()
+
+  JointFeedback fb; fb.q = sample_q(); fb.q[2] += 0.15;   // posture error, off target
+  fb.qd.setZero();
+  // keep both at "their target == fk(displaced q)" so the task error is zero:
+  m_off.set_target(dyn.fk(fb.q));
+  m_on.set_target(dyn.fk(fb.q));
+
+  JointCommand c_off, c_on;
+  m_off.compute(fb, 0.001, c_off);
+  m_on.compute(fb, 0.001, c_on);
+
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  JointVec dtau = c_on.torque - c_off.torque;
+  EXPECT_GT(dtau.norm(), 1e-3);                  // the posture term is actually active
+  EXPECT_NEAR((J * dtau).norm(), 0.0, 1e-5);     // ...and produces no task wrench
+}

@@ -35,6 +35,7 @@ void CartesianImpedanceMode::set_target(const Pose& x_d) noexcept {
 
 void CartesianImpedanceMode::on_enter(const JointFeedback& fb) {
   entry_pose_ = dyn_.fk(fb.q);                       // hold where we are
+  q_rest_ = fb.q;
   has_ext_target_.store(false, std::memory_order_release);
   ramp_elapsed_ = 0.0;
 }
@@ -53,7 +54,20 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double /*dt_s*/,
   Vector6 F  = p.Kx.cwiseProduct(e) - p.Dx.cwiseProduct(xd);
 
   dyn_.gravity(fb.q, g_);
-  tau_ = g_ + J_.transpose() * F;                    // ramp + nullspace added later
+  tau_ = g_ + J_.transpose() * F;
+  if (p.nullspace_on) {
+    // Damped pseudo-inverse of Jᵀ:  (Jᵀ)⁺ = (J Jᵀ + λ²I)⁻¹ J   (6x7).
+    // N = I - Jᵀ (Jᵀ)⁺ projects secondary joint torques into null(J), so they
+    // produce no task-space wrench. Fixed-size LDLT — no heap allocation.
+    Eigen::Matrix<double, 6, 6> JJt = J_ * J_.transpose();
+    JJt.diagonal().array() += p.pinv_damping * p.pinv_damping;
+    Eigen::Matrix<double, 6, kNumJoints> JtPinv = JJt.ldlt().solve(J_);
+    Eigen::Matrix<double, kNumJoints, kNumJoints> N =
+        Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity()
+        - J_.transpose() * JtPinv;
+    JointVec tau0 = p.nullspace_kp * (q_rest_ - fb.q) - p.nullspace_kd * fb.qd;
+    tau_ += N * tau0;
+  }
 
   for (int i = 0; i < kNumJoints; ++i)
     tau_[i] = std::clamp(tau_[i], -p.torque_limit, p.torque_limit);

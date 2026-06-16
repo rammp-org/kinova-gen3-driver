@@ -46,6 +46,7 @@ class CartesianImpedanceMode : public ControlMode {
   // Target source: the entry pose (written once by on_enter on the RT thread) or
   // an optional external override published by set_target.
   Pose entry_pose_;
+  JointVec q_rest_ = JointVec::Zero();   // nullspace posture target (set on_enter)
   // ext_target_ double-buffer: a SINGLE non-RT supervisor thread writes it (see
   // set_target); compute() (RT) reads it. Two buffers + index flip give the RT
   // reader a torn-read-free snapshot as long as there is only one writer.
