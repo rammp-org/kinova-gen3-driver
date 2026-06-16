@@ -118,6 +118,27 @@ else()
     target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# benchmark_cartesian_impedance runs CartesianImpedanceMode through the
+# RtExecutor and reports timing. Verified with --sim (SimTransport); the real
+# KORTEX path is compiled in but only built/linked, never exercised while the
+# robot is off.
+add_executable(benchmark_cartesian_impedance apps/benchmark_cartesian_impedance.cpp)
+target_link_libraries(benchmark_cartesian_impedance PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(benchmark_cartesian_impedance PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    # Real-robot build: KortexTransport is compiled into the library and the
+    # KORTEX include dirs / -D_OS_UNIX are needed where the app references the
+    # KortexTransport header. The real --ip path is active (no KINOVA_NO_KORTEX).
+    target_include_directories(benchmark_cartesian_impedance PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(benchmark_cartesian_impedance PRIVATE _OS_UNIX)
+else()
+    # SIM-ONLY build (default). KINOVA_NO_KORTEX #ifdef's out the KortexTransport
+    # reference so no KORTEX symbols are demanded -- required on the Jetson, where
+    # the vendored libKortexApiCpp.a is x86-64 only and would fail to link into an
+    # aarch64 executable.
+    target_compile_definitions(benchmark_cartesian_impedance PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # --- tests --------------------------------------------------------------------
 enable_testing()
 find_package(GTest REQUIRED)
