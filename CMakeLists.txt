@@ -122,6 +122,7 @@ find_package(GTest REQUIRED)
 
 add_executable(unit_tests
     tests/smoke_test.cpp
+    tests/cartesian_types_test.cpp
     tests/joint_types_test.cpp
     tests/dynamics_test.cpp
     tests/telemetry_test.cpp
@@ -134,6 +135,6 @@ target_include_directories(unit_tests PRIVATE include)
 
 # URDF path for tests that load the Gen3 model (used by later tasks).
 target_compile_definitions(unit_tests PRIVATE
-    URDF_PATH="${CMAKE_SOURCE_DIR}/models/gen3_7dof.urdf")
+    URDF_PATH="${CMAKE_SOURCE_DIR}/models/gen3_7dof_2f85.urdf")
 
 add_test(NAME unit_tests COMMAND unit_tests)
