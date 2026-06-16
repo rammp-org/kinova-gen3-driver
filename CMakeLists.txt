@@ -72,6 +72,7 @@ find_package(Eigen3 REQUIRED)
 # (pimpl keeps KORTEX headers out of the public interface).
 set(KINOVA_LIB_SOURCES
     src/dynamics.cpp
+    src/cartesian.cpp
     src/telemetry.cpp
     src/telemetry_consumers.cpp
     src/rt_system.cpp
@@ -129,7 +130,8 @@ add_executable(unit_tests
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
     tests/gravity_comp_mode_test.cpp
-    tests/rt_safety_test.cpp)
+    tests/rt_safety_test.cpp
+    tests/cartesian_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
