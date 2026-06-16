@@ -1,7 +1,7 @@
 # aarch64 toolchain file.
 #
-# In practice this project is built NATIVELY on the Jetson (abra), which is
-# already aarch64/Linux, so cross-compilation from the Mac is not used and this
+# In practice this project is built NATIVELY on the Jetson, which is already
+# aarch64/Linux, so cross-compilation from a dev machine is not used and this
 # file is optional. It exists to (a) document the target and (b) support a
 # future cross-build host if ever needed.
 #

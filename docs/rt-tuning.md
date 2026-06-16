@@ -1,32 +1,41 @@
-# Real-Time Tuning for a Steady Loop (Jetson AGX Orin / `abra`)
+# Real-Time Tuning for a Steady Loop (Jetson AGX Orin)
 
 A PREEMPT_RT kernel is necessary but **not sufficient** for a steady 1 kHz
-control loop. This document is the checklist of settings that determine
-loop-timing stability, their state on `abra` as of 2026-06-02, why each matters,
-and exactly how to set them. The goal: low and *bounded* wake jitter, no missed
-deadlines (which can trip the Gen3 watchdog and fault the arm).
+control loop. This is a generic guide to the platform settings that determine
+loop-timing stability — what each one is, why it matters, and how to set it on a
+Jetson AGX Orin (tegra234, 12 cores; developed against kernel `5.15-rt-tegra`).
+The goal: low and *bounded* wake jitter and no missed deadlines (a missed 1 kHz
+deadline can trip the Gen3 watchdog and fault the arm).
 
-## Current state on `abra` (2026-06-02)
+Throughout, the examples pin the RT loop to **core 11** — pick the
+highest-numbered core on your machine and substitute it everywhere.
 
-`abra` = NVIDIA Jetson AGX Orin (tegra234, 12 cores), kernel `5.15.185-rt-tegra`.
+## What to audit before trusting timing numbers
 
-| Setting | State | Want | Status |
+A capable RT kernel with max power is still not enough. On a stock Jetson the
+items below default to settings that show up as tail latency / jitter; audit and
+fix each one before recording any numbers.
+
+| Setting | Stock / untuned default | Want | Set in |
 |---|---|---|---|
-| PREEMPT_RT kernel | `5.15-rt`, `/sys/kernel/realtime=1` | RT kernel | ✅ |
-| Power model | MAXN (mode 0, all cores, no cap) | MAXN | ✅ |
-| CPU governor | `schedutil` (cpu0 floating 0.7–2.2 GHz) | `performance` | ❌ |
-| Clocks locked | `jetson_clocks` not applied | locked at max | ❌ |
-| Core isolation | none (`isolcpus`/`nohz_full`/`rcu_nocbs` absent) | isolate ≥1 core | ❌ |
-| Deep CPU idle | `c7` enabled, **5000 µs** exit latency | disabled on RT cores | ❌ |
-| RT throttling | `sched_rt_runtime_us = 950000` (95%) | `-1` (with isolation) | ⚠️ |
-| timer_migration | `1` | `0` | ⚠️ |
-| Transparent huge pages | (verify) | `never` | ⚠️ |
-| cyclictest (`rt-tests`) | not installed | installed | ❌ |
+| PREEMPT_RT kernel | (must be flashed) | `/sys/kernel/realtime == 1` | kernel |
+| Power model | varies | MAXN (all cores, no cap) | §A |
+| CPU governor | `schedutil` (floating freq) | `performance` | §A |
+| Clocks locked | not applied | locked at max (`jetson_clocks`) | §A |
+| Core isolation | none | isolate ≥1 core | §B (boot) |
+| Deep CPU idle | `c7` enabled (~5 ms exit) | disabled on RT cores | §A |
+| RT throttling | `sched_rt_runtime_us = 950000` (95%) | `-1` (with isolation) | §A |
+| `timer_migration` | `1` | `0` | §A |
+| Transparent huge pages | varies | `never` | §A |
+| `cyclictest` (`rt-tests`) | not installed | installed | §D |
 
-**Verdict: capable kernel + max power, but NOT yet tuned for steady timing.**
-The governor, deep C-state, missing isolation, and unlocked clocks are the items
-that will show up as tail-latency / jitter. Apply the steps below before
-trusting any timing numbers.
+Verify the kernel and a setting or two first:
+
+```sh
+cat /sys/kernel/realtime                                    # 1
+uname -r                                                    # ...-rt-tegra
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor   # schedutil (until tuned)
+```
 
 ---
 
@@ -53,7 +62,7 @@ sudo ./scripts/rt_grant_once.sh        # creates 'realtime' group, rtprio/memloc
 
 This is preferred over `setcap cap_sys_nice,cap_ipc_lock+ep` because the grant is
 on the *user/group*, so it **survives every rebuild** — `setcap` is on the binary
-inode and is wiped each time you recompile (painful in the build-on-abra loop).
+inode and is wiped each time you recompile.
 
 `enable_rt()` is best-effort: if the grant isn't in place it logs a note and runs
 at `SCHED_OTHER` (the driver still *runs* without sudo, just without hard-RT
@@ -87,12 +96,12 @@ Why each (the script documents inline too):
 - **`performance` governor + `jetson_clocks`** — a floating governor wakes the
   core at a low frequency and ramps up, adding variable latency to the first
   work after each sleep. Pinning at max removes that ramp.
-- **Disable deep idle (`c7`, 5 ms exit)** — between cycles the loop sleeps; if
+- **Disable deep idle (`c7`, ~5 ms exit)** — between cycles the loop sleeps; if
   the core drops into a deep C-state, the wake can be delayed by milliseconds.
   Keep only `WFI` (~1 µs).
 - **`sched_rt_runtime_us = -1`** — the default throttles RT tasks to 95% of a
-  core; our sleep-spin pacing busy-waits and can be throttled. Safe **only**
-  with core isolation (otherwise a runaway RT thread can wedge the core).
+  core; sleep-spin pacing busy-waits and can be throttled. Safe **only** with
+  core isolation (otherwise a runaway RT thread can wedge the core).
 - **`timer_migration = 0`, THP `never`** — remove timer bounce and khugepaged
   compaction stalls.
 
@@ -101,7 +110,7 @@ Why each (the script documents inline too):
 Core **isolation** is the single biggest win for tail latency and must be set on
 the kernel command line. On the Jetson this is edited in
 `/boot/extlinux/extlinux.conf` (not GRUB). Append to the `APPEND` line of the
-primary boot entry:
+primary boot entry (substitute your chosen core for `11`):
 
 ```
 isolcpus=11 nohz_full=11 rcu_nocbs=11
@@ -116,10 +125,9 @@ Then reboot and confirm:
 
 ```sh
 cat /proc/cmdline | grep -o 'isolcpus=[^ ]*'      # isolcpus=11
-cat /sys/devices/system/cpu/cpu11/topology/...    # core present
 ```
 
-Pick the **highest-numbered** core (11) so it's least likely to host boot/IRQ
+Pick the **highest-numbered** core so it's least likely to host boot/IRQ
 defaults. Isolate only what you need (1 core for a single RT loop) — isolating
 cores removes them from the general scheduler pool.
 
@@ -166,11 +174,13 @@ sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 60
 > **Use `taskset -c 11 cyclictest -t1 …`** instead — it sets the mask explicitly.
 > The driver is unaffected: `--cpu 11` calls `sched_setaffinity` explicitly.
 
-Read the **Max** latency. Measured on `abra` (see
-[`rt-validation-results.md`](rt-validation-results.md)):
-- Untuned: **48 µs** idle / 34 µs under load.
-- Tuned + isolated: **7 µs** even under loadavg ~19.6 — and it *holds* under load
-  because nothing else can schedule onto the isolated core.
+Read the **Max** latency — that's the worst-case wake delay, the number that
+matters for a hard 1 kHz deadline. As a sense of the achievable improvement on a
+tuned Jetson AGX Orin: an untuned box can show a worst case in the tens of µs
+that climbs under load, while tuning + isolating a core brings it into the
+single-digit µs range *and holds there under heavy load* — because nothing else
+can schedule onto the isolated core. Record your own baseline and keep it with
+your test notes.
 
 `cyclictest` validates the platform independent of our code. Then cross-check
 with the driver's own `--pacing sleepspin` vs `--pacing nanosleep` cycle-time
@@ -180,7 +190,7 @@ histograms over a 60 s run — they should agree on the order of magnitude.
 
 Section A resets on reboot. To make it stick, install a oneshot systemd unit
 that runs `rt_setup.sh` at boot (after `jetson_clocks`’ own service), e.g.
-`/etc/systemd/system/rt-setup.service`:
+`/etc/systemd/system/rt-setup.service` (point `ExecStart` at your checkout):
 
 ```ini
 [Unit]
@@ -189,7 +199,7 @@ After=nvpmodel.service jetson_clocks.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/abra/kinova-gen3-driver/scripts/rt_setup.sh 11
+ExecStart=/home/<user>/kinova-gen3-driver/scripts/rt_setup.sh 11
 
 [Install]
 WantedBy=multi-user.target
@@ -207,7 +217,8 @@ in the bootloader config.)
 2. `sudo ./scripts/rt_setup.sh 11` — system-global runtime tunings (governor,
    clocks, C-states, throttling). Re-run after reboot, or enable the systemd unit.
 3. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot.
-4. `sudo cyclictest -m -a 11 -p 90 -i 1000 -D 1h` → record max-latency baseline.
+4. `sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 1h` → record
+   max-latency baseline.
 5. Run the driver (NO sudo) `--cpu 11 --rt-priority 80`; confirm `policy: FIFO`,
    `cpu_dma_latency: pinned@0us`, `majflt+=0`, zero overruns, low involuntary
    context switches.

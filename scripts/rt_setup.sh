@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Apply runtime real-time tunings for a steady 1 kHz control loop on the
-# Jetson AGX Orin (abra). RUN WITH sudo. These are NON-PERSISTENT (reset on
+# Apply runtime real-time tunings for a steady 1 kHz control loop on a
+# Jetson AGX Orin. RUN WITH sudo. These are NON-PERSISTENT (reset on
 # reboot) — see docs/rt-tuning.md for the boot-time settings (isolcpus etc.)
 # and for making these persistent.
 #

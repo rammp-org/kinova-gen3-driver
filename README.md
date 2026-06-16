@@ -63,30 +63,33 @@ scheduled.
 | Pacing | **Sleep-then-spin (default) and pure `clock_nanosleep(ABSTIME)`** — both selectable | The prototype's hybrid sleep-then-spin gives lower jitter; pure `clock_nanosleep` is simpler. Both are built in (`--pacing sleepspin\|nanosleep`) so we can **benchmark both** on real hardware. |
 | Footguns | **Hard throws over silent failures** | `Dynamics` throws if the URDF `nv != 7`; `KortexTransport` validates the actuator count on connect. Better to fail loudly at startup than to silently mis-map joints. |
 
-## Build (on the Jetson `abra`)
+## Build (on a PREEMPT_RT Jetson)
 
-**This driver builds and runs only on the Jetson `abra`** (Linux 5.15-rt-tegra,
-PREEMPT_RT, aarch64). It cannot build on macOS — KORTEX and the RT syscalls are
-Linux-only; local clang errors on the Mac are expected noise. Cross-compilation
-is left open (a stub `cmake/aarch64-toolchain.cmake` is checked in but unused by
-the default native build).
+**This driver builds and runs on an aarch64 Jetson running a PREEMPT_RT
+kernel** (developed on Linux 5.15-rt-tegra). It cannot build on macOS — KORTEX
+and the RT syscalls are Linux-only; local clang errors on a Mac are expected
+noise. Cross-compilation is left open (a stub `cmake/aarch64-toolchain.cmake` is
+checked in but unused by the default native build).
 
-The standard dev loop syncs this repo to `abra` and builds + tests there:
-
-```sh
-./scripts/build_on_abra.sh        # rsync + cmake + build + ctest
-```
-
-Or manually:
+Build natively on the Jetson:
 
 ```sh
-./scripts/sync_to_abra.sh
-ssh abra 'cd ~/kinova-gen3-driver/build && cmake .. \
+cd kinova-gen3-driver
+cmake -S . -B build \
   -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
-  && cmake --build . -j && ctest --output-on-failure'
+  && cmake --build build -j && ctest --test-dir build --output-on-failure
 ```
 
-**Dependencies** (all already installed on `abra`):
+`CMAKE_PREFIX_PATH` points at wherever pip installed Pinocchio's cmeel prefix
+(the path above is the typical `python3.10` location — adjust for your Python
+version; `pinocchioConfig.cmake` lives at `<prefix>/lib/cmake/pinocchio/`).
+
+If you develop on another machine, the convenient loop is rsync-to-Jetson then
+build over ssh. Those host-specific helpers are personal, not part of the repo —
+keep them in a gitignored `local_tools/` (e.g. an rsync wrapper plus the
+`cmake … && cmake --build … && ctest` over ssh).
+
+**Dependencies** (install on the Jetson):
 
 - **Pinocchio** — pip-installed under the `cmeel.prefix`; point CMake at it with
   `-DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix`
@@ -101,34 +104,32 @@ The **default build is sim-only** and needs no KORTEX SDK — `kortex_transport.
 is not compiled and the app's `--ip` path is `#ifdef`'d out. The real-robot path
 is opt-in via `-DKINOVA_ENABLE_KORTEX=ON`.
 
-**Architecture matters.** The KORTEX C++ lib vendored in the old prototype
-(`~/rtos_testing/cpp/kortex_hardware/`) is **x86-64** and will not link into a
-Jetson (aarch64) binary. Kortex `2.3.0` (the prototype's version) publishes *no*
+**Architecture matters.** A KORTEX C++ lib built for **x86-64** will not link
+into a Jetson (aarch64) binary. Kortex `2.3.0` publishes *no*
 aarch64 C++ build at all. We use **Kortex C++ API 2.8.0 aarch64** — the newest
 version that actually builds against our code (the newest overall, 3.4.0, ships
 broken headers: its `ClientService.h` includes a `CoreBenchmarker.h` that isn't
 in the package).
 
-### Install (on `abra`, no sudo — it's just a user-dir extract)
+### Install (on the Jetson, no sudo — it's just a user-dir extract)
 
 ```sh
-ssh abra '
-  DEST=~/kortex_api_2.8.0_aarch64
-  mkdir -p "$DEST"
-  curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
-  unzip -q -o /tmp/k.zip -d "$DEST"
-'
+DEST=~/kortex_api_2.8.0_aarch64
+mkdir -p "$DEST"
+curl -sL "https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0/linux_aarch64_gcc_7.4.zip" -o /tmp/k.zip
+unzip -q -o /tmp/k.zip -d "$DEST"
 # yields $DEST/include/{client,client_stubs,common,google,messages} + $DEST/lib/release/libKortexApiCpp.a (AArch64)
 ```
 
 ### Build the real path against it
 
 ```sh
-ssh abra 'cd ~/kinova-gen3-driver && rm -rf build_kortex && mkdir build_kortex && cd build_kortex && cmake .. \
+cd kinova-gen3-driver
+cmake -S . -B build_kortex \
   -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
   -DKINOVA_ENABLE_KORTEX=ON \
   -DKORTEX_HW_DIR=$HOME/kortex_api_2.8.0_aarch64 \
-  && cmake --build . -j'
+  && cmake --build build_kortex -j
 ```
 
 `KORTEX_HW_DIR` is only required/validated when `KINOVA_ENABLE_KORTEX=ON`, so a
@@ -145,11 +146,10 @@ box without the SDK still builds the sim. (Symptom of pointing at the x86-64 lib
 
 ## Real-time tuning — REQUIRED for steady timing
 
-A PREEMPT_RT kernel alone does **not** give a steady loop. `abra` has the RT
-kernel and MAXN power, but as of 2026-06-02 the CPU governor (`schedutil`), deep
-CPU idle (`c7`, 5 ms exit latency), missing core isolation, and unlocked clocks
-will all show up as jitter. **Tune the platform before trusting any timing
-numbers.**
+A PREEMPT_RT kernel alone does **not** give a steady loop. Even with the RT
+kernel and MAXN power, a stock Jetson's CPU governor (`schedutil`), deep CPU idle
+(`c7`, ~5 ms exit latency), missing core isolation, and unlocked clocks will all
+show up as jitter. **Tune the platform before trusting any timing numbers.**
 
 **The driver runs without `sudo`.** Scheduling (`SCHED_FIFO`), `mlockall`, core
 affinity, and the C-state pin are all done *inside* `rt_system::enable_rt()`;
@@ -180,17 +180,18 @@ The full checklist — privilege model, every setting with rationale, the
 bootloader edit, per-run flags, validation, and persistence — is in
 [`docs/rt-tuning.md`](docs/rt-tuning.md).
 
-**Validated on `abra`** (see [`docs/rt-validation-results.md`](docs/rt-validation-results.md)):
-after tuning + isolating core 11, `cyclictest` worst-case wake latency dropped
-from **48 µs → 7 µs** and *held at 7 µs under loadavg ~19.6*; the driver's own
-cycle p99.9 = 1 µs with zero steady-state major faults — all without runtime sudo.
+**Typical result on a tuned Jetson AGX Orin:** after tuning + isolating a core,
+`cyclictest` worst-case wake latency drops from the tens of µs into the
+single-digit µs range and *holds there under heavy load* (nothing else can
+schedule onto the isolated core); the driver's own cycle p99.9 stays ~1 µs with
+zero steady-state major faults — all without runtime sudo. Record your own
+baseline per the validation steps in the tuning guide.
 
 ## Run the sim benchmark
 
 ```sh
-ssh abra 'cd ~/kinova-gen3-driver/build && \
-  ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf \
-    --rate 1000 --duration 5 --csv /tmp/bench.csv'
+cd build && ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf \
+  --rate 1000 --duration 5 --csv /tmp/bench.csv
 ```
 
 Useful flags: `--rate <hz>`, `--pacing sleepspin|nanosleep`, `--cpu <core>`,
@@ -233,9 +234,7 @@ Unit, SimTransport-integration, and RT-safety tests all run **without a robot**
 and are exercised by `ctest`:
 
 ```sh
-./scripts/build_on_abra.sh                                  # builds + runs ctest
-# or, on abra directly:
-ssh abra 'cd ~/kinova-gen3-driver/build && ctest --output-on-failure'
+ctest --test-dir build --output-on-failure
 ```
 
 Coverage:
@@ -266,10 +265,8 @@ apps/                      benchmark_grav_comp.cpp
 models/                    gen3_7dof.urdf
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
-scripts/                   build_on_abra.sh  sync_to_abra.sh
-                           rt_grant_once.sh  rt_setup.sh
-docs/                      rt-tuning.md  rt-validation-results.md
-                           integration-runbook.md
+scripts/                   rt_grant_once.sh  rt_setup.sh   (one-time + runtime RT tuning)
+docs/                      rt-tuning.md  integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)
 ```

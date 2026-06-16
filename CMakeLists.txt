@@ -1,14 +1,11 @@
 # Kinova Gen3 low-level C++ driver.
 #
 # Targets Linux/aarch64 (NVIDIA Jetson). CANNOT build on macOS: the KORTEX SDK
-# and the RT APIs used by later tasks are Linux-only. Build on the Jetson host
-# (abra) via the dev loop:
-#     ./scripts/build_on_abra.sh        # sync + cmake + build + ctest
-# or manually:
-#     ./scripts/sync_to_abra.sh
-#     ssh abra 'cd ~/kinova-gen3-driver/build && cmake .. \
+# and the RT APIs used by later tasks are Linux-only. Build natively on the
+# Jetson:
+#     cmake -S . -B build \
 #       -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix \
-#       && cmake --build . -j && ctest --output-on-failure'
+#       && cmake --build build -j && ctest --test-dir build --output-on-failure
 #
 # VERIFIED WORKING CMAKE_PREFIX_PATH (for find_package(pinocchio)):
 #     /usr/local/lib/python3.10/dist-packages/cmeel.prefix
@@ -29,8 +26,8 @@ add_compile_options(-O2 -Wall -Wextra -Wno-deprecated-declarations)
 # OFF (default): SIM-ONLY build. KortexTransport is NOT compiled or linked, no
 # KORTEX headers are required, and the app gets -DKINOVA_NO_KORTEX so the real
 # --ip path is #ifdef'd out. This is the only configuration that links on the
-# Jetson today, because the vendored libKortexApiCpp.a is x86-64 ONLY (there is
-# no aarch64 KORTEX C++ lib on abra yet).
+# Jetson today when no aarch64 KORTEX C++ lib is installed (an x86-64
+# libKortexApiCpp.a will not link into an aarch64 binary).
 #
 # ON: compile + link the real KortexTransport path. Requires an aarch64 build of
 # the KORTEX C++ SDK with KORTEX_HW_DIR pointing at it. Enable later for the
