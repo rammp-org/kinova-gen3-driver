@@ -68,7 +68,12 @@ Pose Dynamics::fk(const JointVec& q) {
   return x;
 }
 void Dynamics::jacobian(const JointVec& q, Jacobian6& J_out) {
-  (void)q;                       // implemented in Task 4; stub returns a zero Jacobian
+  impl_->pack(q);
   J_out.setZero();
+  // LOCAL_WORLD_ALIGNED: spatial velocity expressed in world-aligned axes at the
+  // EE origin — the same frame the Cartesian stiffness gains live in.
+  pinocchio::computeFrameJacobian(impl_->model, impl_->data, impl_->qcfg,
+                                  impl_->frame_id, pinocchio::LOCAL_WORLD_ALIGNED,
+                                  J_out);
 }
 }  // namespace kinova
