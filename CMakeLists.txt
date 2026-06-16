@@ -78,6 +78,7 @@ set(KINOVA_LIB_SOURCES
     src/rt_system.cpp
     src/sim_transport.cpp
     src/gravity_comp_mode.cpp
+    src/cartesian_impedance_mode.cpp
     src/rt_executor.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
@@ -131,7 +132,8 @@ add_executable(unit_tests
     tests/sim_transport_test.cpp
     tests/gravity_comp_mode_test.cpp
     tests/rt_safety_test.cpp
-    tests/cartesian_test.cpp)
+    tests/cartesian_test.cpp
+    tests/cartesian_impedance_mode_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
