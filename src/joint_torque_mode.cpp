@@ -24,6 +24,8 @@ void JointTorqueMode::set_torque(const JointVec& tau_ff) noexcept {
   // the write counter. compute() detects freshness via the counter and reads the
   // active buffer; the release/acquire on the index makes the buffer write
   // visible to the RT reader.
+  // relaxed load is safe: this thread is the sole writer of tau_ff_active_; a
+  // second writer would corrupt buffer selection, so no concurrent writer exists.
   const int inactive = 1 - tau_ff_active_.load(std::memory_order_relaxed);
   tau_ff_buf_[inactive] = tau_ff;
   tau_ff_active_.store(inactive, std::memory_order_release);
