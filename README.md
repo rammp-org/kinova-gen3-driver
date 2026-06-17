@@ -10,7 +10,7 @@ compute cost and 1 kHz loop-timing stability on the PREEMPT_RT Jetson, not a
 user-facing API.
 
 Supported control today: **gravity compensation** and **Cartesian (task-space)
-impedance** — see [`docs/control-modes.md`](docs/control-modes.md) for the laws,
+impedance** — see the [docs](docs/index.md) ([control-modes guide](docs/guide/control-modes.md)) for the laws,
 parameters, frames, and tuning. **High-speed velocity** and other laws slot in
 the same way as new `ControlMode` implementations. Public frontends (ROS,
 websockets, …) are deliberately deferred — they become "just another consumer" of
@@ -44,7 +44,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`. See [`docs/control-modes.md`](docs/control-modes.md). |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`. See the [control-modes guide](docs/guide/control-modes.md). |
 | `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, and `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`) for a validated EE frame. Mass-matrix/Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
@@ -204,7 +204,7 @@ knobs `--scale`, `--damping`, `--torque-limit`.
 The **Cartesian impedance** mode has its own benchmark, `benchmark_cartesian_impedance`
 (same telemetry, plus a read-only `--dry-run` for pre-torque validation). Its
 full-law compute measures **p50 ≈ 2 µs / p99 ≈ 4 µs** per cycle with zero
-allocation in the RT loop — see [`docs/control-modes.md`](docs/control-modes.md).
+allocation in the RT loop — see the [deep dive](docs/deep-dive/impedance.md).
 
 ```sh
 cd build && ./benchmark_cartesian_impedance --sim \
@@ -281,7 +281,10 @@ models/                    gen3_7dof.urdf  gen3_7dof_2f85.urdf (2F-85 gripper pa
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
 scripts/                   rt_grant_once.sh  rt_setup.sh   (one-time + runtime RT tuning)
-docs/                      control-modes.md  rt-tuning.md  integration-runbook.md
+docs/                      index.md  getting-started.md          (hosted-docs site)
+                           guide/control-modes.md  reference/api.md
+                           deep-dive/impedance.md
+                           rt-tuning.md  integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)
 ```
