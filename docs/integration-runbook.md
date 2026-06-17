@@ -171,7 +171,7 @@ These are correct-by-construction in sim but **unvalidated on hardware**:
   (`RefreshCommand` / `RefreshFeedback`) path is **untested on hardware** — the
   benchmark uses the blocking `exchange()`. Don't rely on the async path live
   until exercised.
-- **Velocity / current modes ported by analogy.** Only torque (gravity-comp) is
+- **Velocity / current modes ported by analogy.** Only torque (gravity-comp + feedforward joint torque via `JointTorqueMode`) is
   exercised. Velocity and current actuator-mode mappings were ported by analogy
   to the torque path and are **not validated**.
 - **`kCurrent` reuses the torque field.** `JointCommand` has no dedicated

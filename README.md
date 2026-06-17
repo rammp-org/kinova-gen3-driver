@@ -9,7 +9,7 @@ This is the functional core of a low-level control stack for the Gen3, built
 compute cost and 1 kHz loop-timing stability on the PREEMPT_RT Jetson, not a
 user-facing API.
 
-Supported control today: **torque with gravity compensation**. Designed so
+Supported control today: **torque with gravity compensation**, plus **feedforward joint-torque commands** (`JointTorqueMode`; gravity comp is the zero-feedforward case). Designed so
 **impedance** and **high-speed velocity** modes slot in later as new
 `ControlMode` implementations. Public frontends (ROS, websockets, …) are
 deliberately deferred — they become "just another consumer" of this library.
@@ -41,7 +41,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concrete: `GravityCompTorqueMode`. |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concrete: `JointTorqueMode` (gravity comp = zero feedforward). |
 | `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; `gravity(q, tau_out)` now, mass-matrix/Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
@@ -241,7 +241,7 @@ Coverage:
 
 - **Unit:** `Dynamics` gravity at known poses + continuous-joint config
   round-trip; deg↔rad round-trips; `SampleRing` FIFO/drop/SPSC correctness;
-  `GravityCompTorqueMode.compute` = gravity + position passthrough.
+  `JointTorqueMode.compute` = gravity + feedforward + position passthrough.
 - **SimTransport integration:** the whole executor + mode + dynamics + telemetry
   pipeline driven by the fake robot.
 - **RT-safety:** runs `RtExecutor` on `SimTransport` and asserts **zero major
