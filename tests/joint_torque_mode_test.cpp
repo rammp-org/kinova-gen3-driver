@@ -29,3 +29,22 @@ TEST(JointTorque, DampingSubtractsVelocityTerm) {
   for (int i = 0; i < kNumJoints; ++i)
     EXPECT_NEAR(c.torque[i], g[i] - 2.0 * 1.0, 1e-6);
 }
+
+TEST(JointTorque, FeedforwardAddsToGravity) {
+  Dynamics dyn(URDF_PATH);
+  JointTorqueMode m(dyn, {1.0, 0.0, 1e9});  // huge limit: no clamp interference
+  JointFeedback fb; fb.q.setZero(); fb.q[1] = M_PI / 2; fb.qd.setZero();
+  JointVec ff; ff.setConstant(3.0);
+  JointCommand c; m.on_enter(fb); m.set_torque(ff); m.compute(fb, 0.001, c);
+  JointVec g; dyn.gravity(fb.q, g);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i] + 3.0, 1e-6);
+}
+
+TEST(JointTorque, TotalOutputClampedWithFeedforward) {
+  Dynamics dyn(URDF_PATH);
+  JointTorqueMode m(dyn, {1.0, 0.0, 39.0});
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointVec ff; ff.setConstant(1000.0);  // gravity + 1000 >> 39 on every joint
+  JointCommand c; m.on_enter(fb); m.set_torque(ff); m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], 39.0, 1e-9);
+}
