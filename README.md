@@ -9,10 +9,13 @@ This is the functional core of a low-level control stack for the Gen3, built
 compute cost and 1 kHz loop-timing stability on the PREEMPT_RT Jetson, not a
 user-facing API.
 
-Supported control today: **torque with gravity compensation**. Designed so
-**impedance** and **high-speed velocity** modes slot in later as new
-`ControlMode` implementations. Public frontends (ROS, websockets, …) are
-deliberately deferred — they become "just another consumer" of this library.
+Supported control today: **gravity compensation** and **Cartesian (task-space)
+impedance** — see [`docs/control-modes.md`](docs/control-modes.md) for the laws,
+parameters, frames, and tuning. **High-speed velocity** and other laws slot in
+the same way as new `ControlMode` implementations. Public frontends (ROS,
+websockets, …) are deliberately deferred — they become "just another consumer" of
+this library; the impedance mode's non-RT `set_target`/`set_gains` setters are the
+seam they plug into.
 
 It is a layered, instrumented, testable refactor of a validated single-file
 prototype (`grav_comp_test.cpp`), preserving the hard-won-correct KORTEX
@@ -41,8 +44,8 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concrete: `GravityCompTorqueMode`. |
-| `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; `gravity(q, tau_out)` now, mass-matrix/Coriolis later. |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`. See [`docs/control-modes.md`](docs/control-modes.md). |
+| `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, and `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`) for a validated EE frame. Mass-matrix/Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
 | `RtExecutor` | Owns the single RT thread; per cycle paces → `exchange` → check faults → `compute` → push a `CycleSample`. Mode switch = atomic-pointer swap at a cycle boundary. |
@@ -198,6 +201,16 @@ Useful flags: `--rate <hz>`, `--pacing sleepspin|nanosleep`, `--cpu <core>`,
 `--rt-priority <prio>`, `--duration <s>`, `--csv <path>`, and the gravity-comp
 knobs `--scale`, `--damping`, `--torque-limit`.
 
+The **Cartesian impedance** mode has its own benchmark, `benchmark_cartesian_impedance`
+(same telemetry, plus a read-only `--dry-run` for pre-torque validation). Its
+full-law compute measures **p50 ≈ 2 µs / p99 ≈ 4 µs** per cycle with zero
+allocation in the RT loop — see [`docs/control-modes.md`](docs/control-modes.md).
+
+```sh
+cd build && ./benchmark_cartesian_impedance --sim \
+  --urdf ../models/gen3_7dof_2f85.urdf --rate 1000 --duration 5
+```
+
 What the output means:
 
 - **Live console (~1 Hz):** loop rate; `cycle` percentiles (p50/p99/p99.9/max);
@@ -254,19 +267,21 @@ Robot-in-the-loop tests are documented but **not run unattended** — see
 ## Repo layout
 
 ```
-include/kinova_lowlevel/   joint_types.h units.h transport.h control_mode.h
-                           dynamics.h rt_executor.h telemetry.h
-                           telemetry_consumers.h rt_system.h
-                           sim_transport.h kortex_transport.h gravity_comp_mode.h
-src/                       dynamics.cpp telemetry.cpp telemetry_consumers.cpp
-                           rt_system.cpp sim_transport.cpp kortex_transport.cpp
-                           gravity_comp_mode.cpp rt_executor.cpp
-apps/                      benchmark_grav_comp.cpp
-models/                    gen3_7dof.urdf
+include/kinova_lowlevel/   joint_types.h units.h cartesian_types.h transport.h
+                           control_mode.h dynamics.h cartesian.h rt_executor.h
+                           telemetry.h telemetry_consumers.h rt_system.h
+                           sim_transport.h kortex_transport.h
+                           gravity_comp_mode.h cartesian_impedance_mode.h
+src/                       dynamics.cpp cartesian.cpp telemetry.cpp
+                           telemetry_consumers.cpp rt_system.cpp sim_transport.cpp
+                           kortex_transport.cpp gravity_comp_mode.cpp
+                           cartesian_impedance_mode.cpp rt_executor.cpp
+apps/                      benchmark_grav_comp.cpp  benchmark_cartesian_impedance.cpp
+models/                    gen3_7dof.urdf  gen3_7dof_2f85.urdf (2F-85 gripper payload)
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
 scripts/                   rt_grant_once.sh  rt_setup.sh   (one-time + runtime RT tuning)
-docs/                      rt-tuning.md  integration-runbook.md
+docs/                      control-modes.md  rt-tuning.md  integration-runbook.md
                            integration/grav_comp_static_check.md
                            superpowers/{specs,plans}/…   (design + plan)
 ```
