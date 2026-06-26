@@ -285,4 +285,21 @@ void KortexTransport::safe_shutdown() {
   I.low_level_ = false;
 }
 
+void KortexTransport::clear_faults() {
+  auto& I = *impl_;
+  if (!I.connected_ || !I.base) return;
+  try {
+    I.base->ClearFaults();
+  } catch (...) {
+  }
+  // A protective stop can drop the robot out of low-level servoing. If we were
+  // in low-level mode, re-enter + re-seed so the RT loop can resume commanding.
+  if (I.low_level_) {
+    try {
+      set_servoing_low_level();
+    } catch (...) {
+    }
+  }
+}
+
 }  // namespace kinova

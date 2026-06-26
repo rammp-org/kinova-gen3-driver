@@ -22,3 +22,13 @@ TEST(SimTransport, SendReceiveRoundTrips) {
   JointFeedback fb; t.receive(fb);
   EXPECT_TRUE(fb.q.allFinite());
 }
+// SimTransport has no fault concept, so it inherits Transport's default-no-op
+// clear_faults(). The teleop server calls clear_faults() on whatever Transport
+// it holds; this guards that the sim path is a safe no-op (no throw, state
+// unchanged) so protocol bring-up under --sim never trips on it.
+TEST(SimTransport, ClearFaultsIsNoOp) {
+  JointFeedback init;
+  SimTransport t(init);
+  Transport& base = t;  // call through the base interface
+  EXPECT_NO_THROW(base.clear_faults());
+}

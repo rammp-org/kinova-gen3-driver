@@ -16,6 +16,7 @@ class KortexTransport : public Transport {
   void send(const JointCommand&) override;
   void receive(JointFeedback&) override;
   void safe_shutdown() override;
+  void clear_faults() override;
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

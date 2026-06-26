@@ -13,5 +13,8 @@ class Transport {
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;
   virtual void safe_shutdown() = 0;
+  // Runtime fault recovery (e.g. after a protective stop). Default no-op so
+  // transports without faults (SimTransport) need not implement it.
+  virtual void clear_faults() {}
 };
 }  // namespace kinova
