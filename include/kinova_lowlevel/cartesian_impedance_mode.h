@@ -9,8 +9,8 @@ struct CartesianImpedanceParams {
   Vector6 Kx = (Vector6() << 300,300,300, 30,30,30).finished();  // N/m | N·m/rad
   Vector6 Dx = (Vector6() << 35,35,35, 5,5,5).finished();        // N·s/m | N·m·s/rad
   // Defaults are sensible starting points; tune Kx/Dx on hardware.
-  double  nullspace_kp = 5.0;     // joint posture stiffness (N·m/rad)
-  double  nullspace_kd = 1.0;     // joint posture damping (N·m·s/rad)
+  double  nullspace_kp = 25.0;    // joint posture stiffness (N·m/rad)
+  double  nullspace_kd = 5.0;     // joint posture damping (N·m·s/rad)
   bool    nullspace_on = true;
   double  pinv_damping = 1e-3;    // Levenberg-Marquardt lambda for the pseudo-inverse
   double  torque_limit = 39.0;    // per-joint clamp (N·m)
