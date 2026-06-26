@@ -1,0 +1,31 @@
+# Docs site config. Build/serve with mkdocs (pip install mkdocs mkdocs-material):
+#   mkdocs serve      # live preview at http://127.0.0.1:8000
+#   mkdocs build      # static site into ./site
+# The pages are plain Markdown under docs/ and render fine on GitHub too, so this
+# generator is swappable (Docusaurus/etc.) — it just defines the nav.
+site_name: Kinova Gen3 Low-Level Driver
+site_description: Durable C++ driver for Gen3 7-DOF 1 kHz torque control (gravity-comp + Cartesian impedance)
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Guide:
+      - Control Modes: guide/control-modes.md
+  - Reference:
+      - API: reference/api.md
+  - Deep Dive:
+      - Cartesian Impedance: deep-dive/impedance.md
+  - Operations:
+      - Real-Time Tuning: rt-tuning.md
+      - Integration Runbook: integration-runbook.md
