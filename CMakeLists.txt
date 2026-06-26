@@ -139,6 +139,26 @@ else()
     target_compile_definitions(benchmark_cartesian_impedance PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# teleop_socket_server bridges the Python VR-teleop supervisor to
+# CartesianImpedanceMode over UDP. Sim build (default) exercises the protocol;
+# the real KORTEX path is compiled in but only run against the arm in person.
+add_executable(teleop_socket_server apps/teleop_socket_server.cpp)
+target_link_libraries(teleop_socket_server PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(teleop_socket_server PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    # Real-robot build: KortexTransport is compiled into the library and the
+    # KORTEX include dirs / -D_OS_UNIX are needed where the app references the
+    # KortexTransport header. The real --ip path is active (no KINOVA_NO_KORTEX).
+    target_include_directories(teleop_socket_server PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(teleop_socket_server PRIVATE _OS_UNIX)
+else()
+    # SIM-ONLY build (default). KINOVA_NO_KORTEX #ifdef's out the KortexTransport
+    # reference so no KORTEX symbols are demanded -- required on the Jetson, where
+    # the vendored libKortexApiCpp.a is x86-64 only and would fail to link into an
+    # aarch64 executable.
+    target_compile_definitions(teleop_socket_server PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # --- tests --------------------------------------------------------------------
 enable_testing()
 find_package(GTest REQUIRED)
