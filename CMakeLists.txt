@@ -154,7 +154,8 @@ add_executable(unit_tests
     tests/gravity_comp_mode_test.cpp
     tests/rt_safety_test.cpp
     tests/cartesian_test.cpp
-    tests/cartesian_impedance_mode_test.cpp)
+    tests/cartesian_impedance_mode_test.cpp
+    tests/teleop_protocol_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
