@@ -1,3 +1,4 @@
 build/
 build_kortex/
 local_tools/
+.worktrees/
