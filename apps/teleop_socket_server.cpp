@@ -56,7 +56,9 @@ int64_t ns_now() {
 }
 
 // Single-writer / single-reader lock-free latest-value snapshot (seqlock). The
-// RT thread is the only writer; the feedback thread is the only reader. POD T.
+// RT thread is the only writer; the feedback thread is the only reader.
+// T need not be trivially copyable — fixed-size Eigen members store data inline,
+// so a torn read yields transient garbage numbers but never a bad pointer.
 template <class T>
 class Seqlock {
  public:
@@ -161,10 +163,15 @@ int main(int argc, char** argv) {
   std::cout << "[teleop-srv] urdf=" << urdf << " rate=" << rate_hz << "Hz port="
             << port << " sim=" << (use_sim ? "yes" : "no") << "\n";
 
-  // Two Dynamics instances: one for the mode (RT thread), one for the feedback
-  // thread (fk is RT-safe but not safe to share across threads).
+  // Three Dynamics instances — Dynamics::fk mutates internal Pinocchio state and
+  // is NOT thread-safe. Each thread that calls fk owns its own instance so no
+  // Dynamics object is ever shared across threads:
+  //   dyn    — CartesianImpedanceMode / RT thread
+  //   dyn_fb — feedback thread (periodic ~150 Hz fk)
+  //   dyn_rx — rx thread, FREEZE handler only
   Dynamics dyn(urdf);
   Dynamics dyn_fb(urdf);
+  Dynamics dyn_rx(urdf);  // rx-thread exclusive: prevents data race with dyn_fb
 
   std::unique_ptr<Transport> base_transport;
   if (use_sim) {
@@ -283,7 +290,9 @@ int main(int argc, char** argv) {
               break;
             case tp::ControlCmd::kFreeze: {
               JointFeedback fb;
-              if (snapshot.load(fb)) mode.set_target(dyn_fb.fk(fb.q));
+              // Use dyn_rx (rx-thread-exclusive) — dyn_fb belongs to the
+              // feedback thread and must not be touched here.
+              if (snapshot.load(fb)) mode.set_target(dyn_rx.fk(fb.q));
               break;
             }
             case tp::ControlCmd::kShutdown:
@@ -355,10 +364,13 @@ int main(int argc, char** argv) {
   std::cout << "[teleop-srv] listening; RT loop running. Ctrl-C to stop.\n";
   ex.run(g_stop);  // blocks on the main (RT) thread until stop
 
-  transport.safe_shutdown();
+  // Stop threads before tearing down the transport: the rx thread can call
+  // transport.clear_faults() and the feedback thread uses the socket, so both
+  // must be fully stopped before safe_shutdown and close(sock).
   g_stop.store(true, std::memory_order_release);
   rx.join();
   feedback.join();
+  transport.safe_shutdown();
   ::close(sock);
   std::cout << "[teleop-srv] stopped.\n";
   return 0;
