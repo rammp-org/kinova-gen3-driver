@@ -117,6 +117,47 @@ class FeedbackTap : public Transport {
   Seqlock<JointFeedback>& snap_;
 };
 
+// Transport decorator: carries the latest gripper target (set by the rx thread)
+// and stamps it into each JointCommand on its way to the wrapped transport. Keeps
+// gripper control orthogonal to any ControlMode. The atomics make the rx-thread
+// write / RT-thread read race-free; the JointCommand copy is POD-sized (no alloc).
+class GripperInjector : public Transport {
+ public:
+  explicit GripperInjector(Transport& inner) : inner_(inner) {}
+
+  // Called by the rx thread when a POSE_TARGET arrives.
+  void set_gripper(float g) {
+    if (g < 0.0f) g = 0.0f;
+    if (g > 1.0f) g = 1.0f;
+    gripper_.store(g, std::memory_order_relaxed);
+    active_.store(true, std::memory_order_relaxed);
+  }
+
+  void connect() override { inner_.connect(); }
+  void set_servoing_low_level() override { inner_.set_servoing_low_level(); }
+  void set_actuator_modes(const ActuatorModes& m) override {
+    inner_.set_actuator_modes(m);
+  }
+  void exchange(const JointCommand& c, JointFeedback& fb) override {
+    inner_.exchange(stamp(c), fb);
+  }
+  void send(const JointCommand& c) override { inner_.send(stamp(c)); }
+  void receive(JointFeedback& fb) override { inner_.receive(fb); }
+  void safe_shutdown() override { inner_.safe_shutdown(); }
+  void clear_faults() override { inner_.clear_faults(); }
+
+ private:
+  JointCommand stamp(const JointCommand& c) {
+    JointCommand out = c;
+    out.gripper = gripper_.load(std::memory_order_relaxed);
+    out.gripper_active = active_.load(std::memory_order_relaxed);
+    return out;
+  }
+  Transport& inner_;
+  std::atomic<float> gripper_{0.0f};
+  std::atomic<bool> active_{false};
+};
+
 Pose pose_from_packet(const tp::PoseTargetPacket& p) {
   Pose x;
   x.p = Eigen::Vector3d(p.pos[0], p.pos[1], p.pos[2]);
@@ -191,7 +232,8 @@ int main(int argc, char** argv) {
   }
 
   Seqlock<JointFeedback> snapshot;
-  FeedbackTap transport(*base_transport, snapshot);
+  GripperInjector injector(*base_transport);
+  FeedbackTap transport(injector, snapshot);
 
   std::signal(SIGINT, on_sigint);
 
@@ -216,7 +258,6 @@ int main(int argc, char** argv) {
   std::mutex client_mu;
   sockaddr_in client_addr{};
   bool have_client = false;
-  std::atomic<float> last_gripper{0.0f};
   std::atomic<uint32_t> last_control_seq{0};
 
   transport.connect();
@@ -254,9 +295,7 @@ int main(int argc, char** argv) {
           tp::PoseTargetPacket pkt;
           std::memcpy(&pkt, buf, sizeof(pkt));
           mode.set_target(pose_from_packet(pkt));
-          last_gripper.store(pkt.gripper, std::memory_order_relaxed);
-          // TODO(gripper): once JointCommand carries a gripper field, forward
-          // pkt.gripper to the cyclic interconnect command here.
+          injector.set_gripper(pkt.gripper);
           break;
         }
         case tp::MsgType::kSetGains: {
@@ -343,7 +382,7 @@ int main(int argc, char** argv) {
         pkt.ee_quat_wxyz[1] = ee.R.x();
         pkt.ee_quat_wxyz[2] = ee.R.y();
         pkt.ee_quat_wxyz[3] = ee.R.z();
-        pkt.gripper_state = last_gripper.load(std::memory_order_relaxed);
+        pkt.gripper_state = fb.gripper;  // actual measured position from snapshot
         pkt.fault = fb.fault ? 1 : 0;
         pkt.frame_id = fb.frame_id;
         pkt.last_control_seq = last_control_seq.load(std::memory_order_acquire);
