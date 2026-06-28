@@ -25,6 +25,12 @@ namespace {
 constexpr int kTcpPort = 10000;
 constexpr int kUdpPort = 10001;
 
+// Gripper motor-command defaults (KORTEX units are percent, 0..100). Position is
+// commanded per-cycle from JointCommand.gripper; velocity/force are fixed safe
+// defaults — full speed, moderate force. Tune force down if it over-grips.
+constexpr float kGripperVelocityPct = 100.0f;
+constexpr float kGripperForcePct    = 50.0f;
+
 // Map our ActuatorMode -> KORTEX ActuatorConfig control mode.
 k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
   switch (m) {
@@ -88,6 +94,13 @@ struct KortexTransport::Impl {
       }
     }
     fb.fault = fault;
+    // Measured gripper position from the interconnect feedback (percent -> 0..1).
+    // Guard the no-gripper case (a robot without an interconnect gripper reports
+    // zero motors): leave fb.gripper at its default 0.
+    const auto& ic = fb_.interconnect();
+    if (ic.gripper_feedback().motor_size() > 0) {
+      fb.gripper = float(ic.gripper_feedback().motor(0).position()) / 100.0f;
+    }
   }
 
   // Write a JointCommand into cmd_, bumping frame_id_ and per-actuator command_ids.
@@ -121,6 +134,20 @@ struct KortexTransport::Impl {
           break;
       }
       a->set_command_id(frame_id_);
+    }
+    // Gripper rides inside the same cyclic command, in the interconnect's
+    // gripper_command motor message. Position is percent (0..100); we map the
+    // server's 0..1 target. Only emitted when the teleop path has set a target.
+    if (cmd.gripper_active) {
+      auto* gripper = cmd_.mutable_interconnect()->mutable_gripper_command();
+      if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
+      auto* m = gripper->mutable_motor_cmd(0);
+      float pos = cmd.gripper;
+      if (pos < 0.0f) pos = 0.0f;
+      if (pos > 1.0f) pos = 1.0f;
+      m->set_position(pos * 100.0f);
+      m->set_velocity(kGripperVelocityPct);
+      m->set_force(kGripperForcePct);
     }
   }
 };
