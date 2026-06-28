@@ -139,6 +139,14 @@ struct KortexTransport::Impl {
     // gripper_command motor message. Position is percent (0..100); we map the
     // server's 0..1 target. Only emitted when the teleop path has set a target.
     if (cmd.gripper_active) {
+      // NOTE: the interconnect/gripper submessages are allocated lazily on the
+      // first commanded cycle — a one-time heap alloc on the RT path. This is a
+      // deliberate tradeoff (decided in final review): it keeps the gripper
+      // UNcommanded until the operator's first gripper command, so the gripper
+      // stays limp at startup rather than being actuated by a seeded default.
+      // Pre-seeding in set_servoing_low_level() would make this path alloc-free
+      // but would actuate the gripper from cycle 1; that is to be validated on
+      // hardware during the attended bring-up before adopting it.
       auto* gripper = cmd_.mutable_interconnect()->mutable_gripper_command();
       if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
       auto* m = gripper->mutable_motor_cmd(0);

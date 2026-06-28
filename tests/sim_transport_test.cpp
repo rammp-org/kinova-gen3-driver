@@ -57,3 +57,16 @@ TEST(SimTransport, LeavesGripperUntouchedWhenInactive) {
   t.exchange(c, fb);
   EXPECT_NEAR(fb.gripper, 0.7f, 1e-6f);  // unchanged
 }
+
+TEST(SimTransport, SendEchoesGripperToReceive) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  JointCommand c;
+  c.gripper = 0.33f;
+  c.gripper_active = true;
+  t.send(c);
+  JointFeedback fb;
+  t.receive(fb);
+  EXPECT_NEAR(fb.gripper, 0.33f, 1e-6f);
+}

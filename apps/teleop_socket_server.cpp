@@ -133,7 +133,7 @@ class GripperInjector : public Transport {
     if (g < 0.0f) g = 0.0f;
     if (g > 1.0f) g = 1.0f;
     gripper_.store(g, std::memory_order_relaxed);
-    active_.store(true, std::memory_order_relaxed);
+    active_.store(true, std::memory_order_release);  // publish gripper_ before active_
   }
 
   void connect() override { inner_.connect(); }
@@ -152,8 +152,11 @@ class GripperInjector : public Transport {
  private:
   JointCommand stamp(const JointCommand& c) {
     JointCommand out = c;
+    // acquire on active_ pairs with the release in set_gripper: once active_ reads
+    // true, the gripper_ value stored before it is guaranteed visible (no first-cycle
+    // stale read). Single rx-thread writer / single RT-thread reader.
+    out.gripper_active = active_.load(std::memory_order_acquire);
     out.gripper = gripper_.load(std::memory_order_relaxed);
-    out.gripper_active = active_.load(std::memory_order_relaxed);
     return out;
   }
   Transport& inner_;
