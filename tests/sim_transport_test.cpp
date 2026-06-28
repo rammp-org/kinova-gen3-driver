@@ -32,3 +32,28 @@ TEST(SimTransport, ClearFaultsIsNoOp) {
   Transport& base = t;  // call through the base interface
   EXPECT_NO_THROW(base.clear_faults());
 }
+
+TEST(SimTransport, EchoesGripperWhenActive) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  JointCommand c;
+  c.gripper = 0.42f;
+  c.gripper_active = true;
+  JointFeedback fb;
+  t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper, 0.42f, 1e-6f);
+}
+
+TEST(SimTransport, LeavesGripperUntouchedWhenInactive) {
+  JointFeedback init;
+  init.gripper = 0.7f;       // pre-existing measured position
+  SimTransport t(init);
+  t.connect();
+  JointCommand c;
+  c.gripper = 0.1f;
+  c.gripper_active = false;  // no gripper intent
+  JointFeedback fb;
+  t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper, 0.7f, 1e-6f);  // unchanged
+}

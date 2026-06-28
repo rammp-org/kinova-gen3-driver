@@ -17,6 +17,7 @@ struct JointFeedback {
   JointVec current = JointVec::Zero();
   uint64_t frame_id = 0;
   bool fault = false;
+  float gripper = 0.0f;   // measured gripper position, 0 (open) .. 1 (closed)
 };
 
 struct JointCommand {
@@ -24,6 +25,8 @@ struct JointCommand {
   JointVec position = JointVec::Zero();
   JointVec velocity = JointVec::Zero();
   JointVec torque   = JointVec::Zero();
+  float gripper = 0.0f;        // target gripper position, 0 (open) .. 1 (closed)
+  bool  gripper_active = false; // when false, no gripper command is emitted
 };
 
 constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
