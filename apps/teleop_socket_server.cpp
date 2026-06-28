@@ -3,10 +3,13 @@
 // thread; two helper threads handle the socket:
 //
 //   * rx thread:       receive POSE_TARGET / SET_GAINS / CONTROL, apply via the
-//                      mode's non-RT setters (single writer, as required).
+//                      mode's non-RT setters (single writer, as required). Also
+//                      forwards POSE_TARGET.gripper (0–1) via a GripperInjector
+//                      decorator, stamping it into each JointCommand.
 //   * feedback thread: read the latest JointFeedback snapshot, compute EE pose
 //                      via its own Dynamics, and stream FEEDBACK back to the
-//                      last client address.
+//                      last client address. Reports the measured gripper position
+//                      in FEEDBACK.gripper_state.
 //
 // Robot feedback is captured without touching the driver core: FeedbackTap wraps
 // the Transport and snapshots `fb` at the exact point the RT loop reads it.
