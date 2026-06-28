@@ -15,7 +15,13 @@
 - **`NUM_JOINTS = kNumJoints = 7`.** Unchanged.
 - **Build guards:** existing `KINOVA_ENABLE_KORTEX` / `KINOVA_NO_KORTEX` / `_OS_UNIX` guards stay as-is. The sim build (default, no KORTEX) must keep compiling.
 - **RT-safety:** no heap allocation, no locking, no blocking on the command path inside `GripperInjector` / `write_command`. `JointCommand` copies are POD-sized and fine.
-- **Builds and tests run on `abra`**, e.g. `bash local_tools/sync_to_abra.sh && ssh abra 'cd ~/kinova-gen3-driver/build && cmake --build . -j unit_tests teleop_socket_server && ./unit_tests'`. The Mac cannot build KORTEX or Pinocchio.
+- **Builds and tests run on `abra`**, not the Mac (KORTEX + Pinocchio are Linux/aarch64-only). **You are working in a git worktree; the stock `local_tools/sync_to_abra.sh` syncs the *main* checkout, NOT this worktree — do not use it.** From the worktree root, the canonical recipe is:
+  ```bash
+  # sync THIS worktree to abra, then build + test there
+  rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/
+  ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target unit_tests teleop_socket_server -j && ./unit_tests'
+  ```
+  Note the cmake syntax: `--target <names> -j` (a bare `-j unit_tests` is a CMake usage error — `-j` wants a job count, not a target). The abra build dir already exists and is configured; baseline is 44 tests passing.
 
 ---
 
@@ -69,7 +75,7 @@ TEST(SimTransport, LeavesGripperUntouchedWhenInactive) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bash local_tools/sync_to_abra.sh && ssh abra 'cd ~/kinova-gen3-driver/build && cmake --build . -j unit_tests && ./unit_tests --gtest_filter="SimTransport.*Gripper*"'`
+Run: `rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/ && ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target unit_tests -j && ./unit_tests --gtest_filter="SimTransport.*Gripper*"'`
 Expected: COMPILE FAIL — `JointCommand` has no member `gripper` / `gripper_active`, `JointFeedback` has no member `gripper`.
 
 - [ ] **Step 3: Add the struct fields**
@@ -134,7 +140,7 @@ void SimTransport::send(const JointCommand& cmd) {
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `ssh abra 'cd ~/kinova-gen3-driver/build && cmake --build . -j unit_tests && ./unit_tests --gtest_filter="SimTransport.*"'`
+Run: `rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/ && ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target unit_tests -j && ./unit_tests --gtest_filter="SimTransport.*"'`
 Expected: PASS — all `SimTransport.*` tests including the two new ones, and the pre-existing echo/round-trip/clear-faults tests still green.
 
 - [ ] **Step 6: Commit**
@@ -265,7 +271,7 @@ In `main`, in the "Shared state between socket threads" block, delete the line:
 
 - [ ] **Step 6: Build the sim server to verify it compiles and links**
 
-Run: `ssh abra 'cd ~/kinova-gen3-driver/build && cmake --build . -j teleop_socket_server unit_tests && ./unit_tests'`
+Run: `rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/ && ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target teleop_socket_server unit_tests -j && ./unit_tests'`
 Expected: PASS — `teleop_socket_server` links; full `unit_tests` suite green (incl. Task 1's sim gripper tests and the untouched `TeleopProtocol*` parity/size tests). No reference to `last_gripper` remains (no unused-variable warning).
 
 - [ ] **Step 7: Commit**
@@ -288,14 +294,14 @@ Drive the physical gripper and read its measured position. This is the KORTEX-on
 - Consumes: `JointCommand.gripper`, `JointCommand.gripper_active`, `JointFeedback.gripper` (Task 1).
 - Produces: nothing for later tasks (terminal hardware task).
 
-**Before writing code — confirm the KORTEX accessor names on `abra`.** The plan below uses the documented Gen3 low-level interconnect gripper API, but the exact protobuf getters/setters MUST be confirmed against the installed headers before claiming the build is correct. Run:
+**KORTEX accessor names — already confirmed against the installed `kortex_api_2.8.0_aarch64` headers on `abra`** (you do NOT need to re-verify). Confirmed exact names used by Steps 2–3:
+- `cmd_.mutable_interconnect()` → `InterconnectCyclic::Command*` (BaseCyclic.pb.h:2833)
+- `.mutable_gripper_command()` → `GripperCyclic::Command*` (InterconnectCyclicMessage.pb.h:293)
+- `GripperCyclic::Command`: `int motor_cmd_size()`, `MotorCommand* add_motor_cmd()`, `MotorCommand* mutable_motor_cmd(int)` (GripperCyclicMessage.pb.h:405–410)
+- `GripperCyclic::MotorCommand`: `void set_position(float)`, `set_velocity(float)`, `set_force(float)` — all percent (GripperCyclicMessage.pb.h:294–306)
+- `fb_.interconnect()` → `InterconnectCyclic::Feedback&` (BaseCyclic.pb.h:1440); `.gripper_feedback()` → `GripperCyclic::Feedback&`; `int motor_size()`, `const MotorFeedback& motor(int)`, `MotorFeedback::position()` returns `float` (GripperCyclicMessage.pb.h:661–664, 535)
 
-```bash
-ssh abra 'grep -rn "gripper_command\|gripper_feedback\|GripperCyclic\|add_motor_cmd\|mutable_interconnect" \
-  $(find / -path "*BaseCyclic*" -name "*.h" 2>/dev/null | head -5) 2>/dev/null | head -40'
-```
-
-Expected: confirm `BaseCyclic::Command` exposes `mutable_interconnect()->mutable_gripper_command()` with `add_motor_cmd()` / `mutable_motor_cmd(i)` whose entries have `set_position/set_velocity/set_force` (percent), and `BaseCyclic::Feedback` exposes `interconnect().gripper_feedback().motor(i).position()` with a `motor_size()`. If any name differs, adapt the code in Steps 2–3 to the confirmed names and note the correction in the commit message.
+The code in Steps 2–3 uses these exact names — write them verbatim.
 
 - [ ] **Step 1: Add the gripper tuning constants**
 
@@ -346,8 +352,8 @@ In `Impl::fill_feedback(JointFeedback& fb)`, before the closing brace (after `fb
 
 - [ ] **Step 4: Build under KORTEX to verify it compiles**
 
-Run: `ssh abra 'cd ~/kinova-gen3-driver/build && cmake -DKINOVA_ENABLE_KORTEX=ON . && cmake --build . -j teleop_socket_server unit_tests && ./unit_tests'`
-Expected: PASS — the KORTEX build compiles and links `KortexTransport` with the interconnect gripper read/write; `unit_tests` green (sim tests are KORTEX-independent and must still pass). If the build uses a separate KORTEX build dir per `local_tools/`, use that script instead — confirm which on `abra`.
+Run: `rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/ && ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target teleop_socket_server unit_tests -j && ./unit_tests'`
+Expected: PASS — the abra `build` dir is **already configured with `KINOVA_ENABLE_KORTEX=ON`** (verified), so this build compiles and links `KortexTransport` with the interconnect gripper read/write; no `-DKINOVA_ENABLE_KORTEX` reconfigure is needed. `unit_tests` green (sim tests are KORTEX-independent and must still pass).
 
 - [ ] **Step 5: Commit**
 
@@ -371,7 +377,7 @@ Update the socket-server doc/header comments so the gripper is no longer describ
 
 - [ ] **Step 1: Find any "gripper deferred/unimplemented" prose**
 
-Run: `cd ~/kinova-gen3-driver && grep -rni "gripper" apps/ docs/ --include='*.cpp' --include='*.md' | grep -i "defer\|todo\|not.*implement\|out of scope\|unsupported"`
+Run (from the worktree root): `grep -rni "gripper" apps/ docs/ --include='*.cpp' --include='*.md' | grep -i "defer\|todo\|not.*implement\|out of scope\|unsupported"`
 Expected: a short list (the socket-server design's "Out of scope" note is historical and stays; focus on the app file's top comment and any user-facing reference/runbook page).
 
 - [ ] **Step 2: Update the prose**
@@ -390,6 +396,6 @@ git commit -m "docs(teleop): gripper command path is implemented"
 ## Verification (whole feature, on `abra`)
 
 After all tasks:
-- `ssh abra 'cd ~/kinova-gen3-driver/build && cmake --build . -j unit_tests teleop_socket_server && ./unit_tests'` — full suite green, including `SimTransport.*Gripper*` and the untouched `TeleopProtocol*` size/parity tests.
+- `rsync -az --delete --exclude 'build*' --exclude .git ./ abra:~/kinova-gen3-driver/ && ssh abra 'set -e; cd ~/kinova-gen3-driver/build && cmake --build . --target unit_tests teleop_socket_server -j && ./unit_tests'` — full suite green, including `SimTransport.*Gripper*` and the untouched `TeleopProtocol*` size/parity tests.
 - KORTEX build compiles (Task 3 Step 4).
 - **Deferred to an attended in-person session:** live gripper motion against the real arm, per the integration runbook's safety posture.
