@@ -131,6 +131,62 @@ TEST(CartesianImpedanceNullspace, PostureTorqueProducesNoTaskWrench) {
   EXPECT_NEAR((J * dtau).norm(), 0.0, 1e-5);     // ...and produces no task wrench
 }
 
+TEST(CartesianImpedanceNullspace, FixedRestPostureActiveAndInNullspace) {
+  // With nullspace_use_fixed_rest, q_rest is the FIXED pose, NOT the entry config.
+  // We enter AND compute at the entry config: legacy (entry-anchored) would give
+  // zero posture error here, so a nonzero posture torque proves the fixed-rest path
+  // took effect. Offset stays modest so the DAMPED projector's residual (set by
+  // pinv_damping) keeps the leaked task wrench under tol — see the comment on
+  // PostureTorqueProducesNoTaskWrench.
+  Dynamics dyn(URDF_PATH);
+  JointVec rest = sample_q(); rest[2] += 0.15; rest[5] -= 0.12;  // fixed rest != entry
+
+  CartesianImpedanceParams off; off.gain_ramp_s = 0.0; off.nullspace_on = false;
+  CartesianImpedanceMode m_off(dyn, off);
+  CartesianImpedanceParams on = off;
+  on.nullspace_on = true; on.nullspace_use_fixed_rest = true;
+  on.nullspace_q_rest = rest; on.nullspace_kp = 8.0; on.nullspace_kd = 0.0;
+  CartesianImpedanceMode m_on(dyn, on);
+
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();   // enter & compute at entry
+  m_off.on_enter(fb); m_on.on_enter(fb);                  // q_rest := rest (on), q (off)
+  m_off.set_target(dyn.fk(fb.q)); m_on.set_target(dyn.fk(fb.q));  // zero task error
+
+  JointCommand c_off, c_on;
+  m_off.compute(fb, 0.001, c_off);
+  m_on.compute(fb, 0.001, c_on);
+
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  JointVec dtau = c_on.torque - c_off.torque;
+  EXPECT_GT(dtau.norm(), 1e-3);                  // posture toward fixed home is active
+  EXPECT_NEAR((J * dtau).norm(), 0.0, 1e-5);     // ...and produces no task wrench
+}
+
+TEST(CartesianImpedanceNullspace, ManipulabilityGradientActiveAndInNullspace) {
+  // The manipulability gradient term is nonzero at a generic config and, being
+  // applied through the projector N, produces no task-space wrench.
+  Dynamics dyn(URDF_PATH);
+  CartesianImpedanceParams off; off.gain_ramp_s = 0.0; off.nullspace_on = false;
+  CartesianImpedanceMode m_off(dyn, off);
+  CartesianImpedanceParams on = off;
+  on.nullspace_on = true; on.nullspace_kp = 0.0; on.nullspace_kd = 0.0;
+  on.manip_on = true; on.manip_gain = 1.0;
+  CartesianImpedanceMode m_on(dyn, on);
+
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m_off.on_enter(fb); m_on.on_enter(fb);
+  m_off.set_target(dyn.fk(fb.q)); m_on.set_target(dyn.fk(fb.q));  // zero task error
+
+  JointCommand c_off, c_on;
+  m_off.compute(fb, 0.001, c_off);
+  m_on.compute(fb, 0.001, c_on);
+
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  JointVec dtau = c_on.torque - c_off.torque;
+  EXPECT_GT(dtau.norm(), 1e-6);                  // gradient-ascent term is active
+  EXPECT_NEAR((J * dtau).norm(), 0.0, 1e-5);     // ...and stays in null(J)
+}
+
 TEST(CartesianImpedanceRamp, GravityHeldFullDuringRampButWrenchScales) {
   Dynamics dyn(URDF_PATH);
   CartesianImpedanceParams p; p.gain_ramp_s = 1.0; p.nullspace_on = false;
