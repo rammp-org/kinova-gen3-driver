@@ -201,6 +201,28 @@ int main(int argc, char** argv) {
     else if (a == "--rate") rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
     else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
+    // --- null-space secondary objective tuning (default OFF) ------------------
+    else if (a == "--ns-kp") gains.nullspace_kp = std::stod(next("--ns-kp"));
+    else if (a == "--ns-kd") gains.nullspace_kd = std::stod(next("--ns-kd"));
+    else if (a == "--ns-fixed-rest") gains.nullspace_use_fixed_rest = true;
+    else if (a == "--ns-qrest") {
+      // 7 comma-separated joint angles (rad), e.g. --ns-qrest 0,0.26,3.14,-2.27,0,0.96,1.57
+      std::string s = next("--ns-qrest");
+      int n = 0;
+      size_t pos = 0;
+      while (n < kNumJoints) {
+        size_t comma = s.find(',', pos);
+        gains.nullspace_q_rest[n++] = std::stod(s.substr(pos, comma - pos));
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+      }
+      if (n != kNumJoints) { std::cerr << "--ns-qrest needs 7 comma-separated values\n"; std::exit(2); }
+    }
+    // --manip-gain enables manipulability gradient ascent (0 disables).
+    else if (a == "--manip-gain") {
+      gains.manip_gain = std::stod(next("--manip-gain"));
+      gains.manip_on = (gains.manip_gain != 0.0);
+    }
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
