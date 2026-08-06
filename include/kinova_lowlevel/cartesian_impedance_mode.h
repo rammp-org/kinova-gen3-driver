@@ -3,6 +3,7 @@
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/cartesian.h"
+#include "kinova_lowlevel/pose_target_sink.h"
 namespace kinova {
 
 struct CartesianImpedanceParams {
@@ -36,7 +37,7 @@ struct CartesianImpedanceParams {
 //   full; the entry ramp fades in only the active wrench over gain_ramp_s.
 // Holds the entry pose by default. Live setters publish via a single-writer
 // (non-RT) double-buffer; compute() (RT thread) reads one snapshot per cycle.
-class CartesianImpedanceMode : public ControlMode {
+class CartesianImpedanceMode : public ControlMode, public PoseTargetSink {
  public:
   CartesianImpedanceMode(Dynamics& dyn, CartesianImpedanceParams p = {});
   ActuatorModes required_modes() const override;
@@ -46,7 +47,7 @@ class CartesianImpedanceMode : public ControlMode {
 
   // Non-RT setters (call from one supervisor thread).
   void set_gains(const CartesianImpedanceParams& p) noexcept;
-  void set_target(const Pose& x_d) noexcept;
+  void set_target(const Pose& x_d) noexcept override;
 
  private:
   CartesianImpedanceParams params() const noexcept;  // RT-safe: returns a value snapshot
