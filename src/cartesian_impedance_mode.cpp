@@ -1,11 +1,16 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include <algorithm>
 #include <cmath>
+#include "kinova_lowlevel/units.h"
 
 namespace kinova {
 
 CartesianImpedanceMode::CartesianImpedanceMode(Dynamics& dyn, CartesianImpedanceParams p)
     : dyn_(dyn) {
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
+  for (int i = 0; i < kNumJoints; ++i)
+    continuous_[i] = !std::isfinite(lo[i]) && !std::isfinite(hi[i]);
   gains_[0] = p;
   gains_[1] = p;
   J_.setZero();
@@ -70,7 +75,16 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
     Eigen::Matrix<double, kNumJoints, kNumJoints> N =
         Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity()
         - J_.transpose() * JtPinv;
-    JointVec tau0 = p.nullspace_kp * (q_rest_ - fb.q) - p.nullspace_kd * fb.qd;
+    // Posture error on a CONTINUOUS joint must take the short way round: the
+    // transport wraps measured angles to (-pi, pi], so a rest posture near +pi
+    // against a measurement near -pi reads as ~2*pi of error and drives the joint
+    // the long way. Same defect that made j3 spin in JointImpedanceMode.
+    JointVec dq_rest;
+    for (int i = 0; i < kNumJoints; ++i) {
+      const double d = q_rest_[i] - fb.q[i];
+      dq_rest[i] = continuous_[i] ? wrap_to_pi(d) : d;
+    }
+    JointVec tau0 = p.nullspace_kp * dq_rest - p.nullspace_kd * fb.qd;
     if (p.manip_on) {
       // Ascend Yoshikawa manipulability w(q)=√det(J Jᵀ) by forward finite
       // differences: ∂w/∂qᵢ ≈ (w(q+h·eᵢ) − w(q))/h. Costs 7 extra Jacobian evals.

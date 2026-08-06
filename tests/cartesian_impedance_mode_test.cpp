@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
+#include "kinova_lowlevel/units.h"
 using namespace kinova;
 
 namespace {
@@ -223,4 +224,49 @@ TEST(CartesianImpedanceRamp, ZeroRampMeansFullImmediately) {
   Vector6 e = pose_error(tgt, dyn.fk(fb.q));
   JointVec expected = g + J.transpose() * (p.Kx.cwiseProduct(e));
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], expected[i], 1e-5);
+}
+
+TEST(CartesianImpedanceNullspace, ContinuousJointPostureTakesShortWayAroundTheWrap) {
+  // Same defect class as JointImpedance.ContinuousJointErrorTakesShortWayAroundTheWrap.
+  // The transport wraps measured angles to (-pi, pi], so a fixed rest posture at
+  // +3.13 against a measurement at -3.13 is 0.023 rad away, not 6.26. Unwrapped,
+  // the posture term is ~270x too large and points the wrong way; the projector
+  // absorbs most of it but ~4 N.m of spurious null-space torque survives.
+  Dynamics dyn(URDF_PATH);
+  CartesianImpedanceParams p;
+  p.gain_ramp_s = 0.0;
+  p.nullspace_on = true;
+  p.nullspace_use_fixed_rest = true;
+  p.nullspace_kp = 10.0;
+  p.nullspace_kd = 0.0;
+  p.nullspace_q_rest = sample_q();
+  p.nullspace_q_rest[2] = 3.13;
+
+  CartesianImpedanceParams off = p;
+  off.nullspace_on = false;
+  CartesianImpedanceMode m_on(dyn, p), m_off(dyn, off);
+
+  JointFeedback fb; fb.q = sample_q(); fb.q[2] = -3.13; fb.qd.setZero();
+  m_on.on_enter(fb); m_off.on_enter(fb);
+  m_on.set_target(dyn.fk(fb.q)); m_off.set_target(dyn.fk(fb.q));  // zero task error
+
+  JointCommand c_on, c_off;
+  m_on.compute(fb, 0.001, c_on);
+  m_off.compute(fb, 0.001, c_off);
+
+  // Independent oracle: posture error on the CONTINUOUS joint takes the short way.
+  JointVec tau0 = JointVec::Zero();
+  tau0[2] = p.nullspace_kp * wrap_to_pi(p.nullspace_q_rest[2] - fb.q[2]);
+  Jacobian6 J; dyn.jacobian(fb.q, J);
+  Eigen::Matrix<double, 6, 6> A = J * J.transpose();
+  A.diagonal().array() += p.pinv_damping * p.pinv_damping;
+  Eigen::Matrix<double, kNumJoints, kNumJoints> N =
+      Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity() -
+      J.transpose() * A.ldlt().solve(J);
+  const JointVec expected = N * tau0;
+
+  const JointVec dtau = c_on.torque - c_off.torque;
+  for (int i = 0; i < kNumJoints; ++i) {
+    EXPECT_NEAR(dtau[i], expected[i], 1e-9) << "joint " << i;
+  }
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
@@ -61,6 +62,10 @@ class CartesianImpedanceMode : public ControlMode, public PoseTargetSink {
   // an optional external override published by set_target.
   Pose entry_pose_;
   JointVec q_rest_ = JointVec::Zero();   // nullspace posture target (set on_enter)
+  // Which joints are continuous (both URDF limits infinite). The transport wraps
+  // measured angles to (-pi, pi], so the posture error on these joints must take
+  // the short way round or the null-space term drives them the long way.
+  std::array<bool, kNumJoints> continuous_{};
   // ext_target_ double-buffer: a SINGLE non-RT supervisor thread writes it (see
   // set_target); compute() (RT) reads it. Two buffers + index flip give the RT
   // reader a torn-read-free snapshot as long as there is only one writer.
