@@ -1,6 +1,7 @@
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include <algorithm>
 #include <cmath>
+#include "kinova_lowlevel/units.h"
 namespace kinova {
 
 JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
@@ -8,6 +9,10 @@ JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
   // Cache the URDF limits once. set_gains runs on a non-RT thread and must never
   // touch Dynamics -- it is not thread-safe against the RT loop's fk/jacobian.
   dyn.joint_limits(q_lower_urdf_, q_upper_urdf_);
+  for (int i = 0; i < kNumJoints; ++i) {
+    continuous_[i] =
+        !std::isfinite(q_lower_urdf_[i]) && !std::isfinite(q_upper_urdf_[i]);
+  }
   seed_limits(p);
   ik_.set_params(p.ik);
   gains_[0] = p;
@@ -70,14 +75,27 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   for (int i = 0; i < kNumJoints; ++i)
     q_d_[i] = std::clamp(q_d_[i], q_prev[i] - max_step, q_prev[i] + max_step);
 
+  // Keep the reference in the SAME representation as the measured angle, which
+  // the transport wraps to (-pi, pi]. Wrapping after the rate limit is safe: both
+  // sides of that clamp came from the same seed one small IK step apart, so it can
+  // never see a 2*pi jump. Kinematically a no-op -- Dynamics packs continuous
+  // joints as (cos, sin).
+  for (int i = 0; i < kNumJoints; ++i)
+    if (continuous_[i]) q_d_[i] = wrap_to_pi(q_d_[i]);
+
   dyn_.gravity(fb.q, g_);
 
   // Leash the SPRING only. Gravity is never scaled or leashed, so the arm cannot
   // sag when the spring saturates. Applied to the torque, not to q_d_ -- pushing
   // the arm away must not corrupt the IK reference.
   for (int i = 0; i < kNumJoints; ++i) {
-    const double e = std::clamp(q_d_[i] - fb.q[i], -p.max_tracking_error,
-                                p.max_tracking_error);
+    // Continuous joints must take the SHORT way round. Both the reference and the
+    // measurement live in (-pi, pi], so when they straddle the wrap the raw
+    // difference reads ~2*pi instead of ~0; the leash then pins the spring at
+    // Kq*leash in a fixed direction and the joint drives around continuously.
+    double err = q_d_[i] - fb.q[i];
+    if (continuous_[i]) err = wrap_to_pi(err);
+    const double e = std::clamp(err, -p.max_tracking_error, p.max_tracking_error);
     tau_[i] = p.Kq[i] * e - p.Dq[i] * fb.qd[i];
   }
 

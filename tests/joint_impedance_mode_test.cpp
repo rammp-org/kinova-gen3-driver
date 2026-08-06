@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include "kinova_lowlevel/joint_impedance_mode.h"
+#include "kinova_lowlevel/units.h"
 using namespace kinova;
 
 namespace {
@@ -157,5 +158,49 @@ TEST(JointImpedance, IkLimitsSeededFromUrdf) {
     if (std::isfinite(hi[i])) {
       EXPECT_LE(q_ref[i], hi[i] + 1e-6) << "joint " << i;
     }
+  }
+}
+
+TEST(JointImpedance, ContinuousJointErrorTakesShortWayAroundTheWrap) {
+  // j3 (index 2) is continuous, and KortexTransport wraps every measured angle to
+  // (-pi, pi] (kortex_transport.cpp fill_feedback). So a reference at +3.13 and a
+  // measurement at -3.13 are 0.023 rad apart the SHORT way, not 6.26. Reading the
+  // raw difference saturates the spring at Kq*leash in a fixed direction, and the
+  // joint spins continuously -- every wrap reasserts the same error.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.torque_limit.setConstant(1e6);              // isolate the spring from the clamp
+  JointImpedanceMode m(dyn, p);
+  JointFeedback enter; enter.q = sample_q(); enter.q[2] = 3.13; enter.qd.setZero();
+  m.on_enter(enter);                            // q_d[2] := 3.13
+
+  JointFeedback fb = enter; fb.q[2] = -3.13;    // joint crossed the wrap boundary
+  JointCommand c; m.compute(fb, 0.001, c);
+
+  JointVec g; dyn.gravity(fb.q, g);
+  const double spring = c.torque[2] - g[2];
+  const double true_err = wrap_to_pi(3.13 - (-3.13));   // = -0.0232 rad
+  EXPECT_LT(spring, 0.0) << "spring must push the SHORT way, not saturate forward";
+  EXPECT_NEAR(spring, p.Kq[2] * true_err, 1e-9);
+}
+
+TEST(JointImpedance, ContinuousReferenceStaysBounded) {
+  // The reference integrates open-loop. On a continuous joint it must not grow
+  // without bound, or it drifts arbitrarily far from the wrapped measurement.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.gain_ramp_s = 0.0;
+  p.ik.q_rest = sample_q();
+  p.ik.q_rest[2] = 3.14;                        // the shipped default: on the boundary
+  p.ik.posture_gain = 1.0;                      // drive the posture term hard
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+  for (int k = 0; k < 20000; ++k) { JointCommand c; m.compute(fb, 0.001, c); }
+
+  const JointVec q_ref = m.reference();
+  EXPECT_FALSE(q_ref.hasNaN());
+  for (int i : {0, 2, 4, 6}) {                  // the continuous joints
+    EXPECT_LE(std::abs(q_ref[i]), M_PI + 1e-9) << "joint index " << i;
   }
 }

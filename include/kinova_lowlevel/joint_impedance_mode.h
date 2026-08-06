@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/diff_ik.h"
@@ -64,6 +65,10 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
   DiffIkSolver ik_;
   JointVec q_lower_urdf_ = JointVec::Zero();   // cached in ctor: set_gains must not
   JointVec q_upper_urdf_ = JointVec::Zero();   // touch Dynamics off the RT thread
+  // Which joints are continuous (both URDF limits infinite). The transport wraps
+  // every measured angle to (-pi, pi], so on these joints the raw reference-minus-
+  // measured difference can be wrong by 2*pi and MUST be wrapped -- see compute().
+  std::array<bool, kNumJoints> continuous_{};
 
   // Gains double-buffer (writer: set_gains; reader: compute). Seeded at ctor.
   JointImpedanceParams gains_[2];
