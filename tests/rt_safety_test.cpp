@@ -6,6 +6,7 @@
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/gravity_comp_mode.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
+#include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
 using namespace kinova;
@@ -112,6 +113,54 @@ TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {
     ResourceUsage u1 = read_usage();
     majflt_delta.store(u1.majflt - u0.majflt);
     minflt_delta.store(u1.minflt - u0.minflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
+// Same structure as the Cartesian case above, for the joint-space mode. This is
+// the check that proves the IK running INSIDE the 1 kHz cycle does not allocate.
+TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode mode(dyn);                  // defaults: IK runs every cycle
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages before measuring.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
     stop.store(true);
   });
 
