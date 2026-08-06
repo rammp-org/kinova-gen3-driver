@@ -44,7 +44,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`. See the [control-modes guide](docs/guide/control-modes.md). |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`. The two impedance modes also implement `PoseTargetSink` so a pose-streaming front-end can drive either. See the [control-modes guide](docs/guide/control-modes.md). |
 | `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, and `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`) for a validated EE frame. Mass-matrix/Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
@@ -241,6 +241,45 @@ overruns = 0, faults = 0, dropped = 0
 > `setcap cap_sys_nice,cap_ipc_lock+ep`), **and** the real robot's UDP round-trip
 > in the `comm` measurement.
 
+## Run the teleop server
+
+`teleop_socket_server` bridges the Python VR-teleop supervisor
+(`kinova-quest-teleop`) to an impedance mode over UDP. Two control modes are
+selectable at startup; the Python side is byte-identical either way, so switching
+needs no supervisor change.
+
+```sh
+# Cartesian impedance (default) — task-space spring, 7th DOF only null-space-biased
+cd build && ./teleop_socket_server --ip 192.168.1.10 \
+    --urdf ../models/gen3_7dof_2f85.urdf --port 9095
+
+# Joint-space impedance — solves IK, servos ALL 7 joints. Use this when teleop
+# keeps drifting into awkward elbow configurations.
+cd build && ./teleop_socket_server --ip 192.168.1.10 --joint-impedance \
+    --urdf ../models/gen3_7dof_2f85.urdf --port 9095
+```
+
+Swap `--ip <addr>` for `--sim` to exercise the protocol without a robot
+(SimTransport is echo-only — the arm will not move).
+
+Joint-mode tuning flags. `--jkp` / `--jkd` / `--jtau-limit` / `--ik-qrest` each
+take **either** one number (applied to all 7 joints) **or** 7 comma-separated
+values:
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--jkp` | `100,100,100,100,40,40,40` | Joint stiffness (N·m/rad) |
+| `--jkd` | `12,12,12,12,5,5,5` | Joint damping (N·m·s/rad) |
+| `--jtau-limit` | `39,39,39,39,9,9,9` | Per-joint torque clamp (N·m); wrist is rated 9 |
+| `--leash` | `0.35` | Max position error the spring sees (rad) — caps shove force without touching gravity comp |
+| `--ref-speed` | `1.0` | Max reference speed (rad/s); bounds the response to a pose jump |
+| `--ik-qrest` | elbow-up placeholder | Posture the arm defaults to — **tune on hardware** |
+| `--ik-posture-gain` | `0.15` | How strongly the elbow returns to `q_rest` |
+| `--ik-iters` | `4` | IK iterations per cycle |
+
+See the [control-modes guide](docs/guide/control-modes.md) for what each mode
+does and how to choose between them.
+
 ## Tests
 
 Unit, SimTransport-integration, and RT-safety tests all run **without a robot**
@@ -272,11 +311,15 @@ include/kinova_lowlevel/   joint_types.h units.h cartesian_types.h transport.h
                            telemetry.h telemetry_consumers.h rt_system.h
                            sim_transport.h kortex_transport.h
                            gravity_comp_mode.h cartesian_impedance_mode.h
+                           joint_impedance_mode.h diff_ik.h pose_target_sink.h
+                           teleop_protocol.h
 src/                       dynamics.cpp cartesian.cpp telemetry.cpp
                            telemetry_consumers.cpp rt_system.cpp sim_transport.cpp
                            kortex_transport.cpp gravity_comp_mode.cpp
-                           cartesian_impedance_mode.cpp rt_executor.cpp
+                           cartesian_impedance_mode.cpp diff_ik.cpp
+                           joint_impedance_mode.cpp rt_executor.cpp
 apps/                      benchmark_grav_comp.cpp  benchmark_cartesian_impedance.cpp
+                           teleop_socket_server.cpp
 models/                    gen3_7dof.urdf  gen3_7dof_2f85.urdf (2F-85 gripper payload)
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)

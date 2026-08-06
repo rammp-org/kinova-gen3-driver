@@ -6,7 +6,7 @@ joint feedback and a `dt`, and it fills in a joint command. Swapping the control
 law never touches the transport or the RT machinery — modes are how you give the
 arm a new behavior.
 
-This page explains the two shipped modes conceptually. For exact signatures see
+This page explains the three shipped modes conceptually. For exact signatures see
 the [API Reference](../reference/api.md); for the impedance math and RT-safety
 design see the [Deep Dive](../deep-dive/impedance.md).
 
@@ -17,7 +17,7 @@ Every mode implements the same small interface (`ControlMode`):
 - **`required_modes()`** — which actuator mode each joint needs (e.g. all torque).
   The executor applies these before the loop starts.
 - **`on_enter(feedback)`** — runs once, on the RT thread, when the mode is adopted.
-  Both shipped modes use it to "hold where you are" by capturing the entry state.
+  Every shipped mode uses it to "hold where you are" by capturing the entry state.
 - **`compute(feedback, dt, command)`** — the control law, every cycle. It must be
   RT-safe: no allocation, no locks, no blocking.
 - **`on_exit()`** — cleanup hook.
@@ -26,9 +26,14 @@ You hand a mode to the executor with `request_mode(&mode)`; it's adopted at the
 next cycle boundary (an atomic-pointer swap). You keep ownership — the mode must
 outlive its time as the active mode.
 
-Both shipped modes also echo the measured joint position back in the command
+Every shipped mode also echoes the measured joint position back in the command
 (*position passthrough*), so the robot's own low-level safety can fall back to a
 position hold if it ever flags a following-error fault while in torque mode.
+
+The two impedance modes additionally implement `PoseTargetSink` (a single
+`set_target(Pose)` method), so anything that drives the arm from a stream of
+Cartesian targets — the teleop server, for one — works against either without
+knowing which is live.
 
 Everything is **SI units / radians**. Degrees and N·m conversions happen only at
 the transport boundary.
@@ -91,9 +96,60 @@ headline mode that application developers build on.
 |---|---|---|
 | `Kx` (trans / rot) | 300 N/m / 30 N·m/rad | Spring stiffness. Raise for tighter tracking, lower for softer compliance. Too high → buzzing/instability. |
 | `Dx` (trans / rot) | 35 / 5 | Damping. Raise if the spring oscillates; roughly scale with √`Kx`. |
-| `nullspace_kp` / `kd` | 5 / 1 | How firmly the elbow holds its rest posture. Keep modest. |
+| `nullspace_kp` / `kd` | 0 / 8 | How firmly the elbow holds its rest posture. `kp = 0` means pure damping — resist null-space motion without snapping back. Keep modest. |
 | `gain_ramp_s` | 0.5 s | Longer = gentler entry. |
 | `torque_limit` | 39 N·m | Lower it for a more conservative cap during bring-up. |
+
+## Joint-Space Impedance — `JointImpedanceMode`
+
+Same idea as Cartesian impedance, but the spring lives in **joint space**: the
+mode solves IK for the commanded tool pose to get a full 7-joint reference
+configuration, then runs an independent spring-damper on every joint.
+
+- **Why it exists.** Cartesian impedance commands a 6-DOF task with a 7-DOF arm,
+  so one degree of freedom is never commanded — the null-space term biases it but
+  cannot constrain it. Over a teleop session the elbow drifts, and near limits or
+  singularities it reaches configurations the operator can't undo by moving the
+  controller. Solving IK moves redundancy resolution to the *reference*: the arm
+  configuration is chosen deterministically instead of drifting.
+- **Law (conceptually):** each cycle, a bounded IK step nudges the reference
+  configuration toward the commanded pose (warm-started from last cycle, so
+  solutions stay continuous). Then per-joint stiffness pulls the measured
+  configuration toward that reference and per-joint damping resists joint
+  velocity. Gravity compensation is added on top, always in full.
+- **The tradeoff.** Tool-frame stiffness is no longer what you dial in — it
+  becomes `J⁻ᵀ Kq J⁻¹`, which varies with configuration and is not diagonal in the
+  task frame. For teleop that's usually the right trade: predictable posture beats
+  a precisely shaped compliance ellipsoid. For contact-rich tasks where you care
+  about *how* the tool yields along each axis, prefer Cartesian impedance.
+- **Redundancy resolution.** Inside the IK, a null-space posture bias pulls toward
+  `ik.q_rest` (set it to your preferred elbow-up config) and a limit-avoidance
+  term pushes away from hard stops; the reference is then hard-clamped to the URDF
+  limits. Continuous joints (1/3/5/7) are unlimited and their posture error wraps
+  to ±π, so a rest angle near ±π never drives a joint the long way round.
+- **Leash (`max_tracking_error`).** Caps the position error the spring sees, so
+  spring torque saturates at `Kq × leash`. Unlike the total torque clamp, this
+  leaves gravity compensation untouched — the arm can't sag when the spring
+  saturates. This is your main "how hard will it shove" safety dial.
+- **Reference speed limit (`max_ref_speed`).** Bounds how fast the reference may
+  move, so a teleop pose jump (tracking glitch, clutch re-engage) ramps in instead
+  of slamming.
+- **Per-joint torque limits.** Defaults `(39, 39, 39, 39, 9, 9, 9)` N·m, matching
+  the URDF — the wrist joints are rated 9 N·m, not 39.
+- **When to use it:** VR/Quest teleop and any pose-streaming application where the
+  arm keeps wandering into awkward configurations.
+
+### Tuning starting points
+
+| Knob | Default | Effect / how to tune |
+|---|---|---|
+| `Kq` | 100 ×4, 40 ×3 (N·m/rad) | Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower. |
+| `Dq` | 12 ×4, 5 ×3 | Damping. Raise if a joint oscillates; roughly scale with √`Kq`. |
+| `max_tracking_error` | 0.35 rad | The leash. Lower it to make the arm gentler when it's far from the reference. |
+| `max_ref_speed` | 1.0 rad/s | Lower for a slower, safer follow. |
+| `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — this is the posture the arm defaults to. |
+| `ik.posture_gain` | 0.15 | How strongly the elbow returns to `q_rest`. Raise if it still wanders; lower if it fights you. |
+| `ik.max_iters` | 4 | IK iterations per cycle. Costs ~12 µs/cycle at 4 (vs ~3.5 µs for Cartesian) — there is headroom at 1 kHz. |
 
 ## Choosing a mode
 
@@ -103,10 +159,13 @@ headline mode that application developers build on.
 | A safe, predictable first hardware test | Gravity compensation at `scale 0.5` |
 | The tool to be compliant about a target pose | Cartesian impedance |
 | Online retargeting / regrasping with compliance | Cartesian impedance + `set_target` |
+| Precisely shaped tool-frame compliance for contact | Cartesian impedance |
+| Teleop that keeps drifting into awkward elbow poses | Joint-space impedance |
+| Every joint constrained, posture fully predictable | Joint-space impedance |
 
 ## Adding your own mode
 
-Velocity control, joint impedance, and other laws slot in the same way — no
+Velocity control, admittance control, and other laws slot in the same way — no
 transport, executor, or RT changes:
 
 1. Implement `ControlMode` in a new `*_mode.h` / `.cpp`. Capture entry state in

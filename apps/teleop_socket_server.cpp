@@ -1,6 +1,15 @@
-// teleop_socket_server — bridges the Python VR-teleop supervisor to the
-// CartesianImpedanceMode seam over UDP. The RT loop (RtExecutor) owns the main
-// thread; two helper threads handle the socket:
+// teleop_socket_server — bridges the Python VR-teleop supervisor to an impedance
+// control mode over UDP. Two modes are selectable at startup, both driven through
+// the same PoseTargetSink seam, so the Python side is identical either way:
+//
+//   default            CartesianImpedanceMode — task-space spring. The 7th DOF is
+//                      uncommanded (only null-space-biased), so the elbow drifts.
+//   --joint-impedance  JointImpedanceMode — solves IK for the commanded pose and
+//                      servos ALL 7 joints. No free DOF; posture is deterministic.
+//                      Use this when teleop keeps wandering into awkward configs.
+//
+// The RT loop (RtExecutor) owns the main thread; two helper threads handle the
+// socket:
 //
 //   * rx thread:       receive POSE_TARGET / SET_GAINS / CONTROL, apply via the
 //                      mode's non-RT setters (single writer, as required). Also
@@ -16,6 +25,7 @@
 //
 //   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf --port 9095
 //   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
+//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 120 --jkd 14
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol
 // bring-up. Real motion requires the KORTEX build against the arm.
@@ -36,6 +46,8 @@
 
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/joint_impedance_mode.h"
+#include "kinova_lowlevel/pose_target_sink.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/telemetry.h"
@@ -164,6 +176,40 @@ class GripperInjector : public Transport {
   std::atomic<bool> active_{false};
 };
 
+// Parse either a single scalar (applied to every joint) or exactly kNumJoints
+// comma-separated values. Returns false on anything malformed — a silently
+// half-parsed gain vector is the kind of thing you only discover on the robot.
+bool parse_joint_vec(const std::string& s, JointVec& out) {
+  double vals[kNumJoints];
+  int n = 0;
+  size_t pos = 0;
+  while (true) {
+    if (n == kNumJoints) return false;            // more values than joints
+    const size_t comma = s.find(',', pos);
+    const std::string tok =
+        (comma == std::string::npos) ? s.substr(pos) : s.substr(pos, comma - pos);
+    if (tok.empty()) return false;
+    try {
+      size_t used = 0;
+      vals[n++] = std::stod(tok, &used);
+      if (used != tok.size()) return false;       // trailing garbage in the token
+    } catch (const std::exception&) {
+      return false;
+    }
+    if (comma == std::string::npos) break;
+    pos = comma + 1;
+  }
+  if (n == 1) {                                   // scalar broadcasts to all joints
+    out.setConstant(vals[0]);
+    return true;
+  }
+  if (n == kNumJoints) {
+    for (int i = 0; i < kNumJoints; ++i) out[i] = vals[i];
+    return true;
+  }
+  return false;
+}
+
 Pose pose_from_packet(const tp::PoseTargetPacket& p) {
   Pose x;
   x.p = Eigen::Vector3d(p.pos[0], p.pos[1], p.pos[2]);
@@ -184,6 +230,8 @@ int main(int argc, char** argv) {
   int cpu = -1;
   int rt_priority = 80;
   CartesianImpedanceParams gains;
+  JointImpedanceParams jgains;
+  bool joint_mode = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -193,6 +241,15 @@ int main(int argc, char** argv) {
         std::exit(2);
       }
       return argv[++i];
+    };
+    // Parse a scalar-or-7-value joint vector, exiting on anything malformed.
+    auto next_joint_vec = [&](const char* name, JointVec& out) {
+      const std::string s = next(name);
+      if (!parse_joint_vec(s, out)) {
+        std::cerr << name << " needs 1 or " << kNumJoints
+                  << " comma-separated numbers, got: " << s << "\n";
+        std::exit(2);
+      }
     };
     if (a == "--ip") ip = next("--ip");
     else if (a == "--sim") use_sim = true;
@@ -205,24 +262,26 @@ int main(int argc, char** argv) {
     else if (a == "--ns-kp") gains.nullspace_kp = std::stod(next("--ns-kp"));
     else if (a == "--ns-kd") gains.nullspace_kd = std::stod(next("--ns-kd"));
     else if (a == "--ns-fixed-rest") gains.nullspace_use_fixed_rest = true;
-    else if (a == "--ns-qrest") {
-      // 7 comma-separated joint angles (rad), e.g. --ns-qrest 0,0.26,3.14,-2.27,0,0.96,1.57
-      std::string s = next("--ns-qrest");
-      int n = 0;
-      size_t pos = 0;
-      while (n < kNumJoints) {
-        size_t comma = s.find(',', pos);
-        gains.nullspace_q_rest[n++] = std::stod(s.substr(pos, comma - pos));
-        if (comma == std::string::npos) break;
-        pos = comma + 1;
-      }
-      if (n != kNumJoints) { std::cerr << "--ns-qrest needs 7 comma-separated values\n"; std::exit(2); }
-    }
+    // 7 comma-separated joint angles (rad), e.g. --ns-qrest 0,0.26,3.14,-2.27,0,0.96,1.57
+    else if (a == "--ns-qrest") next_joint_vec("--ns-qrest", gains.nullspace_q_rest);
     // --manip-gain enables manipulability gradient ascent (0 disables).
     else if (a == "--manip-gain") {
       gains.manip_gain = std::stod(next("--manip-gain"));
       gains.manip_on = (gains.manip_gain != 0.0);
     }
+    // --- joint-space impedance (IK in the loop) -------------------------------
+    // Constrains ALL 7 joints instead of leaving the redundant DOF free. Use when
+    // Cartesian teleop keeps wandering into awkward elbow configurations.
+    else if (a == "--joint-impedance") joint_mode = true;
+    else if (a == "--jkp") next_joint_vec("--jkp", jgains.Kq);
+    else if (a == "--jkd") next_joint_vec("--jkd", jgains.Dq);
+    else if (a == "--jtau-limit") next_joint_vec("--jtau-limit", jgains.torque_limit);
+    else if (a == "--leash") jgains.max_tracking_error = std::stod(next("--leash"));
+    else if (a == "--ref-speed") jgains.max_ref_speed = std::stod(next("--ref-speed"));
+    else if (a == "--ik-iters") jgains.ik.max_iters = std::stoi(next("--ik-iters"));
+    else if (a == "--ik-posture-gain")
+      jgains.ik.posture_gain = std::stod(next("--ik-posture-gain"));
+    else if (a == "--ik-qrest") next_joint_vec("--ik-qrest", jgains.ik.q_rest);
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -296,7 +355,25 @@ int main(int argc, char** argv) {
   transport.receive(seed_fb);
   const Pose home_pose = dyn_fb.fk(seed_fb.q);
 
-  CartesianImpedanceMode mode(dyn, gains);
+  // Both modes implement PoseTargetSink, so the rx thread does not care which is
+  // live. Only the selected one is constructed; the other stays null.
+  std::unique_ptr<CartesianImpedanceMode> cart_mode;
+  std::unique_ptr<JointImpedanceMode> joint_impedance;
+  ControlMode* mode = nullptr;
+  PoseTargetSink* sink = nullptr;
+  if (joint_mode) {
+    joint_impedance = std::make_unique<JointImpedanceMode>(dyn, jgains);
+    mode = joint_impedance.get();
+    sink = joint_impedance.get();
+  } else {
+    cart_mode = std::make_unique<CartesianImpedanceMode>(dyn, gains);
+    mode = cart_mode.get();
+    sink = cart_mode.get();
+  }
+  std::cout << "[teleop-srv] control mode: "
+            << (joint_mode ? "joint-space impedance (IK in loop, all 7 joints)"
+                           : "cartesian impedance")
+            << "\n";
 
   // --- rx thread ----------------------------------------------------------
   std::thread rx([&] {
@@ -322,7 +399,7 @@ int main(int argc, char** argv) {
           if (n < static_cast<ssize_t>(sizeof(tp::PoseTargetPacket))) break;
           tp::PoseTargetPacket pkt;
           std::memcpy(&pkt, buf, sizeof(pkt));
-          mode.set_target(pose_from_packet(pkt));
+          sink->set_target(pose_from_packet(pkt));
           injector.set_gripper(pkt.gripper);
           break;
         }
@@ -330,6 +407,25 @@ int main(int argc, char** argv) {
           if (n < static_cast<ssize_t>(sizeof(tp::GainsPacket))) break;
           tp::GainsPacket pkt;
           std::memcpy(&pkt, buf, sizeof(pkt));
+          if (joint_mode) {
+            // GainsPacket is a Cartesian-impedance payload; Kx/Dx and the
+            // null-space fields have no counterpart in joint space (6 task DOF vs
+            // 7 joint gains — there is no honest mapping). Apply what does carry
+            // over and say so ONCE: silently dropping operator-supplied gains is
+            // an hour of confused hardware debugging.
+            static std::once_flag warned;
+            std::call_once(warned, [] {
+              std::cerr << "[teleop-srv] SET_GAINS: joint-space mode ignores Kx, Dx, "
+                           "nullspace_kp, nullspace_kd, pinv_damping and nullspace_on. "
+                           "Set joint gains with --jkp/--jkd. Applying torque_limit "
+                           "and gain_ramp_s.\n";
+            });
+            JointImpedanceParams jp = jgains;
+            jp.torque_limit.setConstant(pkt.torque_limit);
+            jp.gain_ramp_s = pkt.gain_ramp_s;
+            joint_impedance->set_gains(jp);
+            break;
+          }
           CartesianImpedanceParams p;
           for (int k = 0; k < 6; ++k) {
             p.Kx[k] = pkt.Kx[k];
@@ -341,7 +437,7 @@ int main(int argc, char** argv) {
           p.torque_limit = pkt.torque_limit;
           p.gain_ramp_s = pkt.gain_ramp_s;
           p.nullspace_on = pkt.nullspace_on != 0;
-          mode.set_gains(p);
+          cart_mode->set_gains(p);
           break;
         }
         case tp::MsgType::kControl: {
@@ -353,13 +449,13 @@ int main(int argc, char** argv) {
               transport.clear_faults();
               break;
             case tp::ControlCmd::kRehome:
-              mode.set_target(home_pose);
+              sink->set_target(home_pose);
               break;
             case tp::ControlCmd::kFreeze: {
               JointFeedback fb;
               // Use dyn_rx (rx-thread-exclusive) — dyn_fb belongs to the
               // feedback thread and must not be touched here.
-              if (snapshot.load(fb)) mode.set_target(dyn_rx.fk(fb.q));
+              if (snapshot.load(fb)) sink->set_target(dyn_rx.fk(fb.q));
               break;
             }
             case tp::ControlCmd::kShutdown:
@@ -426,7 +522,7 @@ int main(int argc, char** argv) {
   SampleRing ring(1 << 16);
   RtExecutor ex(transport, ring,
                 {rate_hz, Pacing::kSleepSpin, {rt_priority, cpu, true}});
-  ex.request_mode(&mode);
+  ex.request_mode(mode);
 
   std::cout << "[teleop-srv] listening; RT loop running. Ctrl-C to stop.\n";
   ex.run(g_stop);  // blocks on the main (RT) thread until stop
