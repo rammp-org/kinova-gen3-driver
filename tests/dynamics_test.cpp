@@ -84,3 +84,20 @@ TEST(DynamicsJacobian, MatchesFiniteDifferenceOfFk) {
     EXPECT_NEAR((J.block<3,1>(3,i) - dang).norm(), 0.0, 1e-4) << "ang col " << i;
   }
 }
+TEST(Dynamics, JointLimitsMatchUrdf) {
+  Dynamics dyn(URDF_PATH);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
+  // Gen3 joints 1,3,5,7 (indices 0,2,4,6) are `continuous` in the URDF. Pinocchio
+  // packs those as (cos,sin) and reports a meaningless [-1,1] config-space limit,
+  // so they must come back as infinite and never be clamped.
+  for (int i : {0, 2, 4, 6}) {
+    EXPECT_TRUE(std::isinf(lo[i])) << "joint index " << i;
+    EXPECT_TRUE(std::isinf(hi[i])) << "joint index " << i;
+    EXPECT_LT(lo[i], 0.0);
+    EXPECT_GT(hi[i], 0.0);
+  }
+  EXPECT_NEAR(lo[1], -2.41, 1e-6);  EXPECT_NEAR(hi[1], 2.41, 1e-6);
+  EXPECT_NEAR(lo[3], -2.66, 1e-6);  EXPECT_NEAR(hi[3], 2.66, 1e-6);
+  EXPECT_NEAR(lo[5], -2.23, 1e-6);  EXPECT_NEAR(hi[5], 2.23, 1e-6);
+}

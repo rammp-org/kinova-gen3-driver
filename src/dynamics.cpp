@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/dynamics.h"
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <pinocchio/parsers/urdf.hpp>
@@ -66,6 +67,23 @@ Pose Dynamics::fk(const JointVec& q) {
   x.R = Eigen::Quaterniond(M.rotation());
   x.R.normalize();
   return x;
+}
+void Dynamics::joint_limits(JointVec& lower, JointVec& upper) const {
+  const pinocchio::Model& m = impl_->model;
+  constexpr double kInf = std::numeric_limits<double>::infinity();
+  // Same name->joint->config-index walk as Impl::pack, so the limits can never
+  // disagree with the configuration packing about which joint is which.
+  for (int i = 0; i < m.nv; ++i) {
+    int jid = m.getJointId(m.names[i + 1]);
+    int qidx = m.idx_qs[jid];
+    if (m.nqs[jid] == 2) {   // continuous: (cos,sin) packing, no meaningful bound
+      lower[i] = -kInf;
+      upper[i] = kInf;
+    } else {
+      lower[i] = m.lowerPositionLimit[qidx];
+      upper[i] = m.upperPositionLimit[qidx];
+    }
+  }
 }
 void Dynamics::jacobian(const JointVec& q, Jacobian6& J_out) {
   impl_->pack(q);
