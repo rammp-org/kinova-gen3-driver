@@ -8,14 +8,18 @@
 namespace kinova {
 
 struct JointImpedanceParams {
-  JointVec Kq = (JointVec() << 30, 30, 30, 30, 12, 12, 12).finished();  // N·m/rad
+  JointVec Kq = (JointVec() << 80, 80, 80, 80, 30, 30, 30).finished();  // N·m/rad
   // Damping is DERIVED, never dialed in:  Dq_i = 2·zeta·sqrt(Kq_i · M_ii(q)).
   // A flat damping vector cannot be right at more than one configuration — on
   // this arm the effective inertia at joint 1 swings ~38x between extended
   // (0.015 kg·m²) and elbow-up (0.573), so any constant is far too high at one end
   // and too low at the other. Deriving it also means retuning Kq never leaves the
   // damping stale.
-  double zeta = 0.7;              // damping ratio; 1.0 = critically damped
+  // Steady-state lag while tracking is  lag = 2·zeta·qdot·sqrt(M/Kq)  once gravity
+  // is compensated — it scales LINEARLY with zeta but only as 1/sqrt(Kq). So zeta
+  // is the cheap lever against a "mushy, doesn't match my hand" feel; drop it
+  // before reaching for more stiffness.
+  double zeta = 0.5;              // damping ratio; 1.0 = critically damped
   // Per-joint ceiling. The URDF gives joints 5-7 an effort limit of 9 N·m; the
   // single scalar CartesianImpedanceParams uses would overrun the wrist by 4x
   // under stiff joint gains.
@@ -25,7 +29,12 @@ struct JointImpedanceParams {
   // torque clamp cannot do this -- it eats the gravity term under load and the
   // arm sags.
   double max_tracking_error = 0.35;   // rad
-  double max_ref_speed      = 1.0;    // rad/s cap on reference motion
+  // Per-joint cap on reference motion [rad/s]. Left non-finite it is seeded from
+  // the URDF velocity limits, so the cap can never silently sit below what the
+  // hardware can actually do — a cap under hand speed accumulates lag that only
+  // unwinds when the operator slows down, which reads as mush.
+  JointVec max_ref_speed = JointVec::Constant(
+      std::numeric_limits<double>::infinity());
   double gain_ramp_s        = 0.5;    // fade the spring in over this window on entry
   DiffIkParams ik{};
 };
@@ -75,6 +84,7 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
   DiffIkSolver ik_;
   JointVec q_lower_urdf_ = JointVec::Zero();   // cached in ctor: set_gains must not
   JointVec q_upper_urdf_ = JointVec::Zero();   // touch Dynamics off the RT thread
+  JointVec v_max_urdf_ = JointVec::Zero();     // URDF velocity limits, cached in ctor
   // Which joints are continuous (both URDF limits infinite). The transport wraps
   // every measured angle to (-pi, pi], so on these joints the raw reference-minus-
   // measured difference can be wrong by 2*pi and MUST be wrapped -- see compute().

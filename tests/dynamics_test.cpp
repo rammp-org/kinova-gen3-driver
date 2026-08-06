@@ -101,3 +101,10 @@ TEST(Dynamics, JointLimitsMatchUrdf) {
   EXPECT_NEAR(lo[3], -2.66, 1e-6);  EXPECT_NEAR(hi[3], 2.66, 1e-6);
   EXPECT_NEAR(lo[5], -2.23, 1e-6);  EXPECT_NEAR(hi[5], 2.23, 1e-6);
 }
+TEST(Dynamics, VelocityLimitsMatchUrdf) {
+  Dynamics dyn(URDF_PATH);
+  JointVec v;
+  dyn.velocity_limits(v);
+  for (int i : {0, 1, 2, 3}) EXPECT_NEAR(v[i], 1.3963, 1e-4) << "joint index " << i;
+  for (int i : {4, 5, 6}) EXPECT_NEAR(v[i], 1.2218, 1e-4) << "joint index " << i;
+}

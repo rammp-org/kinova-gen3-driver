@@ -20,6 +20,10 @@ class Dynamics {
   // [-1,1], which is meaningless as a joint angle. Reads the model only (never
   // `data`), so it is safe to call while another thread uses fk/jacobian.
   void joint_limits(JointVec& lower, JointVec& upper) const;
+  // Per-joint velocity limits [rad/s] from the URDF. Anything the driver rate-
+  // limits should be derived from these rather than a hand-picked constant, which
+  // is how you silently ship a cap below what the hardware can do.
+  void velocity_limits(JointVec& v_max) const;
   int nv() const;
   int nq() const;
  private:

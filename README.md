@@ -268,11 +268,11 @@ values:
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--jkp` | `30,30,30,30,12,12,12` | Joint stiffness (N·m/rad) |
-| `--zeta` | `0.7` | Damping **ratio**. Damping itself is derived: `Dq = 2·zeta·sqrt(Kq·M(q))`, so it tracks both the configuration and whatever `--jkp` you set. `1.0` = critically damped |
+| `--jkp` | `80,80,80,80,30,30,30` | Joint stiffness (N·m/rad). Tracking lag ∝ `1/sqrt(Kq)` |
+| `--zeta` | `0.5` | Damping **ratio**. Lag ∝ `zeta` *linearly*, so this is the cheap lever against mush. Damping itself is derived: `Dq = 2·zeta·sqrt(Kq·M(q))`, so it tracks both the configuration and whatever `--jkp` you set. `1.0` = critically damped |
 | `--jtau-limit` | `39,39,39,39,9,9,9` | Per-joint torque clamp (N·m); wrist is rated 9 |
 | `--leash` | `0.35` | Max position error the spring sees (rad) — caps shove force without touching gravity comp |
-| `--ref-speed` | `1.0` | Max reference speed (rad/s); bounds the response to a pose jump |
+| `--ref-speed` | URDF velocity limits (1.396 / 1.222) | Per-joint cap on reference speed (rad/s); bounds the response to a pose jump. Setting it below hand speed accumulates lag |
 | `--ik-qrest` | elbow-up placeholder | Posture the arm defaults to — **tune on hardware** |
 | `--ik-posture-gain` | `0.15` | How strongly the elbow returns to `q_rest` |
 | `--ik-iters` | `4` | IK iterations per cycle |

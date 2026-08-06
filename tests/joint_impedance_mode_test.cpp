@@ -14,7 +14,7 @@ JointImpedanceParams static_params() {
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
   p.ik.max_iters = 0;          // freeze q_d at its seeded value
-  p.max_ref_speed = 1e9;
+  p.max_ref_speed.setConstant(1e9);
   return p;
 }
 }  // namespace
@@ -123,7 +123,7 @@ TEST(JointImpedance, ReferenceSpeedLimitBoundsMotionOnTeleportedTarget) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
-  p.max_ref_speed = 0.5;                              // rad/s
+  p.max_ref_speed.setConstant(0.5);                   // rad/s
   JointImpedanceMode m(dyn, p);
   JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
   m.on_enter(fb);
@@ -133,8 +133,8 @@ TEST(JointImpedance, ReferenceSpeedLimitBoundsMotionOnTeleportedTarget) {
   const JointVec before = m.reference();
   JointCommand c; m.compute(fb, 0.001, c);
   const double moved = (m.reference() - before).lpNorm<Eigen::Infinity>();
-  EXPECT_GT(moved, 0.0);                              // it did move toward the target
-  EXPECT_LE(moved, p.max_ref_speed * 0.001 + 1e-12);  // ...but no faster than allowed
+  EXPECT_GT(moved, 0.0);                                 // it did move toward the target
+  EXPECT_LE(moved, 0.5 * 0.001 + 1e-12);                 // ...but no faster than allowed
 }
 
 TEST(JointImpedance, IkLimitsSeededFromUrdf) {
@@ -260,4 +260,32 @@ TEST(JointImpedance, ZetaScalesDampingLinearly) {
     EXPECT_NEAR(mb.last_damping()[i], 2.0 * ma.last_damping()[i], 1e-12)
         << "joint " << i;
   }
+}
+
+TEST(JointImpedance, RefSpeedSeededFromUrdfVelocityLimits) {
+  // Left at its non-finite default, the reference rate cap must come from the
+  // URDF rather than a hand-picked constant: a cap below hand speed accumulates
+  // lag that only unwinds when the operator slows down, which reads as mush.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.gain_ramp_s = 0.0;
+  JointImpedanceMode m(dyn, p);
+  JointVec v_urdf; dyn.velocity_limits(v_urdf);
+
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+  Pose far = dyn.fk(fb.q); far.p += Eigen::Vector3d(1.0, 1.0, 1.0);  // pull hard
+  m.set_target(far);
+
+  const double dt = 0.001;
+  for (int k = 0; k < 50; ++k) {
+    const JointVec before = m.reference();
+    JointCommand c; m.compute(fb, dt, c);
+    const JointVec step = m.reference() - before;
+    for (int i = 0; i < kNumJoints; ++i) {
+      EXPECT_LE(std::abs(step[i]), v_urdf[i] * dt + 1e-12) << "joint " << i;
+    }
+  }
+  // ...and the cap is the URDF value, not the old hardcoded 1.0 rad/s.
+  EXPECT_GT(v_urdf[0], 1.0);
 }

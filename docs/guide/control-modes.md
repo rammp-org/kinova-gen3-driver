@@ -139,7 +139,13 @@ configuration, then runs an independent spring-damper on every joint.
   saturates. This is your main "how hard will it shove" safety dial.
 - **Reference speed limit (`max_ref_speed`).** Bounds how fast the reference may
   move, so a teleop pose jump (tracking glitch, clutch re-engage) ramps in instead
-  of slamming.
+  of slamming. Per-joint, seeded from the URDF velocity limits — set below hand
+  speed it silently accumulates lag that only unwinds when the operator slows.
+- **If it feels mushy / disconnected from your hand**, that is velocity-
+  proportional tracking lag, not softness. With gravity compensated, holding a
+  joint at speed `qdot` needs `Kq·lag = Dq·qdot`, so `lag = 2·zeta·qdot·sqrt(M/Kq)`.
+  Reach for `zeta` first (lag scales linearly with it), then `Kq` (only
+  `1/sqrt`), then check `max_ref_speed` is not binding.
 - **Per-joint torque limits.** Defaults `(39, 39, 39, 39, 9, 9, 9)` N·m, matching
   the URDF — the wrist joints are rated 9 N·m, not 39.
 - **When to use it:** VR/Quest teleop and any pose-streaming application where the
@@ -149,8 +155,9 @@ configuration, then runs an independent spring-damper on every joint.
 
 | Knob | Default | Effect / how to tune |
 |---|---|---|
-| `Kq` | 30 ×4, 12 ×3 (N·m/rad) | Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower. |
-| `zeta` | 0.7 | Damping **ratio**, not damping. `1.0` = critically damped; lower = livelier and more overshoot. |
+| `Kq` | 80 ×4, 30 ×3 (N·m/rad) | Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower. |
+| `zeta` | 0.5 | Damping **ratio**, not damping. `1.0` = critically damped; lower = livelier and more overshoot. |
+| `max_ref_speed` | URDF velocity limits | Per-joint reference rate cap. Seeded from the model so it can never sit silently below what the hardware can do. |
 | `max_tracking_error` | 0.35 rad | The leash. Lower it to make the arm gentler when it's far from the reference. |
 | `max_ref_speed` | 1.0 rad/s | Lower for a slower, safer follow. |
 | `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — this is the posture the arm defaults to. |

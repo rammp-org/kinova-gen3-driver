@@ -79,6 +79,13 @@ void Dynamics::mass_matrix(const JointVec& q, JointMat& M_out) {
   for (int i = 0; i < impl_->model.nv; ++i)
     for (int j = 0; j < impl_->model.nv; ++j) M_out(i, j) = impl_->data.M(i, j);
 }
+void Dynamics::velocity_limits(JointVec& v_max) const {
+  const pinocchio::Model& m = impl_->model;
+  for (int i = 0; i < m.nv; ++i) {
+    int jid = m.getJointId(m.names[i + 1]);
+    v_max[i] = m.velocityLimit[m.idx_vs[jid]];
+  }
+}
 void Dynamics::joint_limits(JointVec& lower, JointVec& upper) const {
   const pinocchio::Model& m = impl_->model;
   constexpr double kInf = std::numeric_limits<double>::infinity();

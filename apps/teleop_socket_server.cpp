@@ -25,7 +25,7 @@
 //
 //   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf --port 9095
 //   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
-//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 30 --zeta 0.7
+//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol
 // bring-up. Real motion requires the KORTEX build against the arm.
@@ -277,7 +277,7 @@ int main(int argc, char** argv) {
     else if (a == "--zeta") jgains.zeta = std::stod(next("--zeta"));
     else if (a == "--jtau-limit") next_joint_vec("--jtau-limit", jgains.torque_limit);
     else if (a == "--leash") jgains.max_tracking_error = std::stod(next("--leash"));
-    else if (a == "--ref-speed") jgains.max_ref_speed = std::stod(next("--ref-speed"));
+    else if (a == "--ref-speed") next_joint_vec("--ref-speed", jgains.max_ref_speed);
     else if (a == "--ik-iters") jgains.ik.max_iters = std::stoi(next("--ik-iters"));
     else if (a == "--ik-posture-gain")
       jgains.ik.posture_gain = std::stod(next("--ik-posture-gain"));

@@ -9,6 +9,7 @@ JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
   // Cache the URDF limits once. set_gains runs on a non-RT thread and must never
   // touch Dynamics -- it is not thread-safe against the RT loop's fk/jacobian.
   dyn.joint_limits(q_lower_urdf_, q_upper_urdf_);
+  dyn.velocity_limits(v_max_urdf_);
   for (int i = 0; i < kNumJoints; ++i) {
     continuous_[i] =
         !std::isfinite(q_lower_urdf_[i]) && !std::isfinite(q_upper_urdf_[i]);
@@ -23,6 +24,7 @@ void JointImpedanceMode::seed_limits(JointImpedanceParams& p) const noexcept {
   for (int i = 0; i < kNumJoints; ++i) {
     if (!std::isfinite(p.ik.q_lower[i])) p.ik.q_lower[i] = q_lower_urdf_[i];
     if (!std::isfinite(p.ik.q_upper[i])) p.ik.q_upper[i] = q_upper_urdf_[i];
+    if (!std::isfinite(p.max_ref_speed[i])) p.max_ref_speed[i] = v_max_urdf_[i];
   }
 }
 
@@ -71,9 +73,10 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   last_ik_ = ik_.solve(target, q_d_);        // warm-started from last cycle
 
   // Bound reference speed so a teleported target ramps in instead of slamming.
-  const double max_step = p.max_ref_speed * dt_s;
-  for (int i = 0; i < kNumJoints; ++i)
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double max_step = p.max_ref_speed[i] * dt_s;
     q_d_[i] = std::clamp(q_d_[i], q_prev[i] - max_step, q_prev[i] + max_step);
+  }
 
   // Keep the reference in the SAME representation as the measured angle, which
   // the transport wraps to (-pi, pi]. Wrapping after the rate limit is safe: both
