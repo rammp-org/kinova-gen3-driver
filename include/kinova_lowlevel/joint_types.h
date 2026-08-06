@@ -7,6 +7,8 @@ namespace kinova {
 
 inline constexpr int kNumJoints = 7;
 using JointVec = Eigen::Matrix<double, kNumJoints, 1>;   // SI: rad, rad/s, N·m
+// Joint-space square matrix (e.g. the mass matrix M(q)).
+using JointMat = Eigen::Matrix<double, kNumJoints, kNumJoints>;
 
 enum class ActuatorMode : uint8_t { kPosition, kVelocity, kTorque, kCurrent };
 

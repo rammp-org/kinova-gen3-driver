@@ -8,8 +8,14 @@
 namespace kinova {
 
 struct JointImpedanceParams {
-  JointVec Kq = (JointVec() << 100, 100, 100, 100, 40, 40, 40).finished();  // N·m/rad
-  JointVec Dq = (JointVec() <<  12,  12,  12,  12,  5,  5,  5).finished();  // N·m·s/rad
+  JointVec Kq = (JointVec() << 30, 30, 30, 30, 12, 12, 12).finished();  // N·m/rad
+  // Damping is DERIVED, never dialed in:  Dq_i = 2·zeta·sqrt(Kq_i · M_ii(q)).
+  // A flat damping vector cannot be right at more than one configuration — on
+  // this arm the effective inertia at joint 1 swings ~38x between extended
+  // (0.015 kg·m²) and elbow-up (0.573), so any constant is far too high at one end
+  // and too low at the other. Deriving it also means retuning Kq never leaves the
+  // damping stale.
+  double zeta = 0.7;              // damping ratio; 1.0 = critically damped
   // Per-joint ceiling. The URDF gives joints 5-7 an effort limit of 9 N·m; the
   // single scalar CartesianImpedanceParams uses would overrun the wrist by 4x
   // under stiff joint gains.
@@ -53,6 +59,10 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
   // do not call these from another thread while the RT loop is running.
   JointVec reference() const noexcept { return q_d_; }
   IkResult last_ik() const noexcept { return last_ik_; }
+  // The damping actually applied last cycle, 2·zeta·sqrt(Kq·M_ii(q)). Worth
+  // watching while tuning — it is configuration dependent, so it changes as the
+  // arm moves even at a fixed Kq.
+  JointVec last_damping() const noexcept { return Dq_last_; }
 
  private:
   JointImpedanceParams params() const noexcept;   // RT-safe: returns a value snapshot
@@ -86,7 +96,10 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
   IkResult last_ik_{};
   double ramp_elapsed_ = 0.0;
 
+  JointVec Dq_last_ = JointVec::Zero();   // damping applied last cycle (derived)
+
   // Preallocated RT scratch.
+  JointMat M_ = JointMat::Zero();
   JointVec g_ = JointVec::Zero();
   JointVec tau_ = JointVec::Zero();
 };

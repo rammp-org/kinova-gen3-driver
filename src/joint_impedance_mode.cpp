@@ -84,6 +84,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
     if (continuous_[i]) q_d_[i] = wrap_to_pi(q_d_[i]);
 
   dyn_.gravity(fb.q, g_);
+  dyn_.mass_matrix(fb.q, M_);
 
   // Leash the SPRING only. Gravity is never scaled or leashed, so the arm cannot
   // sag when the spring saturates. Applied to the torque, not to q_d_ -- pushing
@@ -96,7 +97,13 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
     double err = q_d_[i] - fb.q[i];
     if (continuous_[i]) err = wrap_to_pi(err);
     const double e = std::clamp(err, -p.max_tracking_error, p.max_tracking_error);
-    tau_[i] = p.Kq[i] * e - p.Dq[i] * fb.qd[i];
+    // Damping derived from the CURRENT effective inertia, so the damping ratio
+    // stays put as the arm changes configuration and as Kq is retuned live.
+    // M_(i,i) is the inertia at joint i with the others locked — the right scalar
+    // for a decoupled per-joint spring-damper. max(0,...) guards the sqrt against
+    // a non-PD mass matrix from a malformed URDF.
+    Dq_last_[i] = 2.0 * p.zeta * std::sqrt(std::max(0.0, p.Kq[i] * M_(i, i)));
+    tau_[i] = p.Kq[i] * e - Dq_last_[i] * fb.qd[i];
   }
 
   // Ramp scales the spring 0->1 over gain_ramp_s on entry; gravity is ALWAYS

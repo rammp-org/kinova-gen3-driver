@@ -9,8 +9,8 @@ This is the functional core of a low-level control stack for the Gen3, built
 compute cost and 1 kHz loop-timing stability on the PREEMPT_RT Jetson, not a
 user-facing API.
 
-Supported control today: **gravity compensation** and **Cartesian (task-space)
-impedance** — see the [docs](docs/index.md) ([control-modes guide](docs/guide/control-modes.md)) for the laws,
+Supported control today: **gravity compensation**, **Cartesian (task-space)
+impedance**, and **joint-space impedance with in-loop IK** — see the [docs](docs/index.md) ([control-modes guide](docs/guide/control-modes.md)) for the laws,
 parameters, frames, and tuning. **High-speed velocity** and other laws slot in
 the same way as new `ControlMode` implementations. Public frontends (ROS,
 websockets, …) are deliberately deferred — they become "just another consumer" of
@@ -45,7 +45,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
 | `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`. The two impedance modes also implement `PoseTargetSink` so a pose-streaming front-end can drive either. See the [control-modes guide](docs/guide/control-modes.md). |
-| `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, and `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`) for a validated EE frame. Mass-matrix/Coriolis later. |
+| `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`), `mass_matrix(q)` (CRBA), and `joint_limits()` for a validated EE frame. Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
 | `RtExecutor` | Owns the single RT thread; per cycle paces → `exchange` → check faults → `compute` → push a `CycleSample`. Mode switch = atomic-pointer swap at a cycle boundary. |
@@ -262,14 +262,14 @@ cd build && ./teleop_socket_server --ip 192.168.1.10 --joint-impedance \
 Swap `--ip <addr>` for `--sim` to exercise the protocol without a robot
 (SimTransport is echo-only — the arm will not move).
 
-Joint-mode tuning flags. `--jkp` / `--jkd` / `--jtau-limit` / `--ik-qrest` each
+Joint-mode tuning flags. `--jkp` / `--jtau-limit` / `--ik-qrest` each
 take **either** one number (applied to all 7 joints) **or** 7 comma-separated
 values:
 
 | Flag | Default | What it does |
 |---|---|---|
-| `--jkp` | `100,100,100,100,40,40,40` | Joint stiffness (N·m/rad) |
-| `--jkd` | `12,12,12,12,5,5,5` | Joint damping (N·m·s/rad) |
+| `--jkp` | `30,30,30,30,12,12,12` | Joint stiffness (N·m/rad) |
+| `--zeta` | `0.7` | Damping **ratio**. Damping itself is derived: `Dq = 2·zeta·sqrt(Kq·M(q))`, so it tracks both the configuration and whatever `--jkp` you set. `1.0` = critically damped |
 | `--jtau-limit` | `39,39,39,39,9,9,9` | Per-joint torque clamp (N·m); wrist is rated 9 |
 | `--leash` | `0.35` | Max position error the spring sees (rad) — caps shove force without touching gravity comp |
 | `--ref-speed` | `1.0` | Max reference speed (rad/s); bounds the response to a pose jump |

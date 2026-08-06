@@ -117,6 +117,12 @@ configuration, then runs an independent spring-damper on every joint.
   solutions stay continuous). Then per-joint stiffness pulls the measured
   configuration toward that reference and per-joint damping resists joint
   velocity. Gravity compensation is added on top, always in full.
+- **Damping is derived, not dialed in.** `Dq_i = 2·zeta·sqrt(Kq_i · M_ii(q))`,
+  using the joint-space mass matrix. A flat damping vector cannot be right at more
+  than one configuration: on this arm the effective inertia at joint 1 swings ~38x
+  between extended (0.015 kg·m²) and elbow-up (0.573), so any constant is far too
+  high at one end and too low at the other. You set a damping *ratio* (`zeta`) and
+  it stays honest as the arm moves and as you retune `Kq`.
 - **The tradeoff.** Tool-frame stiffness is no longer what you dial in — it
   becomes `J⁻ᵀ Kq J⁻¹`, which varies with configuration and is not diagonal in the
   task frame. For teleop that's usually the right trade: predictable posture beats
@@ -143,8 +149,8 @@ configuration, then runs an independent spring-damper on every joint.
 
 | Knob | Default | Effect / how to tune |
 |---|---|---|
-| `Kq` | 100 ×4, 40 ×3 (N·m/rad) | Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower. |
-| `Dq` | 12 ×4, 5 ×3 | Damping. Raise if a joint oscillates; roughly scale with √`Kq`. |
+| `Kq` | 30 ×4, 12 ×3 (N·m/rad) | Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower. |
+| `zeta` | 0.7 | Damping **ratio**, not damping. `1.0` = critically damped; lower = livelier and more overshoot. |
 | `max_tracking_error` | 0.35 rad | The leash. Lower it to make the arm gentler when it's far from the reference. |
 | `max_ref_speed` | 1.0 rad/s | Lower for a slower, safer follow. |
 | `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — this is the posture the arm defaults to. |

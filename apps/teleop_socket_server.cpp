@@ -25,7 +25,7 @@
 //
 //   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf --port 9095
 //   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
-//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 120 --jkd 14
+//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 30 --zeta 0.7
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol
 // bring-up. Real motion requires the KORTEX build against the arm.
@@ -274,7 +274,7 @@ int main(int argc, char** argv) {
     // Cartesian teleop keeps wandering into awkward elbow configurations.
     else if (a == "--joint-impedance") joint_mode = true;
     else if (a == "--jkp") next_joint_vec("--jkp", jgains.Kq);
-    else if (a == "--jkd") next_joint_vec("--jkd", jgains.Dq);
+    else if (a == "--zeta") jgains.zeta = std::stod(next("--zeta"));
     else if (a == "--jtau-limit") next_joint_vec("--jtau-limit", jgains.torque_limit);
     else if (a == "--leash") jgains.max_tracking_error = std::stod(next("--leash"));
     else if (a == "--ref-speed") jgains.max_ref_speed = std::stod(next("--ref-speed"));
@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
             std::call_once(warned, [] {
               std::cerr << "[teleop-srv] SET_GAINS: joint-space mode ignores Kx, Dx, "
                            "nullspace_kp, nullspace_kd, pinv_damping and nullspace_on. "
-                           "Set joint gains with --jkp/--jkd. Applying torque_limit "
+                           "Set joint gains with --jkp/--zeta. Applying torque_limit "
                            "and gain_ramp_s.\n";
             });
             JointImpedanceParams jp = jgains;

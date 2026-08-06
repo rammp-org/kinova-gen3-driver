@@ -5,6 +5,7 @@
 #include <string>
 #include <pinocchio/parsers/urdf.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
@@ -67,6 +68,16 @@ Pose Dynamics::fk(const JointVec& q) {
   x.R = Eigen::Quaterniond(M.rotation());
   x.R.normalize();
   return x;
+}
+void Dynamics::mass_matrix(const JointVec& q, JointMat& M_out) {
+  impl_->pack(q);
+  pinocchio::crba(impl_->model, impl_->data, impl_->qcfg);
+  // CRBA populates only the upper triangle; mirror it so callers never read
+  // uninitialised garbage below the diagonal.
+  impl_->data.M.triangularView<Eigen::StrictlyLower>() =
+      impl_->data.M.transpose().triangularView<Eigen::StrictlyLower>();
+  for (int i = 0; i < impl_->model.nv; ++i)
+    for (int j = 0; j < impl_->model.nv; ++j) M_out(i, j) = impl_->data.M(i, j);
 }
 void Dynamics::joint_limits(JointVec& lower, JointVec& upper) const {
   const pinocchio::Model& m = impl_->model;

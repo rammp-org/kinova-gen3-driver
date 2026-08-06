@@ -60,11 +60,13 @@ TEST(JointImpedance, MatchesIndependentlyComputedLaw) {
   JointCommand c; m.compute(fb, 0.001, c);
 
   JointVec g; dyn.gravity(fb.q, g);
+  JointMat M; dyn.mass_matrix(fb.q, M);
   JointVec expected;
   for (int i = 0; i < kNumJoints; ++i) {
     const double e = std::clamp(enter.q[i] - fb.q[i],
                                 -p.max_tracking_error, p.max_tracking_error);
-    expected[i] = g[i] + p.Kq[i] * e - p.Dq[i] * fb.qd[i];
+    const double Dq = 2.0 * p.zeta * std::sqrt(p.Kq[i] * M(i, i));
+    expected[i] = g[i] + p.Kq[i] * e - Dq * fb.qd[i];
     expected[i] = std::clamp(expected[i], -p.torque_limit[i], p.torque_limit[i]);
   }
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], expected[i], 1e-9);
@@ -202,5 +204,60 @@ TEST(JointImpedance, ContinuousReferenceStaysBounded) {
   EXPECT_FALSE(q_ref.hasNaN());
   for (int i : {0, 2, 4, 6}) {                  // the continuous joints
     EXPECT_LE(std::abs(q_ref[i]), M_PI + 1e-9) << "joint index " << i;
+  }
+}
+
+TEST(JointImpedance, DampingDerivedFromInertiaAndStiffness) {
+  // Dq_i = 2*zeta*sqrt(Kq_i * M_ii(q)). Verified against an independently
+  // computed mass matrix, and cross-checked through the actual torque output.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.zeta = 0.7;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setConstant(0.1);
+  m.on_enter(fb);                                  // q_d := fb.q -> spring term is 0
+  JointCommand c; m.compute(fb, 0.001, c);
+
+  JointMat M; dyn.mass_matrix(fb.q, M);
+  JointVec g; dyn.gravity(fb.q, g);
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double expected = 2.0 * p.zeta * std::sqrt(p.Kq[i] * M(i, i));
+    EXPECT_NEAR(m.last_damping()[i], expected, 1e-12) << "joint " << i;
+    // Spring error is zero here, so the torque is exactly gravity minus damping.
+    EXPECT_NEAR(c.torque[i], g[i] - expected * fb.qd[i], 1e-9) << "joint " << i;
+  }
+}
+
+TEST(JointImpedance, DampingTracksConfigurationNotJustGains) {
+  // The whole point of deriving damping: a flat Dq cannot be right at more than
+  // one configuration. Joint 1's effective inertia swings ~38x between extended
+  // and elbow-up, so the applied damping must differ substantially too.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m1(dyn, static_params()), m2(dyn, static_params());
+
+  JointFeedback extended; extended.q.setZero(); extended.qd.setConstant(0.1);
+  JointFeedback folded; folded.qd.setConstant(0.1);
+  folded.q << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57;
+
+  JointCommand c;
+  m1.on_enter(extended); m1.compute(extended, 0.001, c);
+  m2.on_enter(folded);   m2.compute(folded, 0.001, c);
+
+  EXPECT_GT(m2.last_damping()[0], 3.0 * m1.last_damping()[0])
+      << "damping must follow the configuration, not stay constant";
+}
+
+TEST(JointImpedance, ZetaScalesDampingLinearly) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams a = static_params(); a.zeta = 0.5;
+  JointImpedanceParams b = static_params(); b.zeta = 1.0;   // critically damped
+  JointImpedanceMode ma(dyn, a), mb(dyn, b);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setConstant(0.1);
+  JointCommand c;
+  ma.on_enter(fb); ma.compute(fb, 0.001, c);
+  mb.on_enter(fb); mb.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) {
+    EXPECT_NEAR(mb.last_damping()[i], 2.0 * ma.last_damping()[i], 1e-12)
+        << "joint " << i;
   }
 }
