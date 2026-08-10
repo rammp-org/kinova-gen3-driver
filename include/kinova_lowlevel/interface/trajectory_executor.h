@@ -16,6 +16,12 @@ enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance };
 enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };
 
+struct ExecStatus {
+  static constexpr int kOk = 0;
+  static constexpr int kPathToleranceViolated = -4;
+  bool active; bool completed; double fraction; int error_code;
+};
+
 class JointTargetSink {
  public:
   virtual ~JointTargetSink() = default;
@@ -28,6 +34,7 @@ class TrajectoryExecutor {
   SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p);
   bool is_active() const { return active_.has_value() || queued_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
+  ExecStatus tick(double now_s, const kinova::JointVec& q_meas);
 
  private:
   struct Active { Trajectory tr; double start_time = 0.0; bool started = false; };

@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/interface/trajectory_executor.h"
 #include <algorithm>
+#include <cmath>
 namespace kinova::interface {
 
 kinova::JointVec sample(const Trajectory& tr, double t_s) {
@@ -29,6 +30,21 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   // Preemption handling lands in Tasks 5-6; for now, latest-wins replaces active.
   active_ = Active{tr, 0.0, false};
   return SubmitResult::kAccepted;
+}
+
+ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& /*q_meas*/) {
+  if (!active_) return ExecStatus{false, false, 0.0, ExecStatus::kOk};
+  Active& a = *active_;
+  if (!a.started) { a.start_time = now_s; a.started = true; }
+  const double elapsed = now_s - a.start_time;
+  const double dur = a.tr.duration_s();
+  sink_.set_joint_target(sample(a.tr, elapsed));
+  const double frac = dur > 0.0 ? std::min(1.0, std::max(0.0, elapsed / dur)) : 1.0;
+  if (elapsed >= dur) {
+    active_.reset();
+    return ExecStatus{false, true, 1.0, ExecStatus::kOk};   // time-based completion
+  }
+  return ExecStatus{true, false, frac, ExecStatus::kOk};
 }
 
 }  // namespace kinova::interface
