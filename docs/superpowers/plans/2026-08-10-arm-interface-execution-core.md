@@ -43,7 +43,7 @@ New directories `include/kinova_lowlevel/interface/`, `src/interface/`, `tests/i
   - `struct Trajectory { std::vector<JointWaypoint> points; double duration_s() const; };`
   - `kinova::JointVec sample(const Trajectory&, double t_s);` — free function; clamps `t_s` to `[0, duration]`; **linear** interpolation between bracketing waypoints (dense cuRobo output makes linear sufficient; cubic is a later refinement).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 // tests/interface/trajectory_executor_test.cpp
@@ -65,12 +65,12 @@ TEST(TrajectorySample, LinearInterpBetweenWaypoints) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run (on abra): `cmake --build build -j && ./build/unit_tests --gtest_filter='TrajectorySample*'`
 Expected: FAIL to compile (`trajectory_executor.h` not found).
 
-- [ ] **Step 3: Write the header + minimal implementation**
+- [x] **Step 3: Write the header + minimal implementation**
 
 ```cpp
 // include/kinova_lowlevel/interface/trajectory_executor.h
@@ -116,12 +116,12 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
 
 Add to `CMakeLists.txt`: append `src/interface/trajectory_executor.cpp` to `KINOVA_LIB_SOURCES`, and append `tests/interface/trajectory_executor_test.cpp` to the `unit_tests` `add_executable(...)` list.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake -S . -B build -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix && cmake --build build -j && ./build/unit_tests --gtest_filter='TrajectorySample*'`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add include/kinova_lowlevel/interface/trajectory_executor.h src/interface/trajectory_executor.cpp tests/interface/trajectory_executor_test.cpp CMakeLists.txt
@@ -150,7 +150,7 @@ git commit -m "feat(interface): trajectory value types + linear sampling"
     - `bool is_active() const;`  // a trajectory is executing or queued
     - `ControlModeKind active_mode() const;`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 // append to tests/interface/trajectory_executor_test.cpp
@@ -191,12 +191,12 @@ TEST(ExecutorSubmit, RejectsModeChangeWhileInFlight) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorSubmit*'`
 Expected: FAIL to compile (`TrajectoryExecutor` not defined).
 
-- [ ] **Step 3: Implement the skeleton**
+- [x] **Step 3: Implement the skeleton**
 
 ```cpp
 // add to trajectory_executor.h (inside namespace kinova::interface)
@@ -247,12 +247,12 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
 ```
 > Note: the `submit` preemption branch is intentionally minimal here (accept + replace) so this task compiles and its two tests pass; Tasks 5–6 replace the tail with real queue / latest-wins logic. Delete the stray `if (p == ...)` line — it is a no-op marker, not real logic.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorSubmit*'`
 Expected: PASS (both submit tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add include/kinova_lowlevel/interface/trajectory_executor.h src/interface/trajectory_executor.cpp tests/interface/trajectory_executor_test.cpp
@@ -275,7 +275,7 @@ git commit -m "feat(interface): executor submit + mode-change-while-moving rejec
   - `ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas);`
     First `tick` after a `submit` latches `start_time = now_s` (relative clock). Each tick calls `sink_.set_joint_target(sample(tr, now_s - start_time))`. Completion (`completed=true`, and the goal leaves active) when `now_s - start_time >= duration`. `fraction = clamp((now-start)/duration, 0, 1)`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
@@ -300,12 +300,12 @@ TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorTick*'`
 Expected: FAIL to compile (`tick` / `ExecStatus` not defined).
 
-- [ ] **Step 3: Implement `tick`**
+- [x] **Step 3: Implement `tick`**
 
 ```cpp
 // add to trajectory_executor.h
@@ -337,12 +337,12 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& /*q_me
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorTick*'`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(interface): executor tick — sampling + time-based completion"
@@ -366,7 +366,7 @@ git add -A && git commit -m "feat(interface): executor tick — sampling + time-
 - Update existing Task 2/3 tests that call `submit` to pass a disabling tolerance
   `kinova::JointVec::Constant(-1.0)` (keeps them green).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 TEST(ExecutorDivergence, AbortsWhenErrorExceedsPathTolerance) {
@@ -382,12 +382,12 @@ TEST(ExecutorDivergence, AbortsWhenErrorExceedsPathTolerance) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorDivergence*'`
 Expected: FAIL (compile error: `submit` arity; then assertion once arity fixed).
 
-- [ ] **Step 3: Implement the guard**
+- [x] **Step 3: Implement the guard**
 
 Add a `kinova::JointVec path_tol_;` member; store it in `submit`; in `tick`, after computing
 `q_desired = sample(...)`, before the completion check:
@@ -404,12 +404,12 @@ for (int i = 0; i < kinova::kNumJoints; ++i) {
 ```
 Change `submit` signatures (header + cpp + all call sites/tests) to take `const kinova::JointVec& path_tol` and store it. Update the Task 2/3 tests to pass `vec7(-1.0)`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='Executor*'`
 Expected: PASS (all executor tests, including updated Task 2/3).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(interface): executor divergence guard (path tolerance)"
@@ -427,7 +427,7 @@ git add -A && git commit -m "feat(interface): executor divergence guard (path to
   **resets the relative clock** (the new goal's next `tick` latches its own start). Same-mode only
   (mode change already rejected in Task 2).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
@@ -445,12 +445,12 @@ TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorPreempt*'`
 Expected: FAIL (clock not reset — desired ~0.5, not 0).
 
-- [ ] **Step 3: Implement latest-wins**
+- [x] **Step 3: Implement latest-wins**
 
 Replace the minimal tail of `submit` from Task 2 with:
 
@@ -466,12 +466,12 @@ Replace the minimal tail of `submit` from Task 2 with:
   return SubmitResult::kAccepted;
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='Executor*'`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(interface): executor latest-wins preemption"
@@ -490,7 +490,7 @@ git add -A && git commit -m "feat(interface): executor latest-wins preemption"
   promotes** the queued trajectory and latches its start clock to the *same* `now_s` — **zero gap**
   (the arm is not reported idle between them).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```cpp
 TEST(ExecutorPreempt, QueuePromotesGaplesslyOnCompletion) {
@@ -509,12 +509,12 @@ TEST(ExecutorPreempt, QueuePromotesGaplesslyOnCompletion) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ExecutorPreempt*'`
 Expected: FAIL (`at_end.active` is false — current code goes idle on completion).
 
-- [ ] **Step 3: Implement gapless promotion**
+- [x] **Step 3: Implement gapless promotion**
 
 In `tick`, replace the completion branch (`if (elapsed >= dur) { active_.reset(); return ...; }`) with:
 
@@ -530,12 +530,12 @@ In `tick`, replace the completion branch (`if (elapsed >= dur) { active_.reset()
   }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='Executor*'`
 Expected: PASS (all executor tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(interface): executor gapless queue promotion"
@@ -548,17 +548,17 @@ git add -A && git commit -m "feat(interface): executor gapless queue promotion"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-08-10-arm-interface-execution-core.md` (check off tasks)
 
-- [ ] **Step 1: Run the entire test binary**
+- [x] **Step 1: Run the entire test binary**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: PASS — the whole `unit_tests` suite green (executor tests + all pre-existing driver tests), proving the new unit did not disturb the RT core.
 
-- [ ] **Step 2: Confirm RT-safety unaffected**
+- [x] **Step 2: Confirm RT-safety unaffected**
 
 Run: `./build/unit_tests --gtest_filter='*rt_safety*:*RtSafety*'`
 Expected: PASS (zero major faults / zero drops) — the execution core is non-RT and links no RT path, so this must remain green.
 
-- [ ] **Step 3: Commit the checked-off plan**
+- [x] **Step 3: Commit the checked-off plan**
 
 ```bash
 git add docs/superpowers/plans/2026-08-10-arm-interface-execution-core.md
@@ -582,3 +582,26 @@ git commit -m "docs(interface): execution-core plan complete"
 - **Plan 2 — Ports + supervisor + sim integration:** Layer A ports (Action/Stream/Service, driven+driving), the supervisor threading (single-writer sink, per-thread `Dynamics`, `FeedbackTap`/`Seqlock` telemetry pump), wiring `TrajectoryExecutor` to a real `ControlMode`'s `set_joint_target`, driven end-to-end against `SimTransport` + a fake in-process backend. **Gated on** the joint modes exposing `set_joint_target`.
 - **Plan 3 — `Ros2Backend`:** the `ExecuteJointTrajectory` action (wrapping FJT messages), `sensor_msgs/JointState` stream, services; behind a `KINOVA_ENABLE_ROS2` CMake option.
 - **Plan 4 — On-robot bring-up (attended):** cuRobo as the real client; runbook.
+
+---
+
+## Completion status
+
+**COMPLETE — 2026-08-10.** All 7 tasks implemented TDD-first and verified on abra (aarch64);
+the full `unit_tests` suite is green (interface tests + all pre-existing driver tests) and the
+`RtSafety` tests still pass, confirming the non-RT execution core did not disturb the RT core.
+
+Two deviations from the literal task snippets, both correctness fixes surfaced in task review:
+- **Task 5 (tolerance isolation):** `submit` no longer sets the shared `path_tol_` unconditionally.
+  A `kQueue` submit stored its tolerance in a new `queued_tol_` member instead of clobbering the
+  divergence guard of the still-running active trajectory. Regression test:
+  `ExecutorPreempt.QueueDoesNotClobberActivePathTolerance`.
+- **Task 6 (promotion adopts tolerance):** gapless promotion applies `path_tol_ = queued_tol_`, so a
+  promoted trajectory is guarded by its own tolerance. Test:
+  `ExecutorPreempt.PromotedGoalAdoptsItsOwnPathTolerance`.
+
+Final executor test suite (7): `TrajectorySample.LinearInterpBetweenWaypoints`,
+`ExecutorSubmit.{AcceptsFirstGoalAndRejectsEmpty,RejectsModeChangeWhileInFlight}`,
+`ExecutorTick.SamplesToSinkAndCompletesOnTime`,
+`ExecutorDivergence.AbortsWhenErrorExceedsPathTolerance`,
+`ExecutorPreempt.{LatestWinsReplacesAndRestartsClock,QueueDoesNotClobberActivePathTolerance,QueuePromotesGaplesslyOnCompletion,PromotedGoalAdoptsItsOwnPathTolerance}`.
