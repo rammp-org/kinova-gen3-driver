@@ -43,7 +43,8 @@ class TrajectoryExecutor {
   std::optional<Active> active_;
   std::optional<Trajectory> queued_;
   Preemption queued_pre_ = Preemption::kLatestWins;
-  kinova::JointVec path_tol_ = kinova::JointVec::Zero();
+  kinova::JointVec path_tol_ = kinova::JointVec::Zero();        // guards the ACTIVE trajectory
+  kinova::JointVec queued_tol_ = kinova::JointVec::Zero();      // applied when queued_ is promoted (Task 6)
 };
 
 }  // namespace kinova::interface

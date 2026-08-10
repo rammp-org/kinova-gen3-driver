@@ -21,15 +21,26 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
 SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p, const kinova::JointVec& path_tol) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
-  path_tol_ = path_tol;
   if (!is_active()) {                       // idle -> adopt immediately
     mode_ = mode;
     active_ = Active{tr, 0.0, false};
+    path_tol_ = path_tol;                   // tolerance guards the adopted trajectory
     queued_.reset();
     return SubmitResult::kAccepted;
   }
-  // Preemption handling lands in Tasks 5-6; for now, latest-wins replaces active.
-  active_ = Active{tr, 0.0, false};
+  // active, same mode: preempt per the caller's policy.
+  if (p == Preemption::kLatestWins) {
+    active_ = Active{tr, 0.0, false};   // replace + reset clock (started=false)
+    path_tol_ = path_tol;               // new trajectory's tolerance takes over
+    queued_.reset();
+    return SubmitResult::kAccepted;
+  }
+  // kQueue: store trajectory + its tolerance for gapless promotion on completion
+  // (promotion in Task 6). Do NOT touch path_tol_: the active trajectory keeps its
+  // own divergence guard until the queued goal is actually promoted.
+  queued_ = tr;
+  queued_pre_ = p;
+  queued_tol_ = path_tol;
   return SubmitResult::kAccepted;
 }
 

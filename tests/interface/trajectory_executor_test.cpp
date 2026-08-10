@@ -83,3 +83,32 @@ TEST(ExecutorDivergence, AbortsWhenErrorExceedsPathTolerance) {
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
   EXPECT_FALSE(ex.is_active());
 }
+
+TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0));
+  ex.tick(0.0, vec7(0.0));
+  ex.tick(1.0, vec7(0.5));                       // halfway through first ramp
+  // preempt with a fresh 0->1 ramp
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0));
+  ExecStatus s = ex.tick(1.0, vec7(0.5));        // first tick of NEW goal -> desired ~0 (clock reset)
+  EXPECT_NEAR(sink.calls.back()[0], 0.0, 1e-9);
+  EXPECT_NEAR(s.fraction, 0.0, 1e-9);
+}
+
+TEST(ExecutorPreempt, QueueDoesNotClobberActivePathTolerance) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  // Active trajectory guarded with a tight tolerance.
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.05));
+  ex.tick(0.0, vec7(0.0));                        // start, on-track
+  // Queue a second goal with a DISABLED tolerance (-1). It must NOT relax the guard
+  // on the still-running active trajectory (the queued tol only applies once promoted).
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0));
+  ExecStatus s = ex.tick(1.0, vec7(0.9));         // active desired 0.5, meas 0.9 -> err 0.4 > 0.05
+  EXPECT_TRUE(s.completed);
+  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
+}
