@@ -39,7 +39,6 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   // (promotion in Task 6). Do NOT touch path_tol_: the active trajectory keeps its
   // own divergence guard until the queued goal is actually promoted.
   queued_ = tr;
-  queued_pre_ = p;
   queued_tol_ = path_tol;
   return SubmitResult::kAccepted;
 }
@@ -58,6 +57,7 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   for (int i = 0; i < kinova::kNumJoints; ++i) {
     if (path_tol_[i] > 0.0 && std::abs(q_meas[i] - q_desired[i]) > path_tol_[i]) {
       active_.reset();
+      queued_.reset();   // a fault aborts the whole chain — don't strand a queued follow-on
       return ExecStatus{false, true, frac, ExecStatus::kPathToleranceViolated};
     }
   }

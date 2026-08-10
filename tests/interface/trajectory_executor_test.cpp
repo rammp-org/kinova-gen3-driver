@@ -15,6 +15,17 @@ TEST(TrajectorySample, LinearInterpBetweenWaypoints) {
   EXPECT_NEAR(tr.duration_s(), 2.0, 1e-9);
 }
 
+TEST(TrajectorySample, HandlesEmptyAndSingleWaypoint) {
+  Trajectory empty;
+  EXPECT_NEAR(sample(empty, 0.0)[0], 0.0, 1e-9);   // empty -> zero vector, no UB
+  EXPECT_NEAR(empty.duration_s(), 0.0, 1e-9);
+  Trajectory hold;                                 // single waypoint -> constant hold, clamps both sides
+  hold.points = { {vec7(0.3), 0.0} };
+  EXPECT_NEAR(sample(hold, -1.0)[0], 0.3, 1e-9);
+  EXPECT_NEAR(sample(hold, 0.0)[0], 0.3, 1e-9);
+  EXPECT_NEAR(sample(hold, 5.0)[0], 0.3, 1e-9);
+}
+
 namespace {
 struct RecordingSink : kinova::interface::JointTargetSink {
   std::vector<kinova::JointVec> calls;
@@ -82,6 +93,22 @@ TEST(ExecutorDivergence, AbortsWhenErrorExceedsPathTolerance) {
   EXPECT_TRUE(s.completed);
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
   EXPECT_FALSE(ex.is_active());
+}
+
+TEST(ExecutorDivergence, AbortWithQueuedGoalClearsQueue) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.05)); // active, tight tol
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,     vec7(-1.0));  // queued follow-on
+  ex.tick(0.0, vec7(0.0));                        // start, on-track
+  ExecStatus s = ex.tick(1.0, vec7(0.9));         // active diverges (err 0.4 > 0.05) -> abort whole chain
+  EXPECT_TRUE(s.completed);
+  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
+  EXPECT_FALSE(ex.is_active());                   // queued follow-on dropped, not stranded
+  ExecStatus after = ex.tick(2.0, vec7(0.0));     // stays idle — no phantom promotion
+  EXPECT_FALSE(after.active);
+  EXPECT_FALSE(after.completed);
 }
 
 TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
