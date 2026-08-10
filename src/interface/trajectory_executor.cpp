@@ -17,4 +17,18 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
   return a.q + u * (b.q - a.q);
 }
 
+SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p) {
+  if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
+  if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
+  if (!is_active()) {                       // idle -> adopt immediately
+    mode_ = mode;
+    active_ = Active{tr, 0.0, false};
+    queued_.reset();
+    return SubmitResult::kAccepted;
+  }
+  // Preemption handling lands in Tasks 5-6; for now, latest-wins replaces active.
+  active_ = Active{tr, 0.0, false};
+  return SubmitResult::kAccepted;
+}
+
 }  // namespace kinova::interface

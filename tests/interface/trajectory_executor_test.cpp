@@ -14,3 +14,39 @@ TEST(TrajectorySample, LinearInterpBetweenWaypoints) {
   EXPECT_NEAR(sample(tr, -1.0)[0], 0.0, 1e-9);          // clamps before start
   EXPECT_NEAR(tr.duration_s(), 2.0, 1e-9);
 }
+
+namespace {
+struct RecordingSink : kinova::interface::JointTargetSink {
+  std::vector<kinova::JointVec> calls;
+  void set_joint_target(const kinova::JointVec& q) override { calls.push_back(q); }
+};
+kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
+  return { { {vec7(0.0), 0.0}, {vec7(1.0), dur} } };
+}
+}  // namespace
+
+TEST(ExecutorSubmit, AcceptsFirstGoalAndRejectsEmpty) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using kinova::interface::SubmitResult; using kinova::interface::ControlModeKind;
+  using kinova::interface::Preemption;
+  EXPECT_EQ(ex.submit(kinova::interface::Trajectory{}, ControlModeKind::kPosition, Preemption::kLatestWins),
+            SubmitResult::kRejectedEmpty);
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins),
+            SubmitResult::kAccepted);
+  EXPECT_TRUE(ex.is_active());
+  EXPECT_EQ(ex.active_mode(), ControlModeKind::kPosition);
+}
+
+TEST(ExecutorSubmit, RejectsModeChangeWhileInFlight) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using kinova::interface::SubmitResult; using kinova::interface::ControlModeKind;
+  using kinova::interface::Preemption;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins);   // now in flight, position
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kImpedance, Preemption::kLatestWins),
+            SubmitResult::kRejectedModeChangeWhileMoving);
+  // same-mode goal is fine
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins),
+            SubmitResult::kAccepted);
+}

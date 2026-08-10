@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <optional>
 #include "kinova_lowlevel/joint_types.h"   // kinova::JointVec, kNumJoints
 namespace kinova::interface {
 
@@ -10,5 +11,31 @@ struct Trajectory {
 };
 
 kinova::JointVec sample(const Trajectory& tr, double t_s);
+
+enum class Preemption { kQueue, kLatestWins };
+enum class ControlModeKind { kPosition, kImpedance };
+enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };
+
+class JointTargetSink {
+ public:
+  virtual ~JointTargetSink() = default;
+  virtual void set_joint_target(const kinova::JointVec&) = 0;
+};
+
+class TrajectoryExecutor {
+ public:
+  explicit TrajectoryExecutor(JointTargetSink& sink) : sink_(sink) {}
+  SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p);
+  bool is_active() const { return active_.has_value() || queued_.has_value(); }
+  ControlModeKind active_mode() const { return mode_; }
+
+ private:
+  struct Active { Trajectory tr; double start_time = 0.0; bool started = false; };
+  JointTargetSink& sink_;
+  ControlModeKind mode_ = ControlModeKind::kPosition;
+  std::optional<Active> active_;
+  std::optional<Trajectory> queued_;
+  Preemption queued_pre_ = Preemption::kLatestWins;
+};
 
 }  // namespace kinova::interface
