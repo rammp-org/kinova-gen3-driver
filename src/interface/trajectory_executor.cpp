@@ -18,9 +18,10 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
   return a.q + u * (b.q - a.q);
 }
 
-SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p) {
+SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p, const kinova::JointVec& path_tol) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
+  path_tol_ = path_tol;
   if (!is_active()) {                       // idle -> adopt immediately
     mode_ = mode;
     active_ = Active{tr, 0.0, false};
@@ -32,14 +33,24 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   return SubmitResult::kAccepted;
 }
 
-ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& /*q_meas*/) {
+ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas) {
   if (!active_) return ExecStatus{false, false, 0.0, ExecStatus::kOk};
   Active& a = *active_;
   if (!a.started) { a.start_time = now_s; a.started = true; }
   const double elapsed = now_s - a.start_time;
   const double dur = a.tr.duration_s();
-  sink_.set_joint_target(sample(a.tr, elapsed));
+  const kinova::JointVec q_desired = sample(a.tr, elapsed);
+  sink_.set_joint_target(q_desired);
   const double frac = dur > 0.0 ? std::min(1.0, std::max(0.0, elapsed / dur)) : 1.0;
+
+  // Check divergence guard
+  for (int i = 0; i < kinova::kNumJoints; ++i) {
+    if (path_tol_[i] > 0.0 && std::abs(q_meas[i] - q_desired[i]) > path_tol_[i]) {
+      active_.reset();
+      return ExecStatus{false, true, frac, ExecStatus::kPathToleranceViolated};
+    }
+  }
+
   if (elapsed >= dur) {
     active_.reset();
     return ExecStatus{false, true, 1.0, ExecStatus::kOk};   // time-based completion

@@ -31,7 +31,7 @@ class JointTargetSink {
 class TrajectoryExecutor {
  public:
   explicit TrajectoryExecutor(JointTargetSink& sink) : sink_(sink) {}
-  SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p);
+  SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p, const kinova::JointVec& path_tol);
   bool is_active() const { return active_.has_value() || queued_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
   ExecStatus tick(double now_s, const kinova::JointVec& q_meas);
@@ -43,6 +43,7 @@ class TrajectoryExecutor {
   std::optional<Active> active_;
   std::optional<Trajectory> queued_;
   Preemption queued_pre_ = Preemption::kLatestWins;
+  kinova::JointVec path_tol_ = kinova::JointVec::Zero();
 };
 
 }  // namespace kinova::interface
