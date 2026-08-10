@@ -82,7 +82,8 @@ set(KINOVA_LIB_SOURCES
     src/diff_ik.cpp
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
-    src/rt_executor.cpp)
+    src/rt_executor.cpp
+    src/interface/trajectory_executor.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -202,7 +203,8 @@ add_executable(unit_tests
     tests/diff_ik_test.cpp
     tests/joint_impedance_mode_test.cpp
     tests/joint_position_mode_test.cpp
-    tests/teleop_protocol_test.cpp)
+    tests/teleop_protocol_test.cpp
+    tests/interface/trajectory_executor_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
