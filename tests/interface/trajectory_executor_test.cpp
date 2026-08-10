@@ -112,3 +112,34 @@ TEST(ExecutorPreempt, QueueDoesNotClobberActivePathTolerance) {
   EXPECT_TRUE(s.completed);
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
 }
+
+TEST(ExecutorPreempt, QueuePromotesGaplesslyOnCompletion) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)); // active
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,     vec7(-1.0)); // queued
+  ex.tick(0.0, vec7(0.0));
+  ExecStatus at_end = ex.tick(2.0, vec7(1.0));   // first ramp ends here
+  EXPECT_TRUE(at_end.active);                    // NOT idle — queued promoted
+  EXPECT_FALSE(at_end.completed);                // continuous motion, no completion gap
+  ExecStatus mid = ex.tick(3.0, vec7(0.5));      // 1s into promoted ramp -> desired 0.5
+  EXPECT_NEAR(sink.calls.back()[0], 0.5, 1e-9);
+  EXPECT_TRUE(mid.active);
+}
+
+TEST(ExecutorPreempt, PromotedGoalAdoptsItsOwnPathTolerance) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  // Active guard DISABLED; queued goal carries a TIGHT tolerance that must take
+  // effect only once it is promoted (guards the Task-5 tolerance-isolation fix).
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)); // active, guard off
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,     vec7(0.05));  // queued, tight
+  ex.tick(0.0, vec7(0.0));
+  ex.tick(2.0, vec7(1.0));                        // first ramp completes -> promote queued (adopt 0.05)
+  // On the promoted ramp: desired at elapsed=1 is 0.5; meas 0.9 -> err 0.4 > 0.05 -> abort.
+  ExecStatus s = ex.tick(3.0, vec7(0.9));
+  EXPECT_TRUE(s.completed);
+  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
+}
