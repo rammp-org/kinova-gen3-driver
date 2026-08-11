@@ -5,6 +5,16 @@
 > [`../integration-runbook.md`](../integration-runbook.md) (aarch64 KORTEX SDK
 > installed, real path built with `-DKINOVA_ENABLE_KORTEX=ON`).
 
+> **First hardware run: 2026-08-11 — passed.** The `--sequence` visual check ran
+> correctly on the arm: the settle phase produced no motion, each joint moved
+> alone in the commanded direction, and the arm returned home.
+>
+> **No tuning was performed.** Every parameter is still at its shipped default
+> (`max_ref_speed` 0.5 rad/s, `max_following_error` 0.35 rad, URDF position
+> limits). Nothing was measured or characterised — see
+> [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6). "It moved
+> correctly" is not "it is tuned".
+
 **Position mode has no compliance.** Unlike the impedance modes there is no
 spring to absorb a mistake: the actuator's own servo chases whatever is
 commanded at full authority. It will not yield to contact — it will push

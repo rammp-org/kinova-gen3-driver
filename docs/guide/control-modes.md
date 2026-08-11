@@ -192,6 +192,12 @@ position, continuous-joint wrapping, then a position-limit clamp.
 | `max_following_error` | 0.35 rad | How far the reference may lead the measured position. Bounds the snap when a blocked arm comes free. `<= 0` disables. |
 | `q_lower` / `q_upper` | URDF limits | Software position limits. A tighter caller-supplied value survives; non-finite entries are seeded from the model. |
 
+> These defaults are **untuned**. The mode passed its first hardware run on
+> 2026-08-11 — joints moved correctly and the arm returned home — but nothing was
+> measured or characterised, and no parameter was adjusted as a result. Treat
+> them as a conservative starting point, not as values anyone validated.
+> [Issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6).
+
 Hardware validation procedure:
 [`../integration/joint_position_hardware_check.md`](../integration/joint_position_hardware_check.md).
 
