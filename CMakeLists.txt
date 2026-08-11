@@ -142,6 +142,27 @@ else()
     target_compile_definitions(benchmark_cartesian_impedance PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# joint_position_check drives JointPositionMode through the RtExecutor. This is
+# the hardware validation harness for joint-space position control -- see
+# docs/integration/joint_position_hardware_check.md. --dry-run is READ-ONLY and
+# never enters low-level servoing.
+add_executable(joint_position_check apps/joint_position_check.cpp)
+target_link_libraries(joint_position_check PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(joint_position_check PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    # Real-robot build: KortexTransport is compiled into the library and the
+    # KORTEX include dirs / -D_OS_UNIX are needed where the app references the
+    # KortexTransport header. The real --ip path is active (no KINOVA_NO_KORTEX).
+    target_include_directories(joint_position_check PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(joint_position_check PRIVATE _OS_UNIX)
+else()
+    # SIM-ONLY build (default). KINOVA_NO_KORTEX #ifdef's out the KortexTransport
+    # reference so no KORTEX symbols are demanded -- required on the Jetson, where
+    # the vendored libKortexApiCpp.a is x86-64 only and would fail to link into an
+    # aarch64 executable.
+    target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # teleop_socket_server bridges the Python VR-teleop supervisor to
 # CartesianImpedanceMode over UDP. Sim build (default) exercises the protocol;
 # the real KORTEX path is compiled in but only run against the arm in person.
