@@ -9,11 +9,11 @@
 // full authority. Defaults are conservative (0.2 rad/s peak, small move) and the
 // trajectory is auto-timed to stay under the speed cap so the mode tracks it.
 //
-// The path-tolerance divergence guard is DISABLED here: it needs live feedback in
-// the publisher thread, and reading the transport concurrently with the RT loop
-// is not safe without the FeedbackTap/Seqlock plumbing (a follow-up). Safety in
-// this app comes from the mode's following-error leash + the slow speed cap, same
-// as joint_position_check.
+// The path-tolerance divergence guard is LIVE here: a FeedbackTap snapshots the
+// arm's q at the RT read point, and the publisher thread reads the latest snapshot
+// each tick and feeds it to the executor, which aborts if any joint diverges from
+// the sampled trajectory by more than --path-tol (default 0.2 rad). --no-guard
+// disables it. This backstops the mode's following-error leash + the slow speed cap.
 //
 //   # 1. READ-ONLY: prints the trajectory plan, commands nothing.
 //   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2 --dry-run
@@ -38,6 +38,7 @@
 #include <thread>
 
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
@@ -80,6 +81,8 @@ int main(int argc, char** argv) {
   double speed = 0.2;         // rad/s peak cap; below the mode's own 0.5 default
   double leash = 0.35;
   double tick_hz = 250.0;     // rate the publisher samples the trajectory at
+  double path_tol = 0.2;      // rad; per-joint divergence guard (live feedback)
+  bool no_guard = false;      // escape hatch: disable the divergence guard
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -101,6 +104,8 @@ int main(int argc, char** argv) {
     else if (a == "--leash") leash = std::stod(next("--leash"));
     else if (a == "--pacing") pacing_str = next("--pacing");
     else if (a == "--tick-rate") tick_hz = std::stod(next("--tick-rate"));
+    else if (a == "--path-tol") path_tol = std::stod(next("--path-tol"));
+    else if (a == "--no-guard") no_guard = true;
     else if (a == "--csv") csv_path = next("--csv");
     else { std::cerr << "unknown arg: " << a << "\n"; std::exit(2); }
   }
@@ -115,6 +120,9 @@ int main(int argc, char** argv) {
     std::cerr << "--delta given without --joint; refusing to guess which joint\n"; return 2;
   }
   if (speed <= 0.0) { std::cerr << "--speed must be > 0\n"; return 2; }
+  if (!no_guard && path_tol <= 0.0) {
+    std::cerr << "--path-tol must be > 0 (or pass --no-guard)\n"; return 2;
+  }
 
   Dynamics dyn(urdf);
 
@@ -130,7 +138,12 @@ int main(int argc, char** argv) {
     std::cerr << "built without KORTEX; only --sim is available\n"; return 2;
 #endif
   }
-  Transport& t = *transport;
+  // Tap the transport so the publisher thread can read the arm's latest q for the
+  // divergence guard. The RT loop is the only writer (it snapshots fb at exchange);
+  // the publisher is the only reader. Every access below goes through the tap.
+  Seqlock<JointFeedback> snapshot;
+  FeedbackTap tapped(*transport, snapshot);
+  Transport& t = tapped;
   std::signal(SIGINT, on_sigint);
 
   // Read the entry configuration first (read-only), so the trajectory starts
@@ -210,19 +223,27 @@ int main(int argc, char** argv) {
     if (g_stop.load(std::memory_order_acquire)) return;
 
     interface::TrajectoryExecutor exec(mode);   // JointPositionMode IS-A JointTargetSink
-    const JointVec kGuardOff = JointVec::Constant(-1.0);   // divergence guard disabled (see header)
+    const JointVec tol = no_guard ? JointVec::Constant(-1.0)      // guard disabled
+                                  : JointVec::Constant(path_tol);
     exec.submit(tr, interface::ControlModeKind::kPosition,
-                interface::Preemption::kLatestWins, kGuardOff);
+                interface::Preemption::kLatestWins, tol);
 
     const auto t0 = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration<double>(1.0 / tick_hz);
+    JointVec q_meas = entry.q;   // last good measured q; the tap seeds it from the entry read
     while (!g_stop.load(std::memory_order_acquire)) {
       const double now_s = std::chrono::duration<double>(
                                std::chrono::steady_clock::now() - t0).count();
-      const interface::ExecStatus st = exec.tick(now_s, entry.q);   // q_meas unused (guard off)
+      JointFeedback fb;
+      if (snapshot.load(fb)) q_meas = fb.q;   // else keep last good q (no spurious abort)
+      const interface::ExecStatus st = exec.tick(now_s, q_meas);
       if (st.completed) {
-        std::printf("\n[traj] trajectory complete at t=%.2f s (code=%d).\n",
-                    now_s, st.error_code);
+        if (st.error_code == interface::ExecStatus::kPathToleranceViolated)
+          std::printf("\n[traj] DIVERGENCE ABORT at t=%.2f s — a joint left the "
+                      "%.3f rad path tolerance. Arm holds; run stops.\n", now_s, path_tol);
+        else
+          std::printf("\n[traj] trajectory complete at t=%.2f s (code=%d).\n",
+                      now_s, st.error_code);
         break;
       }
       std::this_thread::sleep_for(
