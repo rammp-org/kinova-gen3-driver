@@ -122,19 +122,67 @@ not. Holding still in every one of them is what clears the question.
 
 ---
 
-## Step 3 — First motion: one bounded, low-inertia joint
+## Step 3 — Scripted visual check
 
-`j5` (Kinova joint 6) is the wrist — bounded, lightest, least able to hurt
-anything if the direction is wrong.
+This is the confidence pass: one joint at a time, each returning to start, then
+home. Wrist-first, because the distal joints are the lightest and least able to
+hurt anything if a direction is wrong.
+
+**Read the plan before running it.** `--dry-run` prints exactly what will happen,
+computed from the arm's current configuration, and commands nothing:
+
+```sh
+./joint_position_check --ip 192.168.1.10 --sequence --dry-run
+```
+
+```
+[dry-run] sequence plan (8 waypoints, joints j4..j6 at 0.2 rad/s):
+   1. [  3.0s] settle — NOTHING should move here
+   2. [  4.7s] j6 +0.200 rad (+11.5 deg) — ONLY this joint should move
+   3. [  6.4s] j6 back to start
+   ...
+   8. [ 16.2s] HOME — compare against where the arm started
+```
+
+Waypoints are clamped to the URDF limits in the plan as well as in the mode, so
+what is printed is what will actually happen — not what was asked for.
+
+Then run it:
+
+```sh
+./joint_position_check --ip 192.168.1.10 --sequence
+```
+
+**What to watch for** (the app prints this too):
+
+- **Step 1: the arm does not move at all.** Any twitch here is a bug.
+- **Each move: only the named joint turns**, in the direction printed.
+- **Each return: that joint goes back**, and the others never moved.
+- **At the end: the arm is visibly where it started**, and every residual in the
+  report reads `~0.0000`. That is the reference being exact.
+- **Throughout: motion is smooth and rate-limited**, never a snap.
+
+Sim baseline on abra: all 7 residuals `+0.0000`, `majflt+=0`, `overruns=0`.
+
+Once the wrist passes, widen to the whole arm — **only with the workspace clear**:
+
+```sh
+./joint_position_check --ip 192.168.1.10 --sequence --from-joint 1
+```
+
+`--from-joint 0` includes the base joint. There is no reason to need it for this
+check, and it swings the most mass.
+
+### Single-joint variant
+
+For isolating one joint, or checking sign symmetry:
 
 ```sh
 ./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.2 --speed 0.2 --duration 8
+./joint_position_check --ip 192.168.1.10 --joint 5 --delta -0.2 --speed 0.2 --duration 8
 ```
 
-**Expected:** a smooth ~1 s move of about 11°, then it stops and holds. Direction
-matches the sign of `--delta`. Final residual ≈ 0.
-
-Then repeat with `--delta -0.2` to confirm the sign is symmetric.
+Expect a smooth ~1 s move of about 11° each way, then hold. Final residual ≈ 0.
 
 ---
 
