@@ -82,7 +82,8 @@ set(KINOVA_LIB_SOURCES
     src/diff_ik.cpp
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
-    src/rt_executor.cpp)
+    src/rt_executor.cpp
+    src/interface/trajectory_executor.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -163,6 +164,21 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# trajectory_run drives a joint-space trajectory on the arm through the non-RT
+# TrajectoryExecutor + JointPositionMode + RtExecutor -- the first on-robot
+# exercise of the interface execution core. --dry-run is READ-ONLY. The
+# divergence guard is disabled here (no live-feedback plumbing yet); safety comes
+# from the mode's leash + slow speed cap.
+add_executable(trajectory_run apps/trajectory_run.cpp)
+target_link_libraries(trajectory_run PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(trajectory_run PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(trajectory_run PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(trajectory_run PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(trajectory_run PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # teleop_socket_server bridges the Python VR-teleop supervisor to
 # CartesianImpedanceMode over UDP. Sim build (default) exercises the protocol;
 # the real KORTEX path is compiled in but only run against the arm in person.
@@ -202,7 +218,9 @@ add_executable(unit_tests
     tests/diff_ik_test.cpp
     tests/joint_impedance_mode_test.cpp
     tests/joint_position_mode_test.cpp
-    tests/teleop_protocol_test.cpp)
+    tests/teleop_protocol_test.cpp
+    tests/interface/trajectory_executor_test.cpp
+    tests/interface/execution_integration_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 

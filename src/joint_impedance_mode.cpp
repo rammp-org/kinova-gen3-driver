@@ -47,7 +47,14 @@ void JointImpedanceMode::set_target(const Pose& x_d) noexcept {
   const int next = 1 - ext_active_.load(std::memory_order_relaxed);
   ext_target_[next] = x_d;
   ext_active_.store(next, std::memory_order_release);
-  has_ext_target_.store(true, std::memory_order_release);
+  source_.store(TargetSource::kPose, std::memory_order_release);
+}
+
+void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
+  const int next = 1 - jt_active_.load(std::memory_order_relaxed);
+  ext_q_target_[next] = q_d;
+  jt_active_.store(next, std::memory_order_release);
+  source_.store(TargetSource::kJoint, std::memory_order_release);
 }
 
 void JointImpedanceMode::on_enter(const JointFeedback& fb) {
@@ -56,7 +63,7 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
   // OPEN-LOOP. Re-seeding from fb.q every cycle would collapse the spring to zero
   // error and degenerate this into rigid tracking, losing all compliance.
   q_d_ = fb.q;
-  has_ext_target_.store(false, std::memory_order_release);
+  source_.store(TargetSource::kEntryPose, std::memory_order_release);
   ramp_elapsed_ = 0.0;
   last_ik_ = IkResult{};
 }
@@ -64,13 +71,22 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
 void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
                                  JointCommand& out) {
   const JointImpedanceParams p = params();   // own a snapshot for the whole cycle
-  const Pose target = has_ext_target_.load(std::memory_order_acquire)
-                          ? ext_target_[ext_active_.load(std::memory_order_acquire)]
-                          : entry_pose_;
-
-  ik_.set_params(p.ik);                      // fixed-size copy, no alloc
+  const TargetSource src = source_.load(std::memory_order_acquire);
   const JointVec q_prev = q_d_;
-  last_ik_ = ik_.solve(target, q_d_);        // warm-started from last cycle
+
+  if (src == TargetSource::kJoint) {
+    // Direct joint reference: command it straight through, IK bypassed. The rate
+    // limit below still ramps a teleported target in from q_prev, so a distant
+    // joint command is not slammed at the arm.
+    q_d_ = ext_q_target_[jt_active_.load(std::memory_order_acquire)];
+    last_ik_ = IkResult{};
+  } else {
+    const Pose target = (src == TargetSource::kPose)
+                            ? ext_target_[ext_active_.load(std::memory_order_acquire)]
+                            : entry_pose_;
+    ik_.set_params(p.ik);                    // fixed-size copy, no alloc
+    last_ik_ = ik_.solve(target, q_d_);      // warm-started from last cycle
+  }
 
   // Bound reference speed so a teleported target ramps in instead of slamming.
   for (int i = 0; i < kNumJoints; ++i) {
