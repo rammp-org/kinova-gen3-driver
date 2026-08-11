@@ -289,3 +289,42 @@ TEST(JointImpedance, RefSpeedSeededFromUrdfVelocityLimits) {
   // ...and the cap is the URDF value, not the old hardcoded 1.0 rad/s.
   EXPECT_GT(v_urdf[0], 1.0);
 }
+
+// --- Direct joint-target seam (JointTargetSink) -----------------------------
+
+TEST(JointImpedance, JointTargetDrivesReferenceDirectlyBypassingIk) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+
+  JointVec q_cmd = sample_q();
+  q_cmd[0] += 0.05; q_cmd[3] -= 0.07;          // small joint move, within the spring leash
+  m.set_target(q_cmd);                          // JointTargetSink overload -> IK bypassed
+
+  JointCommand c; m.compute(fb, 0.001, c);
+  // The reference is the commanded joint config EXACTLY — an IK solve of some pose
+  // could not reproduce an arbitrary q_cmd like this, so this pins the direct path.
+  EXPECT_NEAR((m.reference() - q_cmd).norm(), 0.0, 1e-12);
+
+  // Torque is the joint spring about q_cmd plus gravity (qd = 0, ramp = 1).
+  JointVec g; dyn.gravity(fb.q, g);
+  const JointImpedanceParams p = static_params();
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double e =
+        std::clamp(q_cmd[i] - fb.q[i], -p.max_tracking_error, p.max_tracking_error);
+    EXPECT_NEAR(c.torque[i], g[i] + p.Kq[i] * e, 1e-9) << "joint " << i;
+  }
+}
+
+TEST(JointImpedance, JointTargetSupersedesPoseTarget) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(dyn.fk(sample_q()));            // Cartesian target first...
+  JointVec q_cmd = sample_q(); q_cmd[2] += 0.06;
+  m.set_target(q_cmd);                          // ...then a joint target: latest wins
+  JointCommand c; m.compute(fb, 0.001, c);
+  EXPECT_NEAR((m.reference() - q_cmd).norm(), 0.0, 1e-12);
+}

@@ -4,6 +4,7 @@
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/diff_ik.h"
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/joint_target_sink.h"
 #include "kinova_lowlevel/pose_target_sink.h"
 namespace kinova {
 
@@ -52,7 +53,9 @@ struct JointImpedanceParams {
 //
 // Live setters publish via a single-writer (non-RT) double-buffer; compute()
 // (RT thread) reads one snapshot per cycle.
-class JointImpedanceMode : public ControlMode, public PoseTargetSink {
+class JointImpedanceMode : public ControlMode,
+                           public PoseTargetSink,
+                           public JointTargetSink {
  public:
   JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p = {});
   ActuatorModes required_modes() const override;
@@ -62,7 +65,14 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
 
   // Non-RT setters (call from one supervisor thread).
   void set_gains(const JointImpedanceParams& p) noexcept;
+  // Cartesian target: resolved to a joint reference by in-loop IK (PoseTargetSink).
   void set_target(const Pose& x_d) noexcept override;
+  // Direct joint reference: commands q_d straight through, bypassing IK
+  // (JointTargetSink). This is how the joint-space trajectory executor drives the
+  // mode — cuRobo already planned in joint space, so re-solving IK would be a
+  // lossy round-trip that could land on a different branch. Latest setter wins:
+  // a joint target supersedes any pose target and vice-versa.
+  void set_target(const JointVec& q_d) noexcept override;
 
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
   // do not call these from another thread while the RT loop is running.
@@ -94,13 +104,20 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink {
   JointImpedanceParams gains_[2];
   std::atomic<int> gains_active_{0};
 
-  // Target source: the entry pose (written once by on_enter on the RT thread) or
-  // an optional external override published by set_target. Same single-writer
-  // double-buffer discipline as CartesianImpedanceMode.
+  // Target source, selected by the most recent setter (single-writer, non-RT):
+  //   kEntryPose - hold the pose captured at on_enter (default; no external cmd)
+  //   kPose      - external Cartesian target -> in-loop IK -> q_d
+  //   kJoint     - external joint reference commanded directly (IK bypassed)
+  // The RT reader loads source_ once per cycle and reads the matching buffer.
+  // Each buffer keeps the same double-buffer + release-store discipline as
+  // CartesianImpedanceMode, so the RT reader never observes a torn target.
+  enum class TargetSource : int { kEntryPose, kPose, kJoint };
   Pose entry_pose_;
   Pose ext_target_[2];
   std::atomic<int> ext_active_{0};
-  std::atomic<bool> has_ext_target_{false};
+  JointVec ext_q_target_[2];
+  std::atomic<int> jt_active_{0};
+  std::atomic<TargetSource> source_{TargetSource::kEntryPose};
 
   JointVec q_d_ = JointVec::Zero();    // integrated reference configuration
   IkResult last_ik_{};
