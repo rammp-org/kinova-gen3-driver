@@ -26,23 +26,31 @@ matter most; if step 2 is clean, the rest is characterisation.
 
 ---
 
-## The open question this exists to answer
+## The negative-degree question — RESOLVED 2026-08-11
+
+> **KORTEX accepts negative degree setpoints in POSITION mode. No fix needed.**
 
 `KortexTransport::write_command` sends `rad_to_deg(cmd.position)` **unwrapped**
 (`src/kortex_transport.cpp:117`), while `fill_feedback` wraps every measured
-angle to (−π, π] (`src/kortex_transport.cpp:83`). So a continuous joint sitting
-past half a turn is read back as a **negative** degree value, and that is what we
-would send.
+angle to (−π, π] (`src/kortex_transport.cpp:83`). So any joint past 180° in
+KORTEX's frame is read back as a **negative** degree value, and that is what we
+send. `kPosition` is the first code path that ever sends our own wrapped angle
+back to the arm — torque mode passes through the **raw** KORTEX value
+(`kortex_transport.cpp:124`) and bypasses the wrap entirely.
 
-This has never mattered before. In torque mode the position field is a
-passthrough of the **raw** KORTEX feedback value (`kortex_transport.cpp:124`),
-which bypasses our wrap entirely. **`kPosition` is the first code path that ever
-sends our own wrapped angle back to the arm.** KORTEX reports continuous-joint
-positions in [0, 360); whether it accepts a negative setpoint in POSITION mode
-is unverified and cannot be settled in sim.
+**Measured:** `local_tools/probe_negative_angle.sh` held the measured
+configuration with **five joints commanded negative**, including j2 at −134.78°
+and j3 at −114.93°. Zero motion was requested and none occurred — worst
+deviation 0.0001 rad (0.006°), which is encoder noise.
 
-If it does not, the failure mode is a joint interpreting `−170°` as something
-else and taking off. That is why step 2 commands **zero motion**.
+Note the scope is wider than "continuous joints past half a turn": **any** joint
+at a negative URDF angle qualifies, because KORTEX reports in [0, 360) and we
+wrap back to (−π, π]. That makes this path routine rather than exotic, which is
+why it was worth settling deliberately rather than inferring from a run that
+happened not to break.
+
+Step 2 below still commands zero motion — it remains the cheapest way to catch a
+regression here.
 
 ---
 

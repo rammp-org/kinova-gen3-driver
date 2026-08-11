@@ -112,12 +112,18 @@ wrap, and leash tests all failed on assertions with the exact wrong values
 `apps/joint_position_check.cpp` is the hardware harness; the procedure is
 [`docs/integration/joint_position_hardware_check.md`](../../integration/joint_position_hardware_check.md).
 
-## Known unknown
+## Resolved unknown — negative degree setpoints
 
 `KortexTransport::write_command` sends `rad_to_deg(cmd.position)` unwrapped while
-feedback is wrapped to (−π, π], so continuous joints past half a turn would be
+feedback is wrapped to (−π, π], so any joint past 180° in KORTEX's frame is
 commanded as **negative** degrees. `kPosition` is the first code path that ever
 sends our own wrapped angle back to the arm — torque mode passes through the raw
-KORTEX value and bypasses the wrap entirely. KORTEX reports positions in
-[0, 360); whether it accepts a negative setpoint is unverified and not settleable
-in sim. Step 2 of the hardware check is built around answering it.
+KORTEX value and bypasses the wrap entirely.
+
+**Settled on hardware 2026-08-11: KORTEX accepts it.** A hold with five joints
+commanded negative (j2 at −134.78°, j3 at −114.93°) produced no motion; worst
+deviation 0.0001 rad. No transport change needed.
+
+Wider in scope than first written up: it is not only continuous joints past half
+a turn, it is *any* joint at a negative URDF angle — which makes the path routine
+rather than exotic.
