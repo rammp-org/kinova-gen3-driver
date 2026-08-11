@@ -50,7 +50,7 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   const double elapsed = now_s - a.start_time;
   const double dur = a.tr.duration_s();
   const kinova::JointVec q_desired = sample(a.tr, elapsed);
-  sink_.set_joint_target(q_desired);
+  sink_.set_target(q_desired);
   const double frac = dur > 0.0 ? std::min(1.0, std::max(0.0, elapsed / dur)) : 1.0;
 
   // Check divergence guard

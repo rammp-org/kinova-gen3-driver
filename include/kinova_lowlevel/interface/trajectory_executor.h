@@ -1,7 +1,8 @@
 #pragma once
 #include <vector>
 #include <optional>
-#include "kinova_lowlevel/joint_types.h"   // kinova::JointVec, kNumJoints
+#include "kinova_lowlevel/joint_types.h"        // kinova::JointVec, kNumJoints
+#include "kinova_lowlevel/joint_target_sink.h"  // kinova::JointTargetSink (the mode seam)
 namespace kinova::interface {
 
 struct JointWaypoint { kinova::JointVec q; double t_s; };
@@ -22,15 +23,12 @@ struct ExecStatus {
   bool active; bool completed; double fraction; int error_code;
 };
 
-class JointTargetSink {
- public:
-  virtual ~JointTargetSink() = default;
-  virtual void set_joint_target(const kinova::JointVec&) = 0;
-};
-
+// The executor drives the driver's control modes through the core
+// kinova::JointTargetSink (set_target(JointVec)) — both JointPositionMode and
+// JointImpedanceMode implement it — so no interface-local sink is needed.
 class TrajectoryExecutor {
  public:
-  explicit TrajectoryExecutor(JointTargetSink& sink) : sink_(sink) {}
+  explicit TrajectoryExecutor(kinova::JointTargetSink& sink) : sink_(sink) {}
   SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p, const kinova::JointVec& path_tol);
   bool is_active() const { return active_.has_value() || queued_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
@@ -38,7 +36,7 @@ class TrajectoryExecutor {
 
  private:
   struct Active { Trajectory tr; double start_time = 0.0; bool started = false; };
-  JointTargetSink& sink_;
+  kinova::JointTargetSink& sink_;
   ControlModeKind mode_ = ControlModeKind::kPosition;
   std::optional<Active> active_;
   std::optional<Trajectory> queued_;

@@ -27,9 +27,9 @@ TEST(TrajectorySample, HandlesEmptyAndSingleWaypoint) {
 }
 
 namespace {
-struct RecordingSink : kinova::interface::JointTargetSink {
+struct RecordingSink : kinova::JointTargetSink {
   std::vector<kinova::JointVec> calls;
-  void set_joint_target(const kinova::JointVec& q) override { calls.push_back(q); }
+  void set_target(const kinova::JointVec& q) noexcept override { calls.push_back(q); }
 };
 kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
   return { { {vec7(0.0), 0.0}, {vec7(1.0), dur} } };
