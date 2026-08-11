@@ -159,10 +159,47 @@ configuration, then runs an independent spring-damper on every joint.
 | `zeta` | 0.5 | Damping **ratio**, not damping. `1.0` = critically damped; lower = livelier and more overshoot. |
 | `max_ref_speed` | URDF velocity limits | Per-joint reference rate cap. Seeded from the model so it can never sit silently below what the hardware can do. |
 | `max_tracking_error` | 0.35 rad | The leash. Lower it to make the arm gentler when it's far from the reference. |
-| `max_ref_speed` | 1.0 rad/s | Lower for a slower, safer follow. |
 | `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — this is the posture the arm defaults to. |
 | `ik.posture_gain` | 0.15 | How strongly the elbow returns to `q_rest`. Raise if it still wanders; lower if it fights you. |
-| `ik.max_iters` | 4 | IK iterations per cycle. Costs ~12 µs/cycle at 4 (vs ~3.5 µs for Cartesian) — there is headroom at 1 kHz. |
+| `ik.max_iters` | 4 | IK iterations per cycle. Per-cycle cost is **unmeasured** — see [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6). Nothing has timed this path, in sim or on hardware. |
+
+> The gains above were tuned by feel during live teleop, not measured. Treat them
+> as a working starting point rather than characterised values —
+> [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6).
+
+## Joint-Space Position — `JointPositionMode`
+
+Commands every actuator in `kPosition` and lets the actuator's own servo close
+the loop. Runs **no dynamics at all** — no gravity term, no mass matrix, no IK —
+which makes it the cheapest control path in the driver (`compute p50 = 128 ns`
+in sim, against a 1 ms budget).
+
+Driven through `JointTargetSink::set_target(const JointVec&)`, the joint-space
+counterpart of `PoseTargetSink`: a caller that already knows the configuration it
+wants does not have to invent a Cartesian pose and pay for an IK solve.
+
+**There is no compliance.** The arm will not yield to contact — it will push
+through until the actuator faults. Use it to move to known configurations and to
+exercise a target path; use joint-space impedance when a human is in the loop.
+
+What the mode owns is the reference integrator, and every stage is a guard:
+rate limit (`max_ref_speed·dt`), a following-error leash against the *measured*
+position, continuous-joint wrapping, then a position-limit clamp.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `max_ref_speed` | 0.5 rad/s | Deliberately below the URDF limits (1.40 / 1.22). Finite requests are clamped **down** to the URDF value, non-finite ones seeded from it — no config can outrun the hardware rating. |
+| `max_following_error` | 0.35 rad | How far the reference may lead the measured position. Bounds the snap when a blocked arm comes free. `<= 0` disables. |
+| `q_lower` / `q_upper` | URDF limits | Software position limits. A tighter caller-supplied value survives; non-finite entries are seeded from the model. |
+
+> These defaults are **untuned**. The mode passed its first hardware run on
+> 2026-08-11 — joints moved correctly and the arm returned home — but nothing was
+> measured or characterised, and no parameter was adjusted as a result. Treat
+> them as a conservative starting point, not as values anyone validated.
+> [Issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6).
+
+Hardware validation procedure:
+[`../integration/joint_position_hardware_check.md`](../integration/joint_position_hardware_check.md).
 
 ## Choosing a mode
 
@@ -175,6 +212,9 @@ configuration, then runs an independent spring-damper on every joint.
 | Precisely shaped tool-frame compliance for contact | Cartesian impedance |
 | Teleop that keeps drifting into awkward elbow poses | Joint-space impedance |
 | Every joint constrained, posture fully predictable | Joint-space impedance |
+| To move to a known joint configuration, rigidly | Joint-space position |
+| A target for another layer to test against | Joint-space position |
+| The cheapest possible control path | Joint-space position |
 
 ## Adding your own mode
 

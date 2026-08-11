@@ -7,6 +7,7 @@
 #include "kinova_lowlevel/gravity_comp_mode.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
+#include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
 using namespace kinova;
@@ -154,6 +155,62 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
     std::atomic<bool> measure_stop{false};
     std::thread measure_watch([&] {
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
+// Position mode does no dynamics at all — no RNEA, no CRBA, no IK — so this is
+// the cheapest control path we have. The check still matters: the reference
+// integrator runs every cycle and must stay allocation-free like the rest.
+TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode mode(dyn);
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages before measuring.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      // Publish a target from a non-RT thread once on_enter has run — it clears
+      // any pre-entry target by design. This is the real usage pattern, and it
+      // keeps the integrator working during the measured window instead of
+      // idling at the entry configuration where every clamp is a no-op.
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      JointVec target; target.setConstant(0.4);
+      mode.set_target(target);
+      std::this_thread::sleep_for(std::chrono::milliseconds(480));
       measure_stop.store(true);
     });
     ex.run(measure_stop);
