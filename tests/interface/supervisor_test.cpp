@@ -45,11 +45,19 @@ TEST(Ports, FakeBackendRecordsDrivenCalls) {
 }
 
 namespace {
+JointFeedback make_feedback(double q0) {
+  JointFeedback f;
+  f.q = JointVec::Constant(q0);
+  return f;
+}
+
 // Fixture wires: SimTransport -> FeedbackTap -> RtExecutor(main-ish thread) + Supervisor + FakeBackend.
+// q0 seeds the initial joint position; init.q is set before SimTransport is
+// constructed so the tap wraps a correctly-seeded transport from the start.
 struct SupFix {
   Dynamics dyn{URDF_PATH}, pump_dyn{URDF_PATH};
-  JointFeedback init;                       // q = 0
-  SimTransport sim{init};
+  JointFeedback init;
+  SimTransport sim;
   Seqlock<JointFeedback> snap;
   FeedbackTap tap{sim, snap};
   SampleRing ring{1u << 12};
@@ -60,6 +68,9 @@ struct SupFix {
   interface::Supervisor sup{pos, imp, exec, snap, pump_dyn, be, be};
   std::atomic<bool> stop{false};
   std::thread rt;
+
+  explicit SupFix(double q0 = 0.0) : init(make_feedback(q0)), sim(init) {}
+
   void run_rt() { rt = std::thread([&]{ exec.run(stop); }); }
   void teardown() { stop = true; if (rt.joinable()) rt.join(); }
 };
@@ -73,4 +84,15 @@ TEST(Supervisor, StartStopClean) {
   f.sup.stop();
   f.teardown();
   SUCCEED();          // no crash, no hang, threads joined
+}
+
+TEST(Supervisor, PumpPublishesArmStateFromFeedback) {
+  SupFix f(0.25);     // seed a non-zero start pose before the tap wires up
+  f.sup.start(); f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(120));
+  f.sup.stop(); f.teardown();
+  ASSERT_GT(f.be.state_count(), 0u);
+  EXPECT_NEAR(f.be.last_state().q[0], 0.25, 1e-6);   // q flowed feedback->pump->StreamPort
+  // query_state returns the same latest snapshot:
+  EXPECT_NEAR(f.sup.on_query_state().q[0], 0.25, 1e-6);
 }
