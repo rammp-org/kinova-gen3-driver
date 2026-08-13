@@ -118,3 +118,15 @@ TEST(Supervisor, PositionGoalRunsToCompletionAndSettlesSuccess) {
   EXPECT_EQ(f.be.last_result_id()[0], 1);
   EXPECT_GT(f.be.feedback_count(), 0u);              // add feedback_count() to FakeBackend
 }
+
+TEST(Supervisor, RejectsQueuePreemptionUntilTask9) {
+  // kQueue promotion isn't settled anywhere yet (Task 9 wires that up); accepting
+  // it today would orphan the prior active goal's result. Must reject fail-loud.
+  SupFix f;
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption   = interface::Preemption::kQueue;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+}

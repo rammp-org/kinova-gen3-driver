@@ -82,6 +82,7 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
 // on_trajectory_goal (backend thread): fast pre-check only, no executor mutation.
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g){
   if (g.trajectory.points.empty()) return GoalResponse::kReject;                 // INVALID_GOAL
+  if (g.preemption == Preemption::kQueue) return GoalResponse::kReject;  // TODO(Task 9): queued-goal result tracking not yet implemented
   const uint8_t want = (g.control_mode==ControlModeKind::kImpedance)?1:0;
   if (in_flight_.load() && want != atomic_mode_.load()) return GoalResponse::kReject; // mode-change-while-moving
   return GoalResponse::kAccept;
