@@ -83,7 +83,8 @@ set(KINOVA_LIB_SOURCES
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
     src/rt_executor.cpp
-    src/interface/trajectory_executor.cpp)
+    src/interface/trajectory_executor.cpp
+    src/interface/supervisor.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
