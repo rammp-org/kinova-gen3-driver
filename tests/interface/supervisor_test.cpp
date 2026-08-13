@@ -157,6 +157,12 @@ TEST(Supervisor, SwitchesToImpedanceAtRest) {
   f.sup.stop(); f.teardown();
   ASSERT_EQ(f.be.result_count(), 1u);
   EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
+  // Prove the switch actually happened: the executor drove the impedance mode's
+  // joint target (set_target bypasses IK), so imp.reference() tracks the ramp goal.
+  // If the switch had NOT occurred, imp.reference() would remain 0 and pos.reference()
+  // would hold the goal instead.
+  EXPECT_NEAR(f.imp.reference()[0], 0.03, 5e-3);
+  EXPECT_NEAR(f.pos.reference()[0], 0.0,  5e-3);
 }
 
 TEST(Supervisor, DivergenceAbortSettlesPathToleranceViolated) {
