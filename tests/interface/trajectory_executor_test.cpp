@@ -170,3 +170,17 @@ TEST(ExecutorPreempt, PromotedGoalAdoptsItsOwnPathTolerance) {
   EXPECT_TRUE(s.completed);
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
 }
+
+TEST(ExecutorPreempt, PromotionRaisesPromotedFlagExactlyOnce) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)); // active
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,     vec7(-1.0)); // queued
+  ex.tick(0.0, vec7(0.0));
+  ExecStatus mid = ex.tick(1.0, vec7(0.5));  EXPECT_FALSE(mid.promoted);
+  ExecStatus at_end = ex.tick(2.0, vec7(1.0));  // first ramp ends -> promote queued
+  EXPECT_TRUE(at_end.promoted);
+  EXPECT_TRUE(at_end.active);
+  ExecStatus after = ex.tick(3.0, vec7(0.5));  EXPECT_FALSE(after.promoted);
+}

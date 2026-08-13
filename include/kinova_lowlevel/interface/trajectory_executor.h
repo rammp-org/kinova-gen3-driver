@@ -20,7 +20,7 @@ enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEm
 struct ExecStatus {
   static constexpr int kOk = 0;
   static constexpr int kPathToleranceViolated = -4;
-  bool active; bool completed; double fraction; int error_code;
+  bool active; bool completed; double fraction; int error_code; bool promoted = false;
 };
 
 // The executor drives the driver's control modes through the core
