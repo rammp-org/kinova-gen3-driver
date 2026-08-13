@@ -130,3 +130,20 @@ TEST(Supervisor, RejectsQueuePreemptionUntilTask9) {
   g.path_tolerance = JointVec::Constant(-1.0);
   EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
 }
+
+TEST(Supervisor, DivergenceAbortSettlesPathToleranceViolated) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);               // moves 0.5 rad; SimTransport never moves
+  g.path_tolerance = JointVec::Constant(0.2);        // guard ON -> must trip
+  interface::GoalId id{}; id[0]=2;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  // |q_desired - q_meas| only crosses the 0.2 rad tolerance at elapsed ~= 0.8s
+  // (0.2/0.5 * 2.0s ramp); wait past that with margin for sampler scheduling.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kPathToleranceViolated);
+  EXPECT_FALSE(f.sup.on_query_state().fault);         // divergence is not a hardware fault
+}
