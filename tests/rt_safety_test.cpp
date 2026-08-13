@@ -288,7 +288,7 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   Dynamics dyn(URDF_PATH), pump_dyn(URDF_PATH);
   Seqlock<JointFeedback> snap;
   FeedbackTap tap(sim, snap);
-  SampleRing ring(1u << 16);
+  SampleRing ring(8192);
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
