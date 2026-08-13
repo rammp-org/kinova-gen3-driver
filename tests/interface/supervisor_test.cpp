@@ -96,3 +96,25 @@ TEST(Supervisor, PumpPublishesArmStateFromFeedback) {
   // query_state returns the same latest snapshot:
   EXPECT_NEAR(f.sup.on_query_state().q[0], 0.25, 1e-6);
 }
+
+static interface::Trajectory ramp7(double from,double to,double dur){
+  interface::Trajectory t; JointVec a=JointVec::Constant(from), b=JointVec::Constant(to);
+  t.points = {{a,0.0},{b,dur}}; return t; }
+
+TEST(Supervisor, PositionGoalRunsToCompletionAndSettlesSuccess) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption   = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);       // guard off for this test (sim is static echo)
+  interface::GoalId id{}; id[0]=1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));   // > duration + settle
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
+  EXPECT_EQ(f.be.last_result_id()[0], 1);
+  EXPECT_GT(f.be.feedback_count(), 0u);              // add feedback_count() to FakeBackend
+}
