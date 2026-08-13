@@ -61,7 +61,11 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         continue;
       }
       if (in.goal.control_mode != active_mode_kind_) {
-        // Only reachable when NOT in flight (on_trajectory_goal rejects otherwise).
+        if (have_active) {   // cross-mode goal slipped past the accept-time pre-check (in_flight_ lag); a mode change requires the arm at rest
+          TrajectoryResult r; r.error_code = result_code::kInvalidGoal;
+          r.error_string = "mode change while a trajectory is in flight";
+          action_.settle(in.id, r); continue;
+        }
         if (in.goal.control_mode == ControlModeKind::kImpedance) {
           if (in.goal.has_gains) { JointImpedanceParams p; p.Kq=in.goal.gains.kq; p.zeta=in.goal.gains.zeta;
                                    p.torque_limit=in.goal.gains.torque_limit; imp_.set_gains(p); }

@@ -148,13 +148,48 @@ TEST(Supervisor, QueuedGoalPromotesAndBothSettleSuccessful) {
   f.sup.on_trajectory_accepted(b, gb);
   std::this_thread::sleep_for(std::chrono::milliseconds(600));                      // A completes+promotes, B completes
   f.sup.stop(); f.teardown();
-  int a_code=999, b_code=999;
+  int a_code=999, b_code=999, a_n=0, b_n=0;
   for (auto& pr : f.be.all_results()) {
-    if (pr.first[0]==1) a_code = pr.second.error_code;
-    if (pr.first[0]==2) b_code = pr.second.error_code;
+    if (pr.first[0]==1) { a_code = pr.second.error_code; ++a_n; }
+    if (pr.first[0]==2) { b_code = pr.second.error_code; ++b_n; }
   }
+  EXPECT_EQ(f.be.result_count(), 2u);                       // exactly two settlements, no double-settle
+  EXPECT_EQ(a_n, 1); EXPECT_EQ(b_n, 1);                     // each id settled exactly once
   EXPECT_EQ(a_code, interface::result_code::kSuccessful);   // finished goal settles successful on promotion
   EXPECT_EQ(b_code, interface::result_code::kSuccessful);   // promoted goal settles successful on completion
+}
+
+TEST(Supervisor, RejectsCrossModeGoalThatSlipsInFlightPrecheck) {
+  // in_flight_ is set only when the sampler drains a goal, so a second goal
+  // submitted back-to-back (before the drain) passes on_trajectory_goal's
+  // mode-change pre-check. The sampler must fail-loud on the cross-mode goal
+  // rather than switch modes mid-flight and orphan it.
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal gp; gp.trajectory=ramp7(0.0,0.05,0.3);
+  gp.control_mode=interface::ControlModeKind::kPosition; gp.preemption=interface::Preemption::kLatestWins;
+  gp.path_tolerance=JointVec::Constant(-1.0);
+  interface::TrajectoryGoal gi; gi.trajectory=ramp7(0.0,0.05,0.3);
+  gi.control_mode=interface::ControlModeKind::kImpedance; gi.preemption=interface::Preemption::kQueue;
+  gi.path_tolerance=JointVec::Constant(-1.0);
+  gi.has_gains=true; gi.gains.kq=JointVec::Constant(60.0); gi.gains.zeta=0.6;
+  gi.gains.torque_limit=(JointVec()<<39,39,39,39,9,9,9).finished();
+  interface::GoalId p{}; p[0]=1; interface::GoalId i{}; i[0]=2;
+  // Both accepted back-to-back: in_flight_ still false at the impedance goal's pre-check.
+  ASSERT_EQ(f.sup.on_trajectory_goal(gp), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(p, gp);
+  ASSERT_EQ(f.sup.on_trajectory_goal(gi), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(i, gi);
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));   // > position duration + margin
+  f.sup.stop(); f.teardown();
+  int p_code=999, i_code=999, p_n=0, i_n=0;
+  for (auto& pr : f.be.all_results()) {
+    if (pr.first[0]==1) { p_code = pr.second.error_code; ++p_n; }
+    if (pr.first[0]==2) { i_code = pr.second.error_code; ++i_n; }
+  }
+  EXPECT_EQ(i_n, 1);                                                // impedance goal settled (never orphaned)
+  EXPECT_EQ(i_code, interface::result_code::kInvalidGoal);          // ... as a fail-loud rejection
+  EXPECT_EQ(p_n, 1);                                                // position goal settled exactly once
+  EXPECT_EQ(p_code, interface::result_code::kSuccessful);
 }
 
 TEST(Supervisor, CancelSettlesActivePreempted) {
