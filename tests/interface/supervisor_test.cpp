@@ -119,16 +119,58 @@ TEST(Supervisor, PositionGoalRunsToCompletionAndSettlesSuccess) {
   EXPECT_GT(f.be.feedback_count(), 0u);              // add feedback_count() to FakeBackend
 }
 
-TEST(Supervisor, RejectsQueuePreemptionUntilTask9) {
-  // kQueue promotion isn't settled anywhere yet (Task 9 wires that up); accepting
-  // it today would orphan the prior active goal's result. Must reject fail-loud.
-  SupFix f;
-  interface::TrajectoryGoal g;
-  g.trajectory = ramp7(0.0, 0.05, 0.4);
-  g.control_mode = interface::ControlModeKind::kPosition;
-  g.preemption   = interface::Preemption::kQueue;
-  g.path_tolerance = JointVec::Constant(-1.0);
-  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+TEST(Supervisor, LatestWinsPreemptionSettlesOldGoalPreempted) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory=ramp7(0.0,0.1,2.0); g.path_tolerance=JointVec::Constant(-1.0);
+  g.control_mode=interface::ControlModeKind::kPosition; g.preemption=interface::Preemption::kLatestWins;
+  interface::GoalId a{}; a[0]=1; interface::GoalId b{}; b[0]=2;
+  f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(a, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(b, g);   // latest-wins preempt
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop(); f.teardown();
+  bool saw_preempt_a=false;
+  for (auto& pr : f.be.all_results()) if (pr.first[0]==1) saw_preempt_a = (pr.second.error_code==interface::result_code::kPreempted);
+  EXPECT_TRUE(saw_preempt_a);
+}
+
+TEST(Supervisor, QueuedGoalPromotesAndBothSettleSuccessful) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal ga; ga.trajectory=ramp7(0.0,0.05,0.2);
+  ga.control_mode=interface::ControlModeKind::kPosition; ga.preemption=interface::Preemption::kLatestWins;
+  ga.path_tolerance=JointVec::Constant(-1.0);
+  interface::TrajectoryGoal gb=ga; gb.preemption=interface::Preemption::kQueue;   // queued follow-on
+  interface::GoalId a{}; a[0]=1; interface::GoalId b{}; b[0]=2;
+  ASSERT_EQ(f.sup.on_trajectory_goal(ga), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(a, ga);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));                       // A still active
+  ASSERT_EQ(f.sup.on_trajectory_goal(gb), interface::GoalResponse::kAccept);        // kQueue now accepted
+  f.sup.on_trajectory_accepted(b, gb);
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));                      // A completes+promotes, B completes
+  f.sup.stop(); f.teardown();
+  int a_code=999, b_code=999;
+  for (auto& pr : f.be.all_results()) {
+    if (pr.first[0]==1) a_code = pr.second.error_code;
+    if (pr.first[0]==2) b_code = pr.second.error_code;
+  }
+  EXPECT_EQ(a_code, interface::result_code::kSuccessful);   // finished goal settles successful on promotion
+  EXPECT_EQ(b_code, interface::result_code::kSuccessful);   // promoted goal settles successful on completion
+}
+
+TEST(Supervisor, CancelSettlesActivePreempted) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory=ramp7(0.0,0.1,2.0); g.path_tolerance=JointVec::Constant(-1.0);
+  g.control_mode=interface::ControlModeKind::kPosition; g.preemption=interface::Preemption::kLatestWins;
+  interface::GoalId a{}; a[0]=1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(a, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));                       // mid-flight
+  EXPECT_EQ(f.sup.on_trajectory_cancel(a), interface::CancelResponse::kAccept);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);                                              // no further results
+  EXPECT_EQ(f.be.last_result_id()[0], 1);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kPreempted);
 }
 
 TEST(Supervisor, RejectsModeChangeWhileInFlight) {

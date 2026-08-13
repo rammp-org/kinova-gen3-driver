@@ -16,6 +16,8 @@ class FakeBackend : public StreamPort, public ActionServerPort {
   ArmState last_state()  const { std::lock_guard<std::mutex> l(m_); return states_.back(); }
   TrajectoryResult last_result() const { std::lock_guard<std::mutex> l(m_); return results_.back().second; }
   GoalId last_result_id() const { std::lock_guard<std::mutex> l(m_); return results_.back().first; }
+  std::vector<std::pair<GoalId, TrajectoryResult>> all_results() const {
+    std::lock_guard<std::mutex> l(m_); return results_; }
  private:
   mutable std::mutex m_;
   std::vector<ArmState> states_;
