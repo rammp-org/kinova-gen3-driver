@@ -131,6 +131,34 @@ TEST(Supervisor, RejectsQueuePreemptionUntilTask9) {
   EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
 }
 
+TEST(Supervisor, RejectsModeChangeWhileInFlight) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g1; g1.trajectory=ramp7(0.0,0.05,1.0); g1.path_tolerance=JointVec::Constant(-1.0);
+  g1.control_mode=interface::ControlModeKind::kPosition;
+  interface::GoalId id1{}; id1[0]=1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g1), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id1, g1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));       // now in flight
+  interface::TrajectoryGoal g2 = g1; g2.control_mode=interface::ControlModeKind::kImpedance;
+  EXPECT_EQ(f.sup.on_trajectory_goal(g2), interface::GoalResponse::kReject);   // mode change mid-motion
+  f.sup.stop(); f.teardown();
+}
+
+TEST(Supervisor, SwitchesToImpedanceAtRest) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory=ramp7(0.0,0.03,0.3); g.path_tolerance=JointVec::Constant(-1.0);
+  g.control_mode=interface::ControlModeKind::kImpedance;
+  g.has_gains=true; g.gains.kq=JointVec::Constant(60.0); g.gains.zeta=0.6;
+  g.gains.torque_limit=(JointVec()<<39,39,39,39,9,9,9).finished();
+  interface::GoalId id{}; id[0]=9;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(900));       // settle + duration
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
+}
+
 TEST(Supervisor, DivergenceAbortSettlesPathToleranceViolated) {
   SupFix f; f.sup.start(); f.run_rt();
   interface::TrajectoryGoal g;

@@ -49,7 +49,20 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
     for (;;) {
       Inbound in; { std::lock_guard<std::mutex> l(q_mtx_); if (inbox_.empty()) break; in=inbox_.front(); inbox_.pop_front(); }
       if (in.cancel) continue;                                   // cancel handled in Task 9
-      // (mode switching handled in Task 8; Task 6 assumes same/position mode)
+      if (in.goal.control_mode != active_mode_kind_) {
+        // Only reachable when NOT in flight (on_trajectory_goal rejects otherwise).
+        if (in.goal.control_mode == ControlModeKind::kImpedance) {
+          if (in.goal.has_gains) { JointImpedanceParams p; p.Kq=in.goal.gains.kq; p.zeta=in.goal.gains.zeta;
+                                   p.torque_limit=in.goal.gains.torque_limit; imp_.set_gains(p); }
+          exec_.request_mode(&imp_); traj_.emplace(imp_);
+          active_mode_kind_=ControlModeKind::kImpedance; atomic_mode_.store(1);
+        } else {
+          exec_.request_mode(&pos_); traj_.emplace(pos_);
+          active_mode_kind_=ControlModeKind::kPosition; atomic_mode_.store(0);
+        }
+        std::this_thread::sleep_for(                                    // let the RT loop adopt + on_enter settle
+            std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(cfg_.mode_settle_s)));
+      }
       const SubmitResult sr = traj_->submit(in.goal.trajectory, in.goal.control_mode,
                                             in.goal.preemption, in.goal.path_tolerance);
       if (sr != SubmitResult::kAccepted) {
