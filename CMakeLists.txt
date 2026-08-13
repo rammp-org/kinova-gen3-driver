@@ -221,7 +221,8 @@ add_executable(unit_tests
     tests/teleop_protocol_test.cpp
     tests/feedback_tap_test.cpp
     tests/interface/trajectory_executor_test.cpp
-    tests/interface/execution_integration_test.cpp)
+    tests/interface/execution_integration_test.cpp
+    tests/interface/supervisor_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
