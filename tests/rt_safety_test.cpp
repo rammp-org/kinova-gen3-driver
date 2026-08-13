@@ -10,6 +10,11 @@
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
+#include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/interface/value_types.h"
+#include "kinova_lowlevel/interface/ports.h"
+#include "kinova_lowlevel/interface/supervisor.h"
+#include "interface/fake_backend.h"
 using namespace kinova;
 
 // RUSAGE_THREAD note: read_usage() reports the CALLING thread's faults. To make
@@ -251,5 +256,100 @@ TEST(RtSafety, NanosleepPacingProducesSamples) {
   drain.join();
   // ~300 cycles at 1 kHz; allow generous slack for scheduling on a shared box.
   EXPECT_GT(consumed, 50u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
+namespace {
+// Local copy of supervisor_test.cpp's ramp7 helper (internal linkage, no ODR
+// conflict across translation units) — builds a two-point 7-joint ramp goal.
+interface::Trajectory ramp7(double from, double to, double dur) {
+  interface::Trajectory t;
+  JointVec a = JointVec::Constant(from), b = JointVec::Constant(to);
+  t.points = {{a, 0.0}, {b, dur}};
+  return t;
+}
+}  // namespace
+
+// The Supervisor adds two non-RT threads (sampler @250Hz, pump @100Hz) that run
+// concurrently with the RT loop, touching a Seqlock<JointFeedback>, a mutex-
+// guarded inbox, and the ControlMode's set_target() from off the RT thread.
+// This test proves that traffic does NOT show up as major page faults or
+// dropped telemetry samples on the RT thread. Structure mirrors
+// RtSafety.JointImpedanceModeNoMajorFaultsSteadyState exactly (warm-up run to
+// fault in code/scratch pages, then a re-armed measured run, both timed and
+// read_usage()-sampled on the SAME loop thread that calls exec.run()) — the
+// only difference is the Supervisor + a long-running position goal are live
+// for the whole test so the sampler is actively calling pos.set_target() and
+// the pump is actively reading feedback throughout the measured window.
+TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
+  using namespace kinova::interface;
+  JointFeedback init; init.q.setZero();
+  SimTransport sim(init);
+  Dynamics dyn(URDF_PATH), pump_dyn(URDF_PATH);
+  Seqlock<JointFeedback> snap;
+  FeedbackTap tap(sim, snap);
+  SampleRing ring(1u << 16);
+  JointPositionMode pos(dyn);
+  JointImpedanceMode imp(dyn);
+  RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
+  FakeBackend be;
+  Supervisor sup(pos, imp, ex, snap, pump_dyn, be, be);
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  sup.start();   // requests position mode; spawns sampler + pump threads now
+
+  // Long ramp (5s) so it is still executing across the whole warm-up + measured
+  // window below: the sampler keeps ticking pos.set_target() and the pump keeps
+  // reading the Seqlock + publishing state the entire time.
+  TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.2, 5.0);
+  g.control_mode = ControlModeKind::kPosition;
+  g.preemption = Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);   // guard off: SimTransport is a static echo
+  GoalId id{}; id[0] = 1;
+  ASSERT_EQ(sup.on_trajectory_goal(g), GoalResponse::kAccept);
+  sup.on_trajectory_accepted(id, g);
+
+  std::thread loop([&] {
+    // Warm-up window: run the loop ~200ms so first-touch faults (executor
+    // code/scratch pages, mode entry) happen before we start measuring.
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    // Baseline on THIS (loop) thread, after warm-up.
+    ResourceUsage u0 = read_usage();
+
+    // Steady-state window: re-arm the mode (the warm-up run consumed the
+    // request — RtExecutor::run() resets its local `active` on each call) and
+    // run ~2s on this same thread while the sampler/pump keep driving traffic.
+    ex.request_mode(&pos);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    // Final reading on the same loop thread.
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+
+    stop.store(true);  // release the drain thread
+  });
+
+  loop.join();
+  drain.join();
+  sup.stop();
+
+  EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
 }
