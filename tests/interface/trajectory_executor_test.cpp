@@ -184,3 +184,146 @@ TEST(ExecutorPreempt, PromotionRaisesPromotedFlagExactlyOnce) {
   EXPECT_TRUE(at_end.active);
   ExecStatus after = ex.tick(3.0, vec7(0.5));  EXPECT_FALSE(after.promoted);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #13: planner velocities/accelerations drive the interpolation order.
+// cuRobo emits qd/qdd; linear interpolation of a ~20 ms-spaced plan puts a
+// velocity step at every waypoint (~50/s), which reads as jerky motion.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Smooth analytic reference, per joint: q(t) = A sin(w t + ph).
+struct Sine {
+  double A, w, ph;
+  double q(double t)   const { return A * std::sin(w * t + ph); }
+  double qd(double t)  const { return A * w * std::cos(w * t + ph); }
+  double qdd(double t) const { return -A * w * w * std::sin(w * t + ph); }
+};
+Sine joint_sine(int j) { return Sine{0.5 + 0.1 * j, 1.3 + 0.2 * j, 0.4 * j}; }
+
+// Sample the analytic reference into `n` waypoints spanning [0, dur].
+// `order`: 0 = positions only, 1 = + velocities, 2 = + accelerations.
+Trajectory analytic_traj(int n, double dur, int order) {
+  Trajectory tr;
+  tr.has_velocities    = order >= 1;
+  tr.has_accelerations = order >= 2;
+  for (int k = 0; k < n; ++k) {
+    const double t = dur * k / (n - 1);
+    JointWaypoint w;
+    w.t_s = t;
+    for (int j = 0; j < kinova::kNumJoints; ++j) {
+      const Sine s = joint_sine(j);
+      w.q[j] = s.q(t); w.qd[j] = s.qd(t); w.qdd[j] = s.qdd(t);
+    }
+    tr.points.push_back(w);
+  }
+  return tr;
+}
+
+// One-sided numeric derivatives of sample(), for continuity checks at knots.
+double vel_left(const Trajectory& tr, double t, int j, double h = 1e-6) {
+  return (sample(tr, t)[j] - sample(tr, t - h)[j]) / h;
+}
+double vel_right(const Trajectory& tr, double t, int j, double h = 1e-6) {
+  return (sample(tr, t + h)[j] - sample(tr, t)[j]) / h;
+}
+double max_abs_err(const Trajectory& tr, double dur) {  // vs the analytic reference
+  double worst = 0.0;
+  for (int i = 0; i <= 500; ++i) {
+    const double t = dur * i / 500.0;
+    const kinova::JointVec q = sample(tr, t);
+    for (int j = 0; j < kinova::kNumJoints; ++j)
+      worst = std::max(worst, std::abs(q[j] - joint_sine(j).q(t)));
+  }
+  return worst;
+}
+
+}  // namespace
+
+TEST(TrajectorySample, PositionsOnlyStaysLinear) {
+  // Regression: trajectories without velocities keep the pre-#13 behavior.
+  Trajectory tr;
+  tr.points = { {vec7(0.0), 0.0}, {vec7(1.0), 2.0} };
+  EXPECT_FALSE(tr.has_velocities);
+  EXPECT_NEAR(sample(tr, 0.5)[0], 0.25, 1e-9);   // exactly linear
+  EXPECT_NEAR(sample(tr, 1.0)[0], 0.50, 1e-9);
+  EXPECT_NEAR(sample(tr, 1.5)[0], 0.75, 1e-9);
+}
+
+TEST(TrajectorySample, CubicHermiteMatchesEndpointPositionsAndVelocities) {
+  const double dur = 2.0;
+  const Trajectory tr = analytic_traj(6, dur, /*order=*/1);
+  for (const auto& w : tr.points) {
+    const kinova::JointVec q = sample(tr, w.t_s);
+    for (int j = 0; j < kinova::kNumJoints; ++j) {
+      EXPECT_NEAR(q[j], w.q[j], 1e-9) << "position at knot t=" << w.t_s << " j=" << j;
+      // Interior knots: the slope on both sides must equal the planner's qd.
+      if (w.t_s > 0.0 && w.t_s < dur) {
+        EXPECT_NEAR(vel_left(tr, w.t_s, j),  w.qd[j], 1e-3) << "left slope j=" << j;
+        EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3) << "right slope j=" << j;
+      }
+    }
+  }
+}
+
+TEST(TrajectorySample, CubicHermiteIsC1WhereLinearIsNot) {
+  // The jerk in issue #13: linear interpolation steps velocity at every knot.
+  const double dur = 2.0;
+  const int n = 9;
+  const Trajectory cubic  = analytic_traj(n, dur, /*order=*/1);
+  const Trajectory linear = analytic_traj(n, dur, /*order=*/0);
+  double worst_cubic = 0.0, worst_linear = 0.0;
+  for (const auto& w : cubic.points) {
+    if (w.t_s <= 0.0 || w.t_s >= dur) continue;              // interior knots only
+    for (int j = 0; j < kinova::kNumJoints; ++j) {
+      worst_cubic  = std::max(worst_cubic,
+          std::abs(vel_right(cubic,  w.t_s, j) - vel_left(cubic,  w.t_s, j)));
+      worst_linear = std::max(worst_linear,
+          std::abs(vel_right(linear, w.t_s, j) - vel_left(linear, w.t_s, j)));
+    }
+  }
+  EXPECT_LT(worst_cubic, 1e-3) << "cubic Hermite must not step velocity at a knot";
+  EXPECT_GT(worst_linear, 0.05) << "linear is expected to step (this is the bug)";
+}
+
+TEST(TrajectorySample, QuinticMatchesEndpointPositionVelocityAndAcceleration) {
+  const double dur = 2.0;
+  const Trajectory tr = analytic_traj(6, dur, /*order=*/2);
+  const double h = 1e-4;
+  for (const auto& w : tr.points) {
+    if (w.t_s <= 0.0 || w.t_s >= dur) continue;
+    for (int j = 0; j < kinova::kNumJoints; ++j) {
+      EXPECT_NEAR(sample(tr, w.t_s)[j], w.q[j], 1e-9);
+      EXPECT_NEAR(vel_left(tr, w.t_s, j),  w.qd[j], 1e-3);
+      EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3);
+      // second derivative, one-sided, must match the planner's qdd
+      const double acc_r =
+          (sample(tr, w.t_s + 2 * h)[j] - 2 * sample(tr, w.t_s + h)[j] + sample(tr, w.t_s)[j]) / (h * h);
+      EXPECT_NEAR(acc_r, w.qdd[j], 5e-2) << "right accel j=" << j;
+    }
+  }
+}
+
+TEST(TrajectorySample, HigherOrderTracksTheAnalyticPathMoreAccurately) {
+  const double dur = 2.0;
+  const int n = 9;
+  const double e_lin  = max_abs_err(analytic_traj(n, dur, 0), dur);
+  const double e_cub  = max_abs_err(analytic_traj(n, dur, 1), dur);
+  const double e_quin = max_abs_err(analytic_traj(n, dur, 2), dur);
+  EXPECT_LT(e_cub,  e_lin  / 10.0) << "cubic should be far closer than linear";
+  EXPECT_LT(e_quin, e_cub);        // quintic closer still
+}
+
+TEST(TrajectorySample, HigherOrderDegeneraciesAreSafe) {
+  Trajectory tr;                       // duplicate timestamps -> zero span, must not NaN
+  tr.has_velocities = true;
+  tr.points = { {vec7(0.0), 0.0}, {vec7(1.0), 0.0}, {vec7(2.0), 1.0} };
+  for (int j = 0; j < kinova::kNumJoints; ++j) {
+    EXPECT_TRUE(std::isfinite(sample(tr, 0.0)[j]));
+    EXPECT_TRUE(std::isfinite(sample(tr, 0.5)[j]));
+  }
+  Trajectory single;                   // single waypoint with velocity -> constant hold
+  single.has_velocities = true;
+  single.points = { {vec7(0.3), 0.0} };
+  EXPECT_NEAR(sample(single, 2.0)[0], 0.3, 1e-9);
+}

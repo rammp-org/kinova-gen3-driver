@@ -5,9 +5,23 @@
 #include "kinova_lowlevel/joint_target_sink.h"  // kinova::JointTargetSink (the mode seam)
 namespace kinova::interface {
 
-struct JointWaypoint { kinova::JointVec q; double t_s; };
+// qd/qdd carry a planner's velocity/acceleration profile. They are meaningful
+// only when the owning Trajectory sets the matching has_* flag; otherwise they
+// are ignored (a zero qd is NOT the same as "no velocity" — see sample()).
+struct JointWaypoint {
+  kinova::JointVec q;
+  double t_s;
+  kinova::JointVec qd  = kinova::JointVec::Zero();
+  kinova::JointVec qdd = kinova::JointVec::Zero();
+};
 struct Trajectory {
   std::vector<JointWaypoint> points;
+  // Selects the interpolation order in sample(), the way ros2_control's
+  // joint_trajectory_controller does: linear (positions only), cubic Hermite
+  // (+ velocities), quintic (+ accelerations). Accelerations are honoured only
+  // together with velocities.
+  bool has_velocities = false;
+  bool has_accelerations = false;
   double duration_s() const { return points.empty() ? 0.0 : points.back().t_s; }
 };
 
