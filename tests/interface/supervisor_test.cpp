@@ -258,3 +258,20 @@ TEST(Supervisor, DivergenceAbortSettlesPathToleranceViolated) {
   EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kPathToleranceViolated);
   EXPECT_FALSE(f.sup.on_query_state().fault);         // divergence is not a hardware fault
 }
+
+// Regression (real-arm bug 2026-08-12): a transient failed feedback-snapshot read
+// (Seqlock::load == false, e.g. the RT writer preempted mid-store) must NOT inject
+// q=0 into the divergence guard — that caused a false PATH_TOLERANCE_VIOLATED abort
+// mid-motion on the arm. The sampler must reuse the last-good q instead. Mirrors the
+// proven last-good-q pattern in apps/trajectory_run.cpp.
+TEST(SupervisorSampler, ReusesLastGoodQOnFailedSnapshotRead) {
+  using kinova::interface::sampled_q;
+  const kinova::JointVec last  = kinova::JointVec::Constant(1.64);
+  const kinova::JointVec fresh = kinova::JointVec::Constant(1.65);
+  // Successful read -> use the fresh sample.
+  EXPECT_NEAR(sampled_q(true, fresh, last)[6], 1.65, 1e-12);
+  // Failed read -> REUSE last-good, NOT zero (the bug injected Zero() here).
+  const kinova::JointVec r = sampled_q(false, kinova::JointVec::Zero(), last);
+  EXPECT_NEAR(r[0], 1.64, 1e-12);
+  EXPECT_NEAR(r[6], 1.64, 1e-12);
+}

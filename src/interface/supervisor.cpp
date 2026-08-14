@@ -44,6 +44,7 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
   const auto period = std::chrono::duration<double>(1.0/cfg_.sampler_hz);
   const auto t0 = clock::now();
   GoalId active_id{}; bool have_active=false;
+  JointVec q_meas = JointVec::Zero();   // last-good measured q; reused when a snapshot read fails
   GoalId queued_id{}; bool have_queued=false;
   while (running_.load(std::memory_order_acquire)) {
     // 1) drain inbox (only this thread touches traj_)
@@ -101,9 +102,10 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
     }
     // 2) tick the active trajectory
     if (traj_->is_active()) {
-      JointFeedback fb; JointVec q = JointVec::Zero(); if (snap_.load(fb)) q = fb.q;
-      const ExecStatus st = traj_->tick(secs_since(t0), q);
-      TrajectoryFeedback fbk; fbk.actual=q; fbk.fraction_complete=st.fraction; action_.publish_feedback(active_id, fbk);
+      JointFeedback fb; const bool ok = snap_.load(fb);   // sequence the read; don't rely on arg eval order
+      q_meas = sampled_q(ok, fb.q, q_meas);               // failed read -> reuse last-good q (no phantom zero)
+      const ExecStatus st = traj_->tick(secs_since(t0), q_meas);
+      TrajectoryFeedback fbk; fbk.actual=q_meas; fbk.fraction_complete=st.fraction; action_.publish_feedback(active_id, fbk);
       if (st.promoted) {
         // The active goal finished successfully and the queued goal took over gaplessly.
         { TrajectoryResult r; r.error_code=result_code::kSuccessful; action_.settle(active_id, r); }

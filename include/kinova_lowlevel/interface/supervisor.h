@@ -13,6 +13,16 @@
 #include "kinova_lowlevel/interface/trajectory_executor.h"
 namespace kinova::interface {
 
+// Reuse the last-good measured q when a lock-free feedback-snapshot read fails
+// (Seqlock::load == false — e.g. the RT writer preempted mid-store). A failed read
+// must NEVER inject a bogus q into the divergence guard: on the real arm that
+// produced a false PATH_TOLERANCE_VIOLATED abort mid-motion. Mirrors the proven
+// last-good-q pattern in apps/trajectory_run.cpp.
+inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
+                                  const kinova::JointVec& last) {
+  return loaded ? fresh : last;
+}
+
 struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; double mode_settle_s = 0.25; };
 
 class Supervisor : public CommandSink {
