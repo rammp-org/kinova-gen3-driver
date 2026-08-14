@@ -67,7 +67,7 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
       active_ = Active{*queued_, now_s, true};      // latch start to NOW (started=true)
       path_tol_ = queued_tol_;                      // adopt the promoted goal's divergence guard
       queued_.reset();
-      return ExecStatus{true, false, 0.0, ExecStatus::kOk};
+      return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};   // promoted this tick
     }
     active_.reset();
     return ExecStatus{false, true, 1.0, ExecStatus::kOk};   // time-based completion

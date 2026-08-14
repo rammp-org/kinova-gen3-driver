@@ -83,13 +83,16 @@ set(KINOVA_LIB_SOURCES
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
     src/rt_executor.cpp
-    src/interface/trajectory_executor.cpp)
+    src/interface/trajectory_executor.cpp
+    src/interface/supervisor.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
 
 add_library(kinova_lowlevel ${KINOVA_LIB_SOURCES})
-target_include_directories(kinova_lowlevel PUBLIC include)
+target_include_directories(kinova_lowlevel PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>)
 target_link_libraries(kinova_lowlevel PUBLIC pinocchio::pinocchio pthread)
 
 if(KINOVA_ENABLE_KORTEX)
@@ -100,6 +103,25 @@ if(KINOVA_ENABLE_KORTEX)
     target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
     target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
 endif()
+
+# --- install / export (b1: find_package(kinova_lowlevel CONFIG) support) ------
+# Lets a downstream repo (e.g. the ROS2 wrapper) consume this core via
+# find_package(kinova_lowlevel CONFIG) + kinova_lowlevel::kinova_lowlevel,
+# without changing the default in-tree sim build above.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+install(TARGETS kinova_lowlevel EXPORT kinova_lowlevelTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT kinova_lowlevelTargets NAMESPACE kinova_lowlevel::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
+configure_package_config_file(cmake/kinova_lowlevelConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
 
 # --- apps ---------------------------------------------------------------------
 # benchmark_grav_comp runs the gravity-comp mode through the RtExecutor and
@@ -221,7 +243,8 @@ add_executable(unit_tests
     tests/teleop_protocol_test.cpp
     tests/feedback_tap_test.cpp
     tests/interface/trajectory_executor_test.cpp
-    tests/interface/execution_integration_test.cpp)
+    tests/interface/execution_integration_test.cpp
+    tests/interface/supervisor_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 

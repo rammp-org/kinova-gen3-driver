@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>kinova_lowlevel</name>
+  <version>0.1.0</version>
+  <description>Kinova Gen3 low-level RT control driver (ROS-agnostic core).</description>
+  <maintainer email="swapnil.pande98@gmail.com">Swapnil Pande</maintainer>
+  <license>Proprietary</license>
+  <buildtool_depend>cmake</buildtool_depend>
+  <depend>pinocchio</depend>
+  <depend>eigen</depend>
+  <export><build_type>cmake</build_type></export>
+</package>

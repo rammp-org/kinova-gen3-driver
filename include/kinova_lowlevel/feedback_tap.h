@@ -13,8 +13,9 @@
 
 namespace kinova {
 
-// Single-writer / single-reader lock-free latest-value snapshot (seqlock). The
-// RT thread is the only writer; one non-RT thread is the only reader.
+// Single-writer / multi-reader lock-free latest-value snapshot (seqlock). One
+// thread (the RT thread) is the only writer; any number of non-RT threads may
+// read concurrently (readers never mutate seq_/data_, so concurrent reads are safe).
 // T need not be trivially copyable — fixed-size Eigen members store data inline,
 // so a torn read yields transient garbage numbers but never a bad pointer.
 template <class T>

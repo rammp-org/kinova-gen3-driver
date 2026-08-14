@@ -1,0 +1,4 @@
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+find_dependency(pinocchio)
+include("${CMAKE_CURRENT_LIST_DIR}/kinova_lowlevelTargets.cmake")
