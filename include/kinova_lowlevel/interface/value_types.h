@@ -36,6 +36,6 @@ enum class CancelResponse { kAccept, kReject };
 
 namespace result_code {
   constexpr int kSuccessful = 0, kInvalidGoal = -1, kPathToleranceViolated = -4,
-                kGoalToleranceViolated = -5, kPreempted = -6;
+                kGoalToleranceViolated = -5, kPreempted = -6, kPlanningFailed = -7;
 }
 }  // namespace kinova::interface
