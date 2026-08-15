@@ -158,10 +158,32 @@ does not clear the noise floor of the dynamics call that dominates it.
 `JointPositionMode` computes the same achieved reference velocity and exposes
 it as `last_ref_velocity()`, but **sends it only when
 `JointPositionParams::velocity_feedforward` is enabled, which it is not by
-default.** Whether the Gen3 firmware treats the velocity field as a feedforward
-or as a *limit* in POSITION servoing cannot be established in sim, and being
-wrong about it at 1 kHz is a hardware event. So the value is computed and
-loggable first, and sent only when someone opts in with the arm attended.
+default.**
+
+!!! warning "Kinova's own driver tried this and disabled it"
+    `ros2_kortex` computes exactly this velocity command and then deliberately
+    does not send it (`kortex_driver/src/hardware_interface.cpp`):
+
+    ```cpp
+    base_command_.mutable_actuators(i)->set_position(cmd_degrees_tmp_);
+    // Velocity command interface not implemented properly in the kortex api
+    // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
+    ```
+
+    So the vendor's position is that per-cycle velocity alongside position is
+    not properly supported by the KORTEX API. Treat `velocity_feedforward` as
+    unlikely to help on this hardware until someone demonstrates otherwise on a
+    real arm; the flag exists to make that experiment possible, not because the
+    path is expected to work.
+
+Whether the firmware treats the velocity field as a feedforward or as a *limit*
+in POSITION servoing is not documented either way, and being wrong about it at
+1 kHz is a hardware event. So the value is computed and loggable first, and sent
+only when someone opts in with the arm attended.
+
+None of this touches the impedance path, which is where the feedforward
+actually pays: there we command **torque** and evaluate the control law
+ourselves, so no firmware interpretation is involved.
 
 When the flag is off, `JointCommand::velocity_active` stays false and
 `KortexTransport` writes nothing to that field — an explicit zero is *not* a

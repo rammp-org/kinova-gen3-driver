@@ -30,12 +30,18 @@ struct JointPositionParams {
   // Emit the reference velocity alongside the position command, as a
   // feedforward for the actuator's own position loop.
   //
-  // OFF by default, deliberately. Whether the Gen3 firmware treats the velocity
-  // field as a feedforward or as a limit in POSITION servoing is not something
-  // we can establish in sim, and getting it wrong at 1 kHz is a hardware event.
-  // The mode computes the reference velocity either way (see last_ref_velocity)
-  // so it can be logged and compared before anything is sent; turn this on only
-  // with the arm attended and the e-stop in hand.
+  // OFF by default, and expected to stay that way. Kinova's own ros2_kortex
+  // driver computes this very command and then declines to send it:
+  //   base_command_.mutable_actuators(i)->set_position(cmd_degrees_tmp_);
+  //   // Velocity command interface not implemented properly in the kortex api
+  //   // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
+  // (kortex_driver/src/hardware_interface.cpp). Nor does the KORTEX reference
+  // say whether the field is a feedforward or a LIMIT in POSITION servoing, and
+  // being wrong at 1 kHz is a hardware event. The mode computes the reference
+  // velocity either way (see last_ref_velocity) so it can be logged and compared
+  // first; this flag exists to make the experiment possible on an attended arm,
+  // not because the path is expected to work. Feedforward that actually pays
+  // goes through the impedance law, where we evaluate the torque ourselves.
   bool velocity_feedforward = false;
 
   // Software position limits [rad]. Non-finite entries are seeded from the URDF
