@@ -115,6 +115,14 @@ struct KortexTransport::Impl {
       switch (cmd.mode) {
         case ActuatorMode::kPosition:
           a->set_position(float(rad_to_deg(cmd.position)[i]));
+          // Velocity feedforward for the actuator's own position loop, emitted
+          // ONLY when the mode marked it live (JointPositionParams::
+          // velocity_feedforward). An explicit zero is not a safe stand-in for
+          // "no feedforward" here — it may read as a velocity LIMIT of zero —
+          // so when the flag is off nothing is written to the field at all and
+          // the command is byte-identical to before.
+          if (cmd.velocity_active)
+            a->set_velocity(float(rad_to_deg(cmd.velocity)[i]));
           break;
         case ActuatorMode::kVelocity:
           a->set_position(fb_.actuators(i).position());

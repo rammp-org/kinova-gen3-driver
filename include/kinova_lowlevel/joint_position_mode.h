@@ -27,6 +27,17 @@ struct JointPositionParams {
   // A value <= 0 disables the leash.
   double max_following_error = 0.35;
 
+  // Emit the reference velocity alongside the position command, as a
+  // feedforward for the actuator's own position loop.
+  //
+  // OFF by default, deliberately. Whether the Gen3 firmware treats the velocity
+  // field as a feedforward or as a limit in POSITION servoing is not something
+  // we can establish in sim, and getting it wrong at 1 kHz is a hardware event.
+  // The mode computes the reference velocity either way (see last_ref_velocity)
+  // so it can be logged and compared before anything is sent; turn this on only
+  // with the arm attended and the e-stop in hand.
+  bool velocity_feedforward = false;
+
   // Software position limits [rad]. Non-finite entries are seeded from the URDF
   // at construction, so a caller-supplied tighter limit survives but the default
   // is never unbounded. Continuous joints are ±inf in the URDF and stay that way.
@@ -61,7 +72,14 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   void on_exit() override {}
 
   // Non-RT setters (call from one supervisor thread).
-  void set_target(const JointVec& q_d) noexcept override;
+  void set_joint_target(const JointTarget& t) noexcept override;
+
+  // The reference velocity computed last cycle: d(q_ref)/dt, i.e. the speed the
+  // arm is actually being commanded at after rate limiting and leashing. Always
+  // computed, only SENT when params().velocity_feedforward is on — so it can be
+  // logged and sanity-checked before it is trusted on hardware. RT-thread-owned:
+  // do not call while the loop is running.
+  JointVec last_ref_velocity() const noexcept { return qd_ref_; }
   void set_params(const JointPositionParams& p) noexcept;
 
   // Returns the ACTIVE parameters, i.e. after URDF seeding and clamping — not
@@ -96,11 +114,12 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   // Target source: the entry configuration (written once by on_enter on the RT
   // thread) or an external target published by set_target.
   JointVec entry_q_ = JointVec::Zero();
-  JointVec ext_target_[2];
+  JointTarget ext_target_[2];
   std::atomic<int> ext_active_{0};
   std::atomic<bool> has_ext_target_{false};
 
   JointVec q_ref_ = JointVec::Zero();   // integrated reference configuration
+  JointVec qd_ref_ = JointVec::Zero();  // its velocity, computed every cycle
 };
 
 }  // namespace kinova

@@ -47,9 +47,9 @@ void JointPositionMode::set_params(const JointPositionParams& p) noexcept {
   params_active_.store(next, std::memory_order_release);
 }
 
-void JointPositionMode::set_target(const JointVec& q_d) noexcept {
+void JointPositionMode::set_joint_target(const JointTarget& t) noexcept {
   const int next = 1 - ext_active_.load(std::memory_order_relaxed);
-  ext_target_[next] = q_d;
+  ext_target_[next] = t;
   ext_active_.store(next, std::memory_order_release);
   has_ext_target_.store(true, std::memory_order_release);
 }
@@ -66,8 +66,9 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
                                 JointCommand& out) {
   const JointPositionParams p = params();   // own a snapshot for the whole cycle
   const JointVec target = has_ext_target_.load(std::memory_order_acquire)
-                              ? ext_target_[ext_active_.load(std::memory_order_acquire)]
+                              ? ext_target_[ext_active_.load(std::memory_order_acquire)].q
                               : entry_q_;
+  const JointVec q_ref_prev = q_ref_;
 
   for (int i = 0; i < kNumJoints; ++i) {
     const bool bounded =
@@ -108,14 +109,26 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
     if (bounded) q_ref_[i] = std::clamp(q_ref_[i], p.q_lower[i], p.q_upper[i]);
   }
 
+  // The speed the reference is actually moving at, measured after the rate limit
+  // and the leash rather than taken from the planner: it is the velocity of the
+  // position we are really commanding, so it stays correct when either bites.
+  // Computed unconditionally so it can be logged before it is ever trusted.
+  for (int i = 0; i < kNumJoints; ++i) {
+    double step = q_ref_[i] - q_ref_prev[i];
+    if (continuous_[i]) step = wrap_to_pi(step);   // the wrap above is not motion
+    qd_ref_[i] = dt_s > 0.0 ? step / dt_s : 0.0;
+  }
+
   out.mode = ActuatorMode::kPosition;
   out.position = q_ref_;
   // RtExecutor reuses one JointCommand across mode changes, so a torque or
   // velocity left by a previous mode would still be sitting in these fields.
-  // The transport ignores them in kPosition today; that is not a reason to leave
-  // stale setpoints where something later could act on them.
+  // That is not a reason to leave stale setpoints where something later could
+  // act on them.
   out.torque.setZero();
-  out.velocity.setZero();
+  out.velocity_active = p.velocity_feedforward;
+  if (p.velocity_feedforward) out.velocity = qd_ref_;
+  else                        out.velocity.setZero();
 }
 
 }  // namespace kinova
