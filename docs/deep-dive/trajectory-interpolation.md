@@ -83,11 +83,19 @@ c₅ =   6d − 3v₀ − 3v₁ − 0.5A₀ + 0.5A₁
 Degenerate segments (duplicate timestamps, `T ≤ 0`) return the left waypoint
 rather than dividing by zero.
 
-## RT cost
+## Cost
 
-`sample()` runs on the 1 kHz thread, so the added arithmetic was measured rather
-than assumed — 200k calls against a 144-point / 2.88 s plan, on the isolated
-core:
+`sample()` does **not** run on the RT thread. It is called from
+`TrajectoryExecutor::tick()`, which the supervisor drives from `sampler_loop` at
+`SupervisorConfig::sampler_hz` (250 Hz), and which `trajectory_run` drives from
+its publisher thread at the same rate. The 1 kHz thread only reads the
+double-buffered `JointTarget` those threads publish — it never interpolates.
+
+That is worth stating precisely, because it sets what this function is allowed
+to do: `sample()` is not bound by the RT contract, and a future change here does
+not need the RT-safety argument. What it *is* bound by is the sampler's own
+period; the arithmetic was therefore measured rather than assumed — 200k calls
+against a 144-point / 2.88 s plan, on the isolated core:
 
 | order | p50 | p99 | p99.9 |
 | --- | --- | --- | --- |
@@ -95,11 +103,17 @@ core:
 | cubic Hermite | 64 ns | 128 ns | 160 ns |
 | quintic | 96 ns | 160 ns | 192 ns |
 
-The worst case, quintic, costs about **32 ns more per tick than linear** — some
-0.003% of the 1 ms budget. The math is fixed-size `JointVec` arithmetic on the
-stack: no allocation, no locks, no branching on data the RT path cannot see, so
-the RT contract is unchanged (`RtSafety` still reports zero major faults and zero
-dropped samples in steady state).
+The worst case, quintic, costs about **32 ns more per sample than linear** —
+some 0.0008% of the sampler's 4 ms period. The math is fixed-size `JointVec`
+arithmetic on the stack: no allocation, no locks. The RT contract is unaffected
+either way, and `RtSafety` (which runs the supervisor in the loop) still reports
+zero major faults and zero dropped samples in steady state.
+
+One consequence of the 250 Hz sampler worth knowing when reading the smoothness
+claim: the reference is republished every 4 ms and then slew-limited by
+`max_ref_speed`, so the C1 continuity a velocity profile buys is real but is
+delivered through that 4 ms staircase rather than a fresh polynomial evaluation
+every millisecond.
 
 ## Where the profile comes from
 
