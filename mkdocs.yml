@@ -26,6 +26,7 @@ nav:
       - API: reference/api.md
   - Deep Dive:
       - Cartesian Impedance: deep-dive/impedance.md
+      - Trajectory Interpolation: deep-dive/trajectory-interpolation.md
   - Operations:
       - Real-Time Tuning: rt-tuning.md
       - Integration Runbook: integration-runbook.md

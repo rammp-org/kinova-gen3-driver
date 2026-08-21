@@ -227,6 +227,10 @@ The supervisor runs a **non-RT sampler thread** per active goal.
   `q_d(t)` (+ `q̇_d` for the impedance feedforward if useful); call the active
   mode's `set_joint_target(q_d)` each tick. Sampler rate is decoupled from and
   well below 1 kHz (e.g. 200–500 Hz); the RT loop reads the latest snapshot.
+  The interpolation order follows what the trajectory carries — linear for
+  positions only, cubic Hermite with velocities, quintic with accelerations —
+  so a planner's profile survives the interface boundary
+  (see `docs/deep-dive/trajectory-interpolation.md`).
 - **Mode activation:** on `on_trajectory_accepted`, map `control_mode` →
   `JointPositionMode` | `JointImpedanceMode`, push its gains (impedance), then
   `request_mode`. The actuator-mode handshake (`kPosition`↔`kTorque`) happens
