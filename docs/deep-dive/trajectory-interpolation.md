@@ -115,6 +115,95 @@ claim: the reference is republished every 4 ms and then slew-limited by
 delivered through that 4 ms staircase rather than a fresh polynomial evaluation
 every millisecond.
 
+## What the profile is used for
+
+Interpolation is only half the value of carrying `qd`/`qdd`. The other half is
+**feedforward**: telling the control law what motion it is supposed to be
+producing, instead of making it infer that from tracking error.
+
+`sample_target()` returns the reference together with the derivatives *of the
+very polynomial `sample()` evaluates*, so the feedforward always describes the
+curve actually being commanded, and `JointTargetSink` carries all three to the
+mode. Modes only see derivatives when the trajectory really had them, so the
+teleop and Cartesian paths are unchanged.
+
+### Joint impedance: damp the velocity error, not the velocity
+
+The torque law used to damp against measured velocity alone:
+
+```
+tau = g(q) + Kq·clamp(q_d − q) − Dq·qd
+```
+
+That damper pulls against the arm *precisely because it is moving as
+commanded*. The cost is a standing, speed-proportional lag which this repo's
+own gains documentation states exactly:
+
+```
+lag = 2·zeta·qd·sqrt(M/Kq)
+```
+
+At `zeta = 0.5` that is `qd·sqrt(M/Kq)` — for joint 1 elbow-up (M ≈ 0.573,
+Kq = 80) about **0.085 rad for every rad/s of commanded speed**, so roughly 10°
+of lag at 2 rad/s. It is systematic, not noise, and it grows with speed. The
+0.35 rad path tolerance the planned-move actions use is padding for it.
+
+Damping the velocity *error* removes it, and the planned acceleration is added
+as an inverse-dynamics term so the spring is not left to generate it out of
+tracking error:
+
+```
+tau = g(q) + Kq·clamp(q_d − q) − Dq·(qd − qd_ref) + M(q)·qdd_d
+```
+
+`qd_ref` is measured as the **achieved** reference velocity — how far `q_d`
+actually moved this cycle — not copied from the planner. When the reference
+rate limiter clamps, we then feed forward the motion we are really commanding
+rather than the motion we were asked for, and the limiter also bounds the
+feedforward for free.
+
+`M(q)` is already computed every cycle to derive the damping, so the inertial
+term is one matvec. Measured over 100k cycles on the isolated core,
+`compute()` costs **3040 ns p50 with or without feedforward** — the difference
+does not clear the noise floor of the dynamics call that dominates it.
+
+### Joint position: a feedforward the firmware may or may not want
+
+`JointPositionMode` computes the same achieved reference velocity and exposes
+it as `last_ref_velocity()`, but **sends it only when
+`JointPositionParams::velocity_feedforward` is enabled, which it is not by
+default.**
+
+!!! warning "Kinova's own driver tried this and disabled it"
+    `ros2_kortex` computes exactly this velocity command and then deliberately
+    does not send it (`kortex_driver/src/hardware_interface.cpp`):
+
+    ```cpp
+    base_command_.mutable_actuators(i)->set_position(cmd_degrees_tmp_);
+    // Velocity command interface not implemented properly in the kortex api
+    // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
+    ```
+
+    So the vendor's position is that per-cycle velocity alongside position is
+    not properly supported by the KORTEX API. Treat `velocity_feedforward` as
+    unlikely to help on this hardware until someone demonstrates otherwise on a
+    real arm; the flag exists to make that experiment possible, not because the
+    path is expected to work.
+
+Whether the firmware treats the velocity field as a feedforward or as a *limit*
+in POSITION servoing is not documented either way, and being wrong about it at
+1 kHz is a hardware event. So the value is computed and loggable first, and sent
+only when someone opts in with the arm attended.
+
+None of this touches the impedance path, which is where the feedforward
+actually pays: there we command **torque** and evaluate the control law
+ourselves, so no firmware interpretation is involved.
+
+When the flag is off, `JointCommand::velocity_active` stays false and
+`KortexTransport` writes nothing to that field — an explicit zero is *not* a
+safe stand-in for "no feedforward", since a zero may read as a velocity limit
+of zero. The command stays byte-identical to before.
+
 ## Where the profile comes from
 
 The ROS2 frontend's `to_trajectory_goal` mapping copies `velocities` and

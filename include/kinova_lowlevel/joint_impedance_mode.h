@@ -72,7 +72,12 @@ class JointImpedanceMode : public ControlMode,
   // mode — cuRobo already planned in joint space, so re-solving IK would be a
   // lossy round-trip that could land on a different branch. Latest setter wins:
   // a joint target supersedes any pose target and vice-versa.
-  void set_target(const JointVec& q_d) noexcept override;
+  //
+  // A target carrying qd/qdd additionally enables feedforward (see compute()).
+  void set_joint_target(const JointTarget& t) noexcept override;
+  // set_target(const Pose&) above would otherwise hide the position-only
+  // set_target(const JointVec&) the sink provides for callers with no profile.
+  using JointTargetSink::set_target;
 
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
   // do not call these from another thread while the RT loop is running.
@@ -82,6 +87,9 @@ class JointImpedanceMode : public ControlMode,
   // watching while tuning — it is configuration dependent, so it changes as the
   // arm moves even at a fixed Kq.
   JointVec last_damping() const noexcept { return Dq_last_; }
+  // The reference velocity used as feedforward last cycle (zero unless the
+  // active target carried a profile). Worth watching while tuning tracking.
+  JointVec last_ref_velocity() const noexcept { return qd_ref_; }
 
  private:
   JointImpedanceParams params() const noexcept;   // RT-safe: returns a value snapshot
@@ -115,7 +123,7 @@ class JointImpedanceMode : public ControlMode,
   Pose entry_pose_;
   Pose ext_target_[2];
   std::atomic<int> ext_active_{0};
-  JointVec ext_q_target_[2];
+  JointTarget ext_q_target_[2];
   std::atomic<int> jt_active_{0};
   std::atomic<TargetSource> source_{TargetSource::kEntryPose};
 
@@ -124,6 +132,7 @@ class JointImpedanceMode : public ControlMode,
   double ramp_elapsed_ = 0.0;
 
   JointVec Dq_last_ = JointVec::Zero();   // damping applied last cycle (derived)
+  JointVec qd_ref_ = JointVec::Zero();    // reference velocity fed forward last cycle
 
   // Preallocated RT scratch.
   JointMat M_ = JointMat::Zero();

@@ -27,6 +27,13 @@ struct Trajectory {
 
 kinova::JointVec sample(const Trajectory& tr, double t_s);
 
+// The same reference, plus the derivatives of the very polynomial sample()
+// evaluates — so a mode's feedforward is exactly consistent with the position
+// it is being asked to track. Derivatives are reported only when the trajectory
+// actually carries a profile; a positions-only trajectory yields q alone and
+// the has_* flags stay false.
+kinova::JointTarget sample_target(const Trajectory& tr, double t_s);
+
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance };
 enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };

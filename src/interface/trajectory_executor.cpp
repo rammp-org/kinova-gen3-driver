@@ -43,6 +43,51 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
   return a.q + v0 * u + 0.5 * a0 * u2 + c3 * u3 + c4 * u4 + c5 * u5;
 }
 
+kinova::JointTarget sample_target(const Trajectory& tr, double t_s) {
+  kinova::JointTarget out;
+  out.q = sample(tr, t_s);
+  if (!tr.has_velocities) return out;   // positions only: nothing to feed forward
+
+  const auto& p = tr.points;
+  // Outside the span the reference is held, so it is not moving.
+  if (p.size() < 2 || t_s <= p.front().t_s || t_s >= p.back().t_s) {
+    out.has_velocity = true;
+    out.has_acceleration = tr.has_accelerations;
+    return out;                          // qd/qdd stay zero: holding still
+  }
+  auto hi = std::upper_bound(p.begin(), p.end(), t_s,
+      [](double t, const JointWaypoint& w){ return t < w.t_s; });
+  const JointWaypoint& b = *hi;
+  const JointWaypoint& a = *(hi - 1);
+  const double span = b.t_s - a.t_s;
+  if (span <= 0.0) return out;
+
+  const double u = (t_s - a.t_s) / span;
+  const kinova::JointVec v0 = a.qd * span, v1 = b.qd * span;
+  const double u2 = u * u, u3 = u2 * u;
+  out.has_velocity = true;
+  if (!tr.has_accelerations) {
+    // d/du of the cubic Hermite basis, rescaled by 1/span to get d/dt.
+    const double d00 =  6.0 * u2 - 6.0 * u;
+    const double d10 =  3.0 * u2 - 4.0 * u + 1.0;
+    const double d01 = -6.0 * u2 + 6.0 * u;
+    const double d11 =  3.0 * u2 - 2.0 * u;
+    out.qd = (d00 * a.q + d10 * v0 + d01 * b.q + d11 * v1) / span;
+    return out;
+  }
+  // Quintic: differentiate the same coefficients twice.
+  const kinova::JointVec a0 = a.qdd * span * span, a1 = b.qdd * span * span;
+  const kinova::JointVec d = b.q - a.q;
+  const kinova::JointVec c3 =  10.0 * d - 6.0 * v0 - 4.0 * v1 - 1.5 * a0 + 0.5 * a1;
+  const kinova::JointVec c4 = -15.0 * d + 8.0 * v0 + 7.0 * v1 + 1.5 * a0 - 1.0 * a1;
+  const kinova::JointVec c5 =   6.0 * d - 3.0 * v0 - 3.0 * v1 - 0.5 * a0 + 0.5 * a1;
+  const double u4 = u3 * u;
+  out.qd  = (v0 + a0 * u + 3.0 * c3 * u2 + 4.0 * c4 * u3 + 5.0 * c5 * u4) / span;
+  out.qdd = (a0 + 6.0 * c3 * u + 12.0 * c4 * u2 + 20.0 * c5 * u3) / (span * span);
+  out.has_acceleration = true;
+  return out;
+}
+
 SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p, const kinova::JointVec& path_tol) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
@@ -74,8 +119,9 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   if (!a.started) { a.start_time = now_s; a.started = true; }
   const double elapsed = now_s - a.start_time;
   const double dur = a.tr.duration_s();
-  const kinova::JointVec q_desired = sample(a.tr, elapsed);
-  sink_.set_target(q_desired);
+  const kinova::JointTarget ref = sample_target(a.tr, elapsed);
+  const kinova::JointVec q_desired = ref.q;
+  sink_.set_joint_target(ref);
   const double frac = dur > 0.0 ? std::min(1.0, std::max(0.0, elapsed / dur)) : 1.0;
 
   // Check divergence guard

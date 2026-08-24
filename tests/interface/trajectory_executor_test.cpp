@@ -28,8 +28,12 @@ TEST(TrajectorySample, HandlesEmptyAndSingleWaypoint) {
 
 namespace {
 struct RecordingSink : kinova::JointTargetSink {
-  std::vector<kinova::JointVec> calls;
-  void set_target(const kinova::JointVec& q) noexcept override { calls.push_back(q); }
+  std::vector<kinova::JointVec> calls;      // positions, for the existing assertions
+  std::vector<kinova::JointTarget> targets; // the full reference, derivatives included
+  void set_joint_target(const kinova::JointTarget& t) noexcept override {
+    calls.push_back(t.q);
+    targets.push_back(t);
+  }
 };
 kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
   return { { {vec7(0.0), 0.0}, {vec7(1.0), dur} } };
@@ -326,4 +330,54 @@ TEST(TrajectorySample, HigherOrderDegeneraciesAreSafe) {
   single.has_velocities = true;
   single.points = { {vec7(0.3), 0.0} };
   EXPECT_NEAR(sample(single, 2.0)[0], 0.3, 1e-9);
+}
+
+// --- sample_target: the derivatives handed to a mode as feedforward ---------
+
+TEST(TrajectorySampleTarget, PositionsOnlyReportsNoDerivatives) {
+  Trajectory tr;
+  tr.points = { {vec7(0.0), 0.0}, {vec7(1.0), 2.0} };
+  const kinova::JointTarget t = sample_target(tr, 1.0);
+  EXPECT_NEAR(t.q[0], 0.5, 1e-9);
+  EXPECT_FALSE(t.has_velocity) << "no profile -> nothing to feed forward";
+  EXPECT_FALSE(t.has_acceleration);
+  EXPECT_NEAR(t.qd[0], 0.0, 1e-12);
+}
+
+TEST(TrajectorySampleTarget, DerivativesMatchTheInterpolantItself) {
+  // The feedforward must describe the very curve sample() commands, so compare
+  // against a numeric derivative of sample() rather than the planner's inputs.
+  const double dur = 2.0;
+  for (int order = 1; order <= 2; ++order) {
+    const Trajectory tr = analytic_traj(9, dur, order);
+    for (double t : {0.31, 0.77, 1.24, 1.85}) {
+      const kinova::JointTarget got = sample_target(tr, t);
+      ASSERT_TRUE(got.has_velocity) << "order=" << order;
+      EXPECT_EQ(got.has_acceleration, order >= 2);
+      const double h = 1e-5;
+      for (int j = 0; j < kinova::kNumJoints; ++j) {
+        EXPECT_NEAR(got.q[j], sample(tr, t)[j], 1e-12);
+        const double vel_fd = (sample(tr, t + h)[j] - sample(tr, t - h)[j]) / (2 * h);
+        EXPECT_NEAR(got.qd[j], vel_fd, 1e-4) << "order=" << order << " t=" << t << " j=" << j;
+        if (order >= 2) {
+          const double acc_fd =
+              (sample(tr, t + h)[j] - 2 * sample(tr, t)[j] + sample(tr, t - h)[j]) / (h * h);
+          EXPECT_NEAR(got.qdd[j], acc_fd, 1e-1) << "order=2 t=" << t << " j=" << j;
+        }
+      }
+    }
+  }
+}
+
+TEST(TrajectorySampleTarget, HeldOutsideTheSpanMeansZeroVelocity) {
+  // Before the start and past the end the reference is parked, so feeding a
+  // non-zero velocity forward would command motion that is not happening.
+  const Trajectory tr = analytic_traj(6, 2.0, /*order=*/2);
+  for (double t : {-0.5, 0.0, 2.0, 5.0}) {
+    const kinova::JointTarget got = sample_target(tr, t);
+    for (int j = 0; j < kinova::kNumJoints; ++j) {
+      EXPECT_NEAR(got.qd[j], 0.0, 1e-12) << "t=" << t;
+      EXPECT_NEAR(got.qdd[j], 0.0, 1e-12) << "t=" << t;
+    }
+  }
 }

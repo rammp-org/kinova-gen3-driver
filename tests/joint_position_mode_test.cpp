@@ -322,3 +322,67 @@ TEST(JointPosition, SetParamsTakesEffectOnTheNextCycle) {
   m.compute(fb, 0.001, c);
   EXPECT_NEAR(c.position[0], 0.0005 + 0.001, 1e-12);
 }
+
+// --- Reference velocity / feedforward ---------------------------------------
+
+// The reference velocity is the speed of the position we ACTUALLY command, so
+// it reflects the rate limiter rather than whatever the planner asked for.
+TEST(JointPosition, ReferenceVelocityFollowsTheRateLimitedReference) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(0.5);      // 0.5 rad/s
+  p.max_following_error = 0.0;           // isolate: no leash
+  JointPositionMode m(dyn, p);
+
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  JointVec target; target.setConstant(1.0);   // far away -> limiter saturates
+  m.set_target(target);
+
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  // Saturated: the reference moves max_ref_speed*dt, so its velocity IS the cap.
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(m.last_ref_velocity()[i], 0.5, 1e-9) << "joint " << i;
+
+  // Off by default: nothing is sent to the actuator and the field stays clean.
+  EXPECT_FALSE(c.velocity_active);
+  EXPECT_NEAR(c.velocity.norm(), 0.0, 1e-12);
+}
+
+TEST(JointPosition, VelocityFeedforwardIsEmittedOnlyWhenEnabled) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(0.5);
+  p.max_following_error = 0.0;
+  p.velocity_feedforward = true;
+  JointPositionMode m(dyn, p);
+
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  JointVec target; target.setConstant(1.0);
+  m.set_target(target);
+
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  EXPECT_TRUE(c.velocity_active);
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c.velocity[i], 0.5, 1e-9) << "joint " << i;
+}
+
+// A parked reference must feed nothing forward, however it got there.
+TEST(JointPosition, HoldingStillMeansZeroReferenceVelocity) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(0.5);
+  p.velocity_feedforward = true;
+  JointPositionMode m(dyn, p);
+
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  m.on_enter(fb);                    // no external target: hold the entry pose
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  m.compute(fb, 0.001, c);           // second cycle: definitively settled
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(m.last_ref_velocity()[i], 0.0, 1e-12) << "joint " << i;
+}

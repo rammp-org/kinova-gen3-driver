@@ -317,6 +317,119 @@ TEST(JointImpedance, JointTargetDrivesReferenceDirectlyBypassingIk) {
   }
 }
 
+// --- Feedforward from a planner profile -------------------------------------
+
+// Without a reference velocity the damper pulls against the arm precisely
+// because it is moving as commanded. Feeding qd_ref forward damps the velocity
+// ERROR instead, which is what removes the standing tracking lag.
+TEST(JointImpedance, ReferenceVelocityIsFedForwardOnlyWhenTheTargetCarriesOne) {
+  Dynamics dyn(URDF_PATH);
+  JointFeedback fb; fb.q = sample_q();
+  fb.qd.setConstant(0.4);                       // the arm is genuinely moving
+
+  // A realistic reference speed: at static_params()'s effectively-unlimited cap
+  // a one-cycle step would be tens of rad/s, and the damping torque would just
+  // saturate torque_limit, hiding the term under test.
+  const double kRefSpeed = 0.5;                 // rad/s
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(kRefSpeed);
+
+  JointVec q_cmd = sample_q();
+  q_cmd[0] += 0.05; q_cmd[3] -= 0.07;           // far enough that the limiter saturates
+  const double dt = 0.001;
+
+  // A: position-only target — the pre-existing behaviour.
+  JointImpedanceMode a(dyn, p);
+  a.on_enter(fb);
+  a.set_target(q_cmd);
+  JointCommand ca; a.compute(fb, dt, ca);
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(a.last_ref_velocity()[i], 0.0, 1e-12) << "no profile -> no feedforward";
+
+  // B: the same move, but the target carries a velocity profile.
+  JointImpedanceMode b(dyn, p);
+  b.on_enter(fb);
+  JointTarget t; t.q = q_cmd; t.has_velocity = true;
+  b.set_joint_target(t);
+  JointCommand cb; b.compute(fb, dt, cb);
+
+  // Both joints that move are past the cap, so the reference travels at exactly
+  // max_ref_speed, signed toward the target; the rest hold still.
+  JointVec expect_qd_ref = JointVec::Zero();
+  expect_qd_ref[0] = +kRefSpeed;
+  expect_qd_ref[3] = -kRefSpeed;
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(b.last_ref_velocity()[i], expect_qd_ref[i], 1e-6) << "joint " << i;
+
+  // Same spring, same gravity; the only difference is the damping term.
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(cb.torque[i] - ca.torque[i], b.last_damping()[i] * expect_qd_ref[i], 1e-6)
+        << "joint " << i;
+}
+
+// The teleop / Cartesian path has no profile and must be untouched.
+TEST(JointImpedance, PoseTargetPathFeedsNothingForward) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setConstant(0.3);
+  m.on_enter(fb);
+  m.set_target(dyn.fk(sample_q()));
+  JointCommand c; m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(m.last_ref_velocity()[i], 0.0, 1e-12) << "joint " << i;
+}
+
+// Inertial feedforward: the torque the planned acceleration needs, so the
+// spring is not left to produce it out of tracking error.
+TEST(JointImpedance, AccelerationFeedforwardAddsMassMatrixTimesQdd) {
+  Dynamics dyn(URDF_PATH);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  const double dt = 0.001;
+
+  JointVec qdd; qdd << 0.5, -0.3, 0.2, 0.7, -0.1, 0.4, -0.6;
+
+  // Target the CURRENT configuration: no spring error, no reference motion, so
+  // the acceleration term is the only thing left in the torque.
+  JointImpedanceMode base(dyn, static_params());
+  base.on_enter(fb);
+  JointTarget t0; t0.q = fb.q; t0.has_velocity = true;
+  base.set_joint_target(t0);
+  JointCommand c0; base.compute(fb, dt, c0);
+
+  JointImpedanceMode with_acc(dyn, static_params());
+  with_acc.on_enter(fb);
+  JointTarget t1; t1.q = fb.q; t1.qdd = qdd;
+  t1.has_velocity = true; t1.has_acceleration = true;
+  with_acc.set_joint_target(t1);
+  JointCommand c1; with_acc.compute(fb, dt, c1);
+
+  JointMat M; dyn.mass_matrix(fb.q, M);
+  const JointVec expected = M * qdd;
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c1.torque[i] - c0.torque[i], expected[i], 1e-9) << "joint " << i;
+}
+
+// Accelerations alone cannot select the inertial term: both Hermite forms need
+// velocities, and honouring qdd without qd would be a half-applied profile.
+TEST(JointImpedance, AccelerationWithoutVelocityIsIgnored) {
+  Dynamics dyn(URDF_PATH);
+  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointImpedanceMode base(dyn, static_params());
+  base.on_enter(fb);
+  base.set_target(fb.q);
+  JointCommand c0; base.compute(fb, 0.001, c0);
+
+  JointImpedanceMode odd(dyn, static_params());
+  odd.on_enter(fb);
+  JointTarget t; t.q = fb.q; t.qdd.setConstant(1.0);
+  t.has_velocity = false; t.has_acceleration = true;   // incoherent: ignore it
+  odd.set_joint_target(t);
+  JointCommand c1; odd.compute(fb, 0.001, c1);
+
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c1.torque[i], c0.torque[i], 1e-12) << "joint " << i;
+}
+
 TEST(JointImpedance, JointTargetSupersedesPoseTarget) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
