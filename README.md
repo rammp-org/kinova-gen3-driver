@@ -311,12 +311,12 @@ include/kinova_lowlevel/   joint_types.h units.h cartesian_types.h transport.h
                            control_mode.h dynamics.h cartesian.h rt_executor.h
                            telemetry.h telemetry_consumers.h rt_system.h
                            sim_transport.h kortex_transport.h
-                           gravity_comp_mode.h cartesian_impedance_mode.h
+                           joint_torque_mode.h cartesian_impedance_mode.h
                            joint_impedance_mode.h diff_ik.h pose_target_sink.h
                            teleop_protocol.h
 src/                       dynamics.cpp cartesian.cpp telemetry.cpp
                            telemetry_consumers.cpp rt_system.cpp sim_transport.cpp
-                           kortex_transport.cpp gravity_comp_mode.cpp
+                           kortex_transport.cpp joint_torque_mode.cpp
                            cartesian_impedance_mode.cpp diff_ik.cpp
                            joint_impedance_mode.cpp rt_executor.cpp
 apps/                      benchmark_grav_comp.cpp  benchmark_cartesian_impedance.cpp
