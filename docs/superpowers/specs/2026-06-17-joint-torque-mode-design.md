@@ -206,3 +206,15 @@ RT no-allocation behavior is covered by extending the existing `rt_safety_test`
   is rewired with no behavior change to the gravity-validation workflow.
 - `cmake --build build && ctest` passes, including the new
   `joint_torque_mode_test` and the existing `rt_safety_test`.
+
+## Reconciled 2026-08-26 (ported to main)
+
+- `torque_limit` is now **per-joint** (`JointVec`, default `(39,39,39,39,9,9,9)`),
+  not the scalar `39.0` this spec describes. A scalar sized for the proximal
+  joints overruns the wrist by 4x — the same defect `JointImpedanceParams`
+  documents.
+- The "Consolidation" section's removal of `GravityCompTorqueMode` was carried
+  out. `benchmark_grav_comp` was **kept and retargeted** to `JointTorqueMode`,
+  not removed: it backs the on-robot procedure in
+  `docs/integration/grav_comp_static_check.md` and is now the joint-torque-path
+  benchmark.

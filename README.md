@@ -44,7 +44,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `GravityCompTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`. The two impedance modes also implement `PoseTargetSink` so a pose-streaming front-end can drive either. See the [control-modes guide](docs/guide/control-modes.md). |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `JointTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`. Gravity compensation is not its own mode — it's `JointTorqueMode` with `tau_ff` never set. The two impedance modes also implement `PoseTargetSink` so a pose-streaming front-end can drive either. See the [control-modes guide](docs/guide/control-modes.md). |
 | `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`), `mass_matrix(q)` (CRBA), and `joint_limits()` for a validated EE frame. Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
@@ -293,7 +293,8 @@ Coverage:
 
 - **Unit:** `Dynamics` gravity at known poses + continuous-joint config
   round-trip; deg↔rad round-trips; `SampleRing` FIFO/drop/SPSC correctness;
-  `GravityCompTorqueMode.compute` = gravity + position passthrough.
+  `JointTorqueMode.compute` at zero feedforward = gravity + position
+  passthrough.
 - **SimTransport integration:** the whole executor + mode + dynamics + telemetry
   pipeline driven by the fake robot.
 - **RT-safety:** runs `RtExecutor` on `SimTransport` and asserts **zero major

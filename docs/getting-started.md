@@ -43,9 +43,9 @@ per-cycle timing. No robot is involved.
 ```sh
 cd build
 
-# Gravity compensation
+# Gravity compensation (JointTorqueMode with no feedforward)
 ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof_2f85.urdf \
-  --rate 1000 --duration 5
+  --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 
 # Cartesian impedance (holds the entry pose; push -> springs back)
 ./benchmark_cartesian_impedance --sim --urdf ../models/gen3_7dof_2f85.urdf \
