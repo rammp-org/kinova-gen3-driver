@@ -187,6 +187,19 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# velocity_probe answers ONE question: does this arm honour ActuatorMode::kVelocity?
+# That path is mapped in KortexTransport but has never been driven by any
+# ControlMode, and cannot be settled in sim (SimTransport is a static echo with no
+# plant). The whole streaming-setpoint design rests on it, so the probe runs first.
+# --dry-run is READ-ONLY. Defaults are deliberately tiny and the command is ramped.
+add_executable(velocity_probe apps/velocity_probe.cpp)
+target_link_libraries(velocity_probe PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(velocity_probe PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(velocity_probe PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(velocity_probe PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(velocity_probe PRIVATE KINOVA_NO_KORTEX)
 # joint_torque_check is the hardware validation harness for JointTorqueMode.
 # benchmark_grav_comp covers the zero-feedforward case; this covers the thing the
 # mode exists for -- a real feedforward via set_torque, and the staleness watchdog
