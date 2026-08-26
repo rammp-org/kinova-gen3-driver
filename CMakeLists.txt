@@ -187,6 +187,20 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# joint_torque_check is the hardware validation harness for JointTorqueMode.
+# benchmark_grav_comp covers the zero-feedforward case; this covers the thing the
+# mode exists for -- a real feedforward via set_torque, and the staleness watchdog
+# decaying it back to zero when the commands stop. --dry-run is READ-ONLY.
+add_executable(joint_torque_check apps/joint_torque_check.cpp)
+target_link_libraries(joint_torque_check PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(joint_torque_check PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(joint_torque_check PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(joint_torque_check PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(joint_torque_check PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # trajectory_run drives a joint-space trajectory on the arm through the non-RT
 # TrajectoryExecutor + JointPositionMode + RtExecutor -- the first on-robot
 # exercise of the interface execution core. --dry-run is READ-ONLY. The
