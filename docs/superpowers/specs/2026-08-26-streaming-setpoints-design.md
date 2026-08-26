@@ -187,16 +187,31 @@ that does not match the kind declared at open.
 transform. Carrying a frame enum would require the driver to know the camera
 transform, which is not its business.
 
-### 10. `GravityCompTorqueMode` and `benchmark_grav_comp` are removed
+### 10. `GravityCompTorqueMode` is removed; `benchmark_grav_comp` is retargeted
 
-**Decision.** Both deleted as part of the PR #3 rebase.
+**Decision.** The **mode** is deleted as part of the PR #3 rebase. The
+**benchmark binary is kept** and retargeted to `JointTorqueMode` with zero
+feedforward.
 
-**Why.** `GravityCompParams` is `{scale, damping, torque_limit}`;
+**Why the mode goes.** `GravityCompParams` is `{scale, damping, torque_limit}`;
 `JointTorqueParams` is that plus the watchdog fields, over the same law. So
 `JointTorqueMode` with `tau_ff = 0` **is** `GravityCompTorqueMode` — a degenerate
 configuration wearing a mode's clothes. Modes are named for their actuator
-contract, not for one output they happen to produce. The benchmark goes too;
-this also makes **issue #18** moot rather than something to fix.
+contract, not for one output they happen to produce.
+
+**Why the binary stays.** It is not only a benchmark: it backs the on-robot
+procedure in `docs/integration/grav_comp_static_check.md` (put the arm in torque
+mode with zero feedforward, confirm gravity compensation holds it up), and is
+referenced from `scripts/rt_setup.sh`, `docs/rt-tuning.md`,
+`docs/getting-started.md` and `docs/integration-runbook.md`. Nothing else
+provides that check. Retargeted, it also becomes the **torque-path benchmark**,
+sitting alongside `benchmark_cartesian_impedance` for the Cartesian torque path.
+Its name stays accurate: with zero feedforward, gravity compensation is exactly
+what it measures.
+
+**Consequence.** **Issue #18** (the documented invocation throws — the default EE
+frame is absent from the bare-arm URDF) becomes something to **fix**, not to
+close as moot.
 
 ## Component 1 — `StreamSink` and the value types
 
@@ -401,11 +416,13 @@ this runs before the velocity work is called done.
 
 ## Open decisions
 
-- **How to measure `JointVelocityMode`'s per-cycle cost.** With
-  `benchmark_grav_comp` removed, `benchmark_cartesian_impedance` is the only
-  benchmark and it exercises the impedance path only. Either add a mode flag to
-  it or write a small dedicated benchmark. The project bar requires RT changes to
-  be measured, so this must be resolved in the plan, not left open.
+- **How to measure `JointVelocityMode`'s per-cycle cost.** Retargeting
+  `benchmark_grav_comp` (decision 10) covers the joint-torque path and
+  `benchmark_cartesian_impedance` covers the Cartesian torque path, but **neither
+  exercises velocity mode**, whose per-cycle Jacobian and DLS solve is the one
+  genuinely new RT cost in this work. Either add a mode flag to an existing
+  benchmark or write a small dedicated one. The project bar requires RT changes
+  to be measured, so this must be resolved in Plan 2, not left open.
 
 ## Accepted gaps and risks
 
@@ -425,8 +442,9 @@ this runs before the velocity work is called done.
 ## Decomposition — three plans, in order
 
 1. **`JointTorqueMode` rebase** — PR #3 onto main, per-joint `torque_limit`,
-   remove `GravityCompTorqueMode` and `benchmark_grav_comp`, retarget the
-   RtSafety tests, close issue #18. Stands alone; no streaming content.
+   remove `GravityCompTorqueMode`, retarget `benchmark_grav_comp` and the
+   RtSafety tests to `JointTorqueMode`, fix issue #18. Stands alone; no
+   streaming content.
 2. **Mode work** — `JointVelocityMode` (with the DLS twist map, null-space term
    and URDF-seeded clamp) and `JointPositionMode`'s pose path. Both testable
    without any streaming surface.
