@@ -171,11 +171,21 @@ counter and two enums — no goal state, no clock, no threads.
 
 **Thread safety.** The ROS2 bring-up runs a real `MultiThreadedExecutor`, so
 `CommandSink` and `ArbitrationSink` calls can arrive concurrently on different
-threads. The Arbiter guards its state with a plain mutex. It is off the RT path
-and off the sampler tick, uncontended in practice (grants are rare; command
-admission holds it for a token comparison), and it must never be held across the
-downstream delegate call — `on_halt` in particular must not be invoked with the
-lock held.
+threads. The Arbiter guards its state with a plain mutex, off the RT path and off
+the sampler tick.
+
+The lock discipline is asymmetric, and both halves matter:
+
+- **Held across command delegation.** Admit-and-deliver must be atomic against
+  `revoke()`/`estop()`, or a command admitted a moment before a revoke can reach
+  the Supervisor *after* the halt has been processed — restarting a stopped arm.
+  This is safe because the downstream command handlers are non-blocking by
+  construction (an atomic pre-check, or a `push_back` under a briefly-held
+  `q_mtx_`) and never call back into the Arbiter, so there is no lock inversion.
+- **Never held across `on_halt`.** State is mutated under the lock, the lock is
+  released, and only then is `on_halt` invoked. Because the state change lands
+  first, no command can be admitted in the window between release and the halt
+  reaching the Supervisor.
 
 ## Component 2 — ports and value types
 
@@ -234,9 +244,17 @@ telemetry does not become coupled to arbitration.
 `result_code::kNotAuthorized = -8` (following `kPlanningFailed = -7`).
 *Known limitation:* rclcpp_action gives a client only "rejected" with no reason,
 so an unauthorized goal is indistinguishable from a malformed one client-side.
-The rate-limited reject log and `rejected_count` in the status topic are what
-make this debuggable — without them, a rejected command stream is
+`rejected_count` in the status topic plus a reject log at the **backend** are
+what make this debuggable — without them, a rejected command stream is
 indistinguishable from a dead subscriber or a QoS mismatch.
+
+**The Arbiter itself does not log.** The core library has no logging facility by
+design — `std::cerr` appears only under `apps/`, and the library's only `fprintf`
+is CSV telemetry. So the Arbiter *counts* (`rejected_count`) and returns a
+distinguishable rejection; the transport backend, which already holds the
+offending message and its sender, does the rate-limited logging in its own
+framework (`RCLCPP_WARN` on the ROS2 side). This keeps the core ROS-free and
+log-framework-free.
 
 ## Component 3 — the halt path
 
