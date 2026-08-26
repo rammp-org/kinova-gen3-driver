@@ -36,6 +36,15 @@ void JointTorqueMode::on_enter(const JointFeedback&) {
   // Enter as gravity-comp hold: discard any prior command and reset the
   // watchdog. Snapping last_seen_write_ to the current count means a command
   // sent before entry is NOT treated as fresh.
+  //
+  // Benign race: set_torque() does buffer store -> release-store the index ->
+  // fetch_add the counter (three separate steps). A non-RT set_torque() call
+  // that lands between the index store and the counter bump here can still be
+  // observed as "already counted" (or not) depending on interleaving, so a
+  // command issued concurrently with on_enter may or may not be discarded —
+  // it is adopted on the very next cycle either way. This is fine under the
+  // documented single-supervisor-thread usage (on_enter and set_torque are not
+  // expected to race in practice), but it is weaker than "always discarded."
   tau_ff_target_.setZero();
   tau_ff_applied_.setZero();
   stale_s_ = 0.0;

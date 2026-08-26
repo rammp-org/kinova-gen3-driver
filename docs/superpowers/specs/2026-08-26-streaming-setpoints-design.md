@@ -346,8 +346,9 @@ Lands **before** this work, as its own change. Beyond the rebase itself:
   `JointImpedanceParams` already documents why that is wrong: *"The URDF gives
   joints 5-7 an effort limit of 9 N·m; the single scalar … would overrun the
   wrist by 4x."* Torque mode has the bug the impedance mode was written to avoid.
-- **Remove `GravityCompTorqueMode`** and `benchmark_grav_comp` (decision 10).
-  `rt_safety_test.cpp` lines 32 and 242 retarget to `JointTorqueMode`.
+- **Remove `GravityCompTorqueMode`** (decision 10); `benchmark_grav_comp` is
+  kept and retargeted, not removed. `rt_safety_test.cpp` lines 32 and 242
+  retarget to `JointTorqueMode`.
 - Streaming then wires `set_torque` to a setpoint path; the mode's existing
   watchdog is already the right shape.
 

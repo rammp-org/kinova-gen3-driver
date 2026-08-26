@@ -149,8 +149,9 @@ TEST(JointTorque, WristClampsAtItsOwnLowerLimit) {
   Dynamics dyn(URDF_PATH);
   // Default limits: 39 N*m for joints 1-4, 9 N*m for the wrist (5-7).
   JointTorqueMode m(dyn, {1.0, 0.0, (JointVec() << 39,39,39,39,9,9,9).finished(), 0.0, 0.0});
-  m.set_torque(JointVec::Constant(1000.0));         // demand far beyond every limit
   JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_torque(JointVec::Constant(1000.0));         // demand far beyond every limit
   JointCommand out;
   m.compute(fb, 0.001, out);
   EXPECT_NEAR(out.torque[0], 39.0, 1e-9);           // proximal joint at its limit

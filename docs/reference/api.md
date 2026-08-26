@@ -162,7 +162,7 @@ void set_gains(const CartesianImpedanceParams& p) noexcept;
 
 Law: `tau = gravity + ramp·(Jᵀ(Kx∘e − Dx∘ẋ) + nullspace)`. Holds the entry pose
 until `set_target` is called. `Vector6` gain layout is `[x y z | rx ry rz]`. See
-the [guide](../guide/control-modes.md#cartesian-impedance--cartesianimpedancemode)
+the [guide](../guide/control-modes.md#cartesian-impedance-cartesianimpedancemode)
 and the [Deep Dive](../deep-dive/impedance.md).
 
 ---

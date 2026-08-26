@@ -124,9 +124,10 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
 
 # --- apps ---------------------------------------------------------------------
-# benchmark_grav_comp runs the gravity-comp mode through the RtExecutor and
-# reports timing. Verified with --sim (SimTransport); the real KORTEX path is
-# compiled in but only built/linked, never exercised while the robot is off.
+# benchmark_grav_comp runs JointTorqueMode (zero feedforward, i.e. gravity
+# compensation) through the RtExecutor and reports timing. Verified with --sim
+# (SimTransport); the real KORTEX path is compiled in but only built/linked,
+# never exercised while the robot is off.
 add_executable(benchmark_grav_comp apps/benchmark_grav_comp.cpp)
 target_link_libraries(benchmark_grav_comp PRIVATE kinova_lowlevel Eigen3::Eigen)
 target_include_directories(benchmark_grav_comp PRIVATE include)
