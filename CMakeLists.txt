@@ -186,6 +186,21 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# velocity_probe answers ONE question: does this arm honour ActuatorMode::kVelocity?
+# That path is mapped in KortexTransport but has never been driven by any
+# ControlMode, and cannot be settled in sim (SimTransport is a static echo with no
+# plant). The whole streaming-setpoint design rests on it, so the probe runs first.
+# --dry-run is READ-ONLY. Defaults are deliberately tiny and the command is ramped.
+add_executable(velocity_probe apps/velocity_probe.cpp)
+target_link_libraries(velocity_probe PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(velocity_probe PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(velocity_probe PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(velocity_probe PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(velocity_probe PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # trajectory_run drives a joint-space trajectory on the arm through the non-RT
 # TrajectoryExecutor + JointPositionMode + RtExecutor -- the first on-robot
 # exercise of the interface execution core. --dry-run is READ-ONLY. The
