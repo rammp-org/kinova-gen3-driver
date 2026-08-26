@@ -8,11 +8,18 @@
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --rate 1000
 //       --duration 5 --csv /tmp/bench.csv
 //
+// --ee-frame <name>: URDF link name Dynamics uses as the end effector (default
+// "end_effector_link", matching the bare-arm --urdf default above). The gripper
+// model names it differently, so pass it explicitly:
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --rate 1000 --duration 5
+//
 // --dry-run: READ-ONLY gravity validation. Connects and reads feedback only —
 // never enters low-level servoing, never commands torque. Prints measured joint
 // torque vs gravity(q) per joint so the URDF/dynamics can be checked against the
 // real arm BEFORE any torque is commanded. Move the arm by pendant between reads.
-//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf --duration 0
+//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --duration 0
 
 #include <atomic>
 #include <chrono>
