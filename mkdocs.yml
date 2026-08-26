@@ -22,6 +22,7 @@ nav:
   - Getting Started: getting-started.md
   - Guide:
       - Control Modes: guide/control-modes.md
+      - Arbitration: guide/arbitration.md
   - Reference:
       - API: reference/api.md
   - Deep Dive:

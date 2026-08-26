@@ -725,14 +725,14 @@ TEST(Supervisor, HaltLatchesTheTargetAtMeasuredQ) {
   interface::GoalId id{}; id[0] = 5;
   f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(id, g);
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
-  const double moving = f.sim.last_command().q[0];
+  const double moving = f.sim.last_command().position[0];
   EXPECT_GT(moving, 1e-3);                       // the reference had actually left 0
   f.sup.on_halt(interface::HaltReason::kEmergencyStop);
   std::this_thread::sleep_for(std::chrono::milliseconds(150));
   f.sup.stop(); f.teardown();
   // SimTransport is a static echo: measured q never leaves the seed, so a hold at
   // MEASURED q must snap the command back to it -- not park at the last reference.
-  EXPECT_NEAR(f.sim.last_command().q[0], 0.0, 1e-6);
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
 }
 ```
 
@@ -840,21 +840,22 @@ git commit -m "feat(interface): Supervisor halt path — settle all dropped goal
 ### Task 6: Integration — a real Arbiter in front of a real Supervisor
 
 **Files:**
-- Modify: `tests/interface/execution_integration_test.cpp`
+- Modify: `tests/interface/supervisor_test.cpp`
+
+> **Corrected during execution.** These tests were originally slated for
+> `tests/interface/execution_integration_test.cpp`, which turned out to be the wrong
+> home: that file is deliberately **single-threaded** and drives a `TrajectoryExecutor`
+> against a mode directly — it never constructs `SimTransport`, `RtExecutor` or a
+> `Supervisor`. The threaded fixture these tests need (`SupFix`) already lives in
+> `supervisor_test.cpp`, so the tests go there and the `sup_fixture.h` extraction step
+> is dropped entirely — fewer files touched, no test-only refactor.
 
 **Interfaces:**
 - Consumes: `Arbiter` (Task 2) and `Supervisor::on_halt` (Task 5).
 
-- [ ] **Step 1: Extract the shared fixture**
+- [ ] **Step 1: Write the failing tests**
 
-`SupFix` and `ramp7` currently live in an **anonymous namespace** in `tests/interface/supervisor_test.cpp`, so they are not reachable from another translation unit. Move both into a new `tests/interface/sup_fixture.h` (drop the anonymous namespace; make `ramp7` `inline`), and replace their definitions in `supervisor_test.cpp` with `#include "sup_fixture.h"`.
-
-Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='Supervisor*'`
-Expected: PASS, unchanged behaviour — this step is a pure move.
-
-- [ ] **Step 2: Write the failing tests**
-
-Append to `tests/interface/execution_integration_test.cpp`, including `sup_fixture.h` and `kinova_lowlevel/interface/arbiter.h`:
+Append to `tests/interface/supervisor_test.cpp`, adding `#include "kinova_lowlevel/interface/arbiter.h"` at the top. `SupFix` and `ramp7` are already in scope there:
 
 ```cpp
 TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
@@ -883,7 +884,7 @@ TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
 
   ASSERT_EQ(f.be.result_count(), 1u);            // exactly once, not zero and not twice
   EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
-  EXPECT_NEAR(f.sim.last_command().q[0], 0.0, 1e-6);   // held at measured q
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);   // held at measured q
 }
 
 TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
@@ -922,26 +923,24 @@ TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
 }
 ```
 
-Add `#include "kinova_lowlevel/interface/arbiter.h"` and `#include "sup_fixture.h"` at the top of the file.
-
-- [ ] **Step 3: Run tests to verify they fail**
+- [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='ArbitrationIntegration*'`
 Expected: FAIL (or compile error) until the fixture is wired.
 
-- [ ] **Step 4: Make them pass**
+- [ ] **Step 3: Make them pass**
 
 No new production code should be needed. If `ANewOwnerCanSwitchControlModeAfterAHalt` fails on the mode switch, check that the halt branch cleared `in_flight_` — `on_trajectory_goal`'s cross-mode pre-check reads it.
 
-- [ ] **Step 5: Run the whole suite**
+- [ ] **Step 4: Run the whole suite**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add tests/interface/execution_integration_test.cpp tests/interface/sup_fixture.h tests/interface/supervisor_test.cpp
+git add tests/interface/supervisor_test.cpp
 git commit -m "test(interface): arbitration integration — revoke mid-motion, re-arm in a new mode"
 ```
 
