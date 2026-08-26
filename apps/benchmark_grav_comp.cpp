@@ -47,6 +47,10 @@ void on_sigint(int) { g_stop.store(true); }
 int main(int argc, char** argv) {
   std::string ip;
   std::string urdf = "../models/gen3_7dof.urdf";
+  // Matches the DEFAULT --urdf below. models/gen3_7dof.urdf (bare arm) has
+  // "end_effector_link"; Dynamics defaults to "gen3_end_effector_link", which
+  // only exists in the gripper model. See issue #18.
+  std::string ee_frame = "end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -72,6 +76,7 @@ int main(int argc, char** argv) {
     else if (a == "--sim") use_sim = true;
     else if (a == "--dry-run") dry_run = true;
     else if (a == "--urdf") urdf = next("--urdf");
+    else if (a == "--ee-frame") ee_frame = next("--ee-frame");
     else if (a == "--rate") rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
     else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
@@ -99,7 +104,7 @@ int main(int argc, char** argv) {
             << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
             << "\n";
 
-  Dynamics dyn(urdf);
+  Dynamics dyn(urdf, ee_frame);
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;
