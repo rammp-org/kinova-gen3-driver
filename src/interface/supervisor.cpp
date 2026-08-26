@@ -4,6 +4,15 @@ namespace kinova::interface {
 using clock = std::chrono::steady_clock;
 static double secs_since(clock::time_point t0){ return std::chrono::duration<double>(clock::now()-t0).count(); }
 
+static const char* halt_reason_string(HaltReason r) {
+  switch (r) {
+    case HaltReason::kOwnershipRevoked: return "halted: ownership revoked";
+    case HaltReason::kEmergencyStop:    return "halted: emergency stop";
+    case HaltReason::kOperatorRequest:  return "halted: operator request";
+  }
+  return "halted";
+}
+
 Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, RtExecutor& exec,
                        Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
                        StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg)
@@ -47,6 +56,20 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
   JointVec q_meas = JointVec::Zero();   // last-good measured q; reused when a snapshot read fails
   GoalId queued_id{}; bool have_queued=false;
   while (running_.load(std::memory_order_acquire)) {
+    // 0) a halt jumps the queue: settle everything ACCEPTed, then hold where the arm IS.
+    bool halt = false; HaltReason hr = HaltReason::kOwnershipRevoked;
+    { std::lock_guard<std::mutex> l(q_mtx_);
+      if (halt_pending_) { halt = true; hr = halt_reason_; halt_pending_ = false; } }
+    if (halt) {
+      TrajectoryResult r; r.error_code = result_code::kHalted; r.error_string = halt_reason_string(hr);
+      if (have_active) action_.settle(active_id, r);
+      if (have_queued) action_.settle(queued_id, r);   // ACCEPTed already; dropping it orphans the client
+      traj_.emplace(active_sink());
+      have_active = false; have_queued = false; in_flight_.store(false);
+      JointFeedback fb; const bool ok = snap_.load(fb);
+      q_meas = sampled_q(ok, fb.q, q_meas);            // never inject a phantom zero here of all places
+      active_sink().set_target(q_meas);                // hold at MEASURED q, not the last reference
+    }
     // 1) drain inbox (only this thread touches traj_)
     for (;;) {
       Inbound in; { std::lock_guard<std::mutex> l(q_mtx_); if (inbox_.empty()) break; in=inbox_.front(); inbox_.pop_front(); }
@@ -136,8 +159,23 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g){
 void Supervisor::on_trajectory_accepted(const GoalId& id, const TrajectoryGoal& g){
   std::lock_guard<std::mutex> l(q_mtx_); inbox_.push_back({id, g, false});
 }
-CancelResponse Supervisor::on_trajectory_cancel(const GoalId& id){
-  std::lock_guard<std::mutex> l(q_mtx_); inbox_.push_back({id, {}, true}); return CancelResponse::kAccept;
+CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c){
+  std::lock_guard<std::mutex> l(q_mtx_); inbox_.push_back({c.id, {}, true}); return CancelResponse::kAccept;
+}
+// on_halt (backend thread): latch + flush the queue, nothing else. The sampler owns
+// traj_ and settle(), so the control action happens there -- which keeps
+// settle-exactly-once true by construction rather than by careful reasoning.
+void Supervisor::on_halt(HaltReason r) {
+  std::lock_guard<std::mutex> l(q_mtx_);
+  inbox_.clear();                 // a halt must never sit behind queued trajectories
+  halt_reason_ = r;
+  halt_pending_ = true;
+}
+
+kinova::JointTargetSink& Supervisor::active_sink() {
+  return active_mode_kind_ == ControlModeKind::kImpedance
+         ? static_cast<kinova::JointTargetSink&>(imp_)
+         : static_cast<kinova::JointTargetSink&>(pos_);
 }
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }

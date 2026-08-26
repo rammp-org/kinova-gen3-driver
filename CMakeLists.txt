@@ -84,7 +84,8 @@ set(KINOVA_LIB_SOURCES
     src/joint_position_mode.cpp
     src/rt_executor.cpp
     src/interface/trajectory_executor.cpp
-    src/interface/supervisor.cpp)
+    src/interface/supervisor.cpp
+    src/interface/arbiter.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -244,7 +245,8 @@ add_executable(unit_tests
     tests/feedback_tap_test.cpp
     tests/interface/trajectory_executor_test.cpp
     tests/interface/execution_integration_test.cpp
-    tests/interface/supervisor_test.cpp)
+    tests/interface/supervisor_test.cpp
+    tests/interface/arbiter_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 
