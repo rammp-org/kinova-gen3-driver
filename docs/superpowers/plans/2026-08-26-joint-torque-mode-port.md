@@ -332,12 +332,32 @@ In `CLAUDE.md`, `docs/getting-started.md`, `docs/rt-tuning.md` and `docs/integra
 
 In `docs/integration/grav_comp_static_check.md`, keep the procedure and reframe what it exercises: `JointTorqueMode` with no feedforward, i.e. gravity-compensation hold. The commands themselves are unchanged.
 
-- [ ] **Step 6: Verify the docs build**
+- [ ] **Step 6: Reconcile the ported design record**
+
+Task 1 copied `docs/superpowers/specs/2026-06-17-joint-torque-mode-design.md` verbatim as a historical record, and Tasks 2-4 have since diverged from it in two ways. Append a short dated note at the end of that file — do not rewrite the body, which is June's design as it stood:
+
+```markdown
+## Reconciled 2026-08-26 (ported to main)
+
+- `torque_limit` is now **per-joint** (`JointVec`, default `(39,39,39,39,9,9,9)`),
+  not the scalar `39.0` this spec describes. A scalar sized for the proximal
+  joints overruns the wrist by 4x — the same defect `JointImpedanceParams`
+  documents.
+- The "Consolidation" section's removal of `GravityCompTorqueMode` was carried
+  out. `benchmark_grav_comp` was **kept and retargeted** to `JointTorqueMode`,
+  not removed: it backs the on-robot procedure in
+  `docs/integration/grav_comp_static_check.md` and is now the joint-torque-path
+  benchmark.
+```
+
+This is the one exception to "do not edit June-dated superpowers docs" in Step 1: that rule protects records of what was true when written, and `CLAUDE.md` separately requires specs be kept in step with the code rather than left to drift. Appending a dated reconciliation note satisfies both; rewriting the body would not.
+
+- [ ] **Step 7: Verify the docs build**
 
 Run: `mkdocs build` (or `uv run --with mkdocs --with mkdocs-material mkdocs build -d /tmp/site`)
 Expected: no new warnings. Pre-existing warnings about `../README.md` and missing anchors are unrelated.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -A
