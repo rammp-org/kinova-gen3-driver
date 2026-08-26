@@ -77,7 +77,6 @@ set(KINOVA_LIB_SOURCES
     src/telemetry_consumers.cpp
     src/rt_system.cpp
     src/sim_transport.cpp
-    src/gravity_comp_mode.cpp
     src/joint_torque_mode.cpp
     src/cartesian_impedance_mode.cpp
     src/diff_ik.cpp
@@ -234,7 +233,6 @@ add_executable(unit_tests
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
-    tests/gravity_comp_mode_test.cpp
     tests/joint_torque_mode_test.cpp
     tests/rt_safety_test.cpp
     tests/cartesian_test.cpp

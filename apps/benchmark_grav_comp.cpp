@@ -26,7 +26,7 @@
 #include <thread>
 
 #include "kinova_lowlevel/dynamics.h"
-#include "kinova_lowlevel/gravity_comp_mode.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/sim_transport.h"
@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
   t.connect();
   t.set_servoing_low_level();
 
-  GravityCompTorqueMode mode(dyn, {scale, damping, torque_limit});
+  JointTorqueMode mode(dyn, {scale, damping, JointVec::Constant(torque_limit), 0.0, 0.0});
 
   RtExecutor ex(t, ring, {rate_hz, pacing, {rt_priority, cpu, true}});
   ex.request_mode(&mode);
