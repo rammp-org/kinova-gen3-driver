@@ -8,7 +8,10 @@ namespace kinova {
 struct JointTorqueParams {
   double scale         = 1.0;   // gravity scale
   double damping       = 0.0;   // joint velocity damping (N·m·s/rad)
-  double torque_limit  = 39.0;  // per-joint clamp on TOTAL output (N·m)
+  // Per-joint ceiling on the TOTAL output. The URDF gives joints 5-7 an effort
+  // limit of 9 N·m; a single scalar sized for the proximal joints would overrun
+  // the wrist by 4x. Mirrors JointImpedanceParams::torque_limit.
+  JointVec torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
   double cmd_timeout_s = 0.1;   // staleness watchdog window; <=0 disables
   double cmd_decay_s   = 0.05;  // ramp tau_ff -> 0 over this window on staleness
                                 // (<=0 => hard zero)

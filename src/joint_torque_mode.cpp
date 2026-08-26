@@ -80,7 +80,7 @@ void JointTorqueMode::compute(const JointFeedback& fb, double dt_s,
   dyn_.gravity(fb.q, g_);  // RT-safe: no alloc
   tau_ = p_.scale * g_ - p_.damping * fb.qd + tau_ff_applied_;
   for (int i = 0; i < kNumJoints; ++i) {
-    tau_[i] = std::clamp(tau_[i], -p_.torque_limit, p_.torque_limit);
+    tau_[i] = std::clamp(tau_[i], -p_.torque_limit[i], p_.torque_limit[i]);
   }
   out.mode = ActuatorMode::kTorque;
   out.torque = tau_;
