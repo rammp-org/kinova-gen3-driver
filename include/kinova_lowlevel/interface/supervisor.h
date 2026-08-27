@@ -70,18 +70,21 @@ class Supervisor : public CommandSink, public StreamSink {
   StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
 
   std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch
-  // Which mode the EXECUTOR is running. Written by the sampler on a goal-driven
-  // mode change AND by the backend thread when a streaming session opens in a
-  // different mode. It deliberately does NOT say what traj_ is bound to -- see
-  // traj_bound_kind_. Merging the two is what let a stream's mode change leave
-  // traj_ writing into a mode nobody is running.
-  ControlModeKind active_mode_kind_ = ControlModeKind::kPosition;
+  // Which mode the EXECUTOR is running. ATOMIC because it is written by the
+  // sampler on a goal-driven mode change AND by the backend thread when a
+  // streaming session opens in a different mode, while both threads read it.
+  // It deliberately does NOT say what traj_ is bound to -- see traj_bound_kind_.
+  // Merging the two is what let a stream's mode change leave traj_ writing into
+  // a mode nobody is running. It is also the ONLY record of the running mode:
+  // on_trajectory_goal reads it directly, so there is no second (binary) copy to
+  // fall out of step -- a kTorque stream is reported as kTorque, not as position.
+  std::atomic<ControlModeKind> active_mode_kind_{ControlModeKind::kPosition};
   // Which mode's sink traj_ is actually bound to. SAMPLER-OWNED: set at every
   // traj_.emplace() and read only by the sampler, so no backend-thread mode
-  // change can desynchronise it from traj_.
+  // change can desynchronise it from traj_. Both must agree with the goal before
+  // the rebind may be skipped -- either one alone leaves a silent desync.
   ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
   std::atomic<bool> in_flight_{false};                // read by on_trajectory_goal
-  std::atomic<uint8_t> atomic_mode_{0};               // 0=pos 1=imp; read by on_trajectory_goal
 
   StreamingSession  session_;                         // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};              // mirrors session_, read by the sampler + goal pre-check

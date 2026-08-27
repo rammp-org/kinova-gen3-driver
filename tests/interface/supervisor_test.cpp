@@ -11,6 +11,7 @@
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/dynamics.h"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -624,4 +625,80 @@ TEST(Supervisor, AnImpedanceGoalAfterAnImpedanceStreamDrivesTheRunningMode) {
   // The discriminating assertion: the trajectory reached the mode the EXECUTOR is
   // running. Bound to the wrong sink, imp_ would never leave its entry reference.
   EXPECT_GT(f.imp.reference()[0], 1e-2);
+}
+
+// Mirror of the case above, and the one the first fix left open. After a
+// kImpedance stream closes, active_mode_kind_ is kImpedance while traj_bound_kind_
+// is still kPosition. A kPosition goal MATCHES traj_bound_kind_, so a rebind
+// condition that tests only that skips the switch: exec_ keeps running imp_,
+// traj_ drives pos_, and the goal settles SUCCESSFUL with the arm motionless.
+// Asserting pos_'s reference is what discriminates -- q_ref_ advances only inside
+// compute(), which is never called for a mode the executor is not running.
+TEST(Supervisor, APositionGoalAfterAnImpedanceStreamDrivesTheRunningMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;   // switches the executor to imp_
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Zero();
+  f.sup.on_setpoint_joint_position(sp);
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.2, 0.5);
+  g.control_mode = interface::ControlModeKind::kPosition;    // back to the mode traj_ is bound to
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 32;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));   // settle + duration
+  f.sup.stop(); f.teardown();
+
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
+  // The discriminating assertion: the executor was switched BACK to pos_, so
+  // pos_ integrated the streamed reference. Left running imp_, this stays 0.
+  EXPECT_GT(f.pos.reference()[0], 1e-2);
+}
+
+// End-to-end kTorque stream: open, push setpoints, close. SimTransport is a static
+// echo so the arm never moves; the observable is the COMMANDED torque, which for
+// this mode is clamp(gravity(q) + tau_ff). The RT thread is stopped before
+// last_command() is read so the read cannot race the 1 kHz writer, and the close
+// then runs the torque branch of close_stream()'s default-restore.
+TEST(Supervisor, StreamingJointTorqueDrivesTheTorqueMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointTorque;
+  r.control_mode = interface::ControlModeKind::kTorque;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(1.0);
+  for (int i = 0; i < 10; ++i) {
+    f.sup.on_setpoint_joint_torque(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();                                    // freeze last_cmd_ before reading it
+  const JointCommand cmd = f.sim.last_command();
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);                        // torque branch of the default-restore
+  f.sup.stop();
+
+  EXPECT_EQ(cmd.mode, ActuatorMode::kTorque);
+  JointVec g0; f.dyn.gravity(JointVec::Zero(), g0);   // measured q never leaves 0
+  const JointVec lim = JointTorqueParams{}.torque_limit;
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double want = std::max(-lim[i], std::min(lim[i], g0[i] + 1.0));
+    EXPECT_NEAR(cmd.torque[i], want, 1e-9) << "joint " << i;
+  }
+  // A goal is admissible again, so the session really is closed.
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
 }

@@ -23,7 +23,7 @@ Supervisor::~Supervisor(){ stop(); }
 void Supervisor::start() {
   exec_.request_mode(&pos_);                       // initial mode = position
   traj_.emplace(pos_);                             // executor bound to the active mode's sink
-  active_mode_kind_ = ControlModeKind::kPosition;  atomic_mode_.store(0);
+  active_mode_kind_.store(ControlModeKind::kPosition);
   traj_bound_kind_  = ControlModeKind::kPosition;
   t0_ = clock::now();                              // origin for every session/expiry stamp
   running_.store(true);
@@ -66,7 +66,7 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
       TrajectoryResult r; r.error_code = result_code::kHalted; r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
       if (have_queued) action_.settle(queued_id, r);   // ACCEPTed already; dropping it orphans the client
-      traj_.emplace(active_sink()); traj_bound_kind_ = active_mode_kind_;
+      traj_.emplace(active_sink()); traj_bound_kind_ = active_mode_kind_.load();
       have_active = false; have_queued = false; in_flight_.store(false);
       JointFeedback fb; const bool ok = snap_.load(fb);
       q_meas = sampled_q(ok, fb.q, q_meas);            // never inject a phantom zero here of all places
@@ -86,10 +86,10 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         // commanding its last reference, so the arm holds where it was.
         if (have_active) { TrajectoryResult r; r.error_code=result_code::kPreempted; action_.settle(active_id, r); }
         if (have_queued) { TrajectoryResult r; r.error_code=result_code::kPreempted; action_.settle(queued_id, r); }
-        traj_.emplace(active_mode_kind_==ControlModeKind::kImpedance
+        traj_.emplace(active_mode_kind_.load()==ControlModeKind::kImpedance
                       ? static_cast<kinova::JointTargetSink&>(imp_)
                       : static_cast<kinova::JointTargetSink&>(pos_));
-        traj_bound_kind_ = active_mode_kind_;
+        traj_bound_kind_ = active_mode_kind_.load();
         have_active=false; have_queued=false; in_flight_.store(false);
         continue;
       }
@@ -104,12 +104,18 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         r.error_string = "trajectory execution supports position and impedance only";
         action_.settle(in.id, r); continue;
       }
-      // Compare against what traj_ is BOUND to, not what the executor is running.
-      // A streaming session can have moved active_mode_kind_ from the backend
-      // thread without touching traj_ (which only this thread may rebuild), so
-      // comparing against active_mode_kind_ would skip the rebind and leave the
-      // executor driving one mode while traj_ wrote targets into another.
-      if (in.goal.control_mode != traj_bound_kind_) {
+      // Rebind unless BOTH agree with the goal. A streaming session moves
+      // active_mode_kind_ from the backend thread without touching traj_ (which
+      // only this thread may rebuild), so the two can disagree in either
+      // direction and each one alone is a silent mis-mapping:
+      //   * != traj_bound_kind_ only: a kPosition goal after a kImpedance stream
+      //     skips the rebind, so traj_ drives pos_ while the executor runs imp_.
+      //   * != active_mode_kind_ only: a goal in the mode the executor already
+      //     runs skips the rebind, so traj_ keeps writing the previous sink.
+      // Either way the arm sits still and the goal settles SUCCESSFUL. Testing
+      // both makes the rebind a no-op at worst.
+      if (in.goal.control_mode != traj_bound_kind_ ||
+          in.goal.control_mode != active_mode_kind_.load()) {
         if (have_active) {   // cross-mode goal slipped past the accept-time pre-check (in_flight_ lag); a mode change requires the arm at rest
           TrajectoryResult r; r.error_code = result_code::kInvalidGoal;
           r.error_string = "mode change while a trajectory is in flight";
@@ -119,10 +125,10 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
           if (in.goal.has_gains) { JointImpedanceParams p; p.Kq=in.goal.gains.kq; p.zeta=in.goal.gains.zeta;
                                    p.torque_limit=in.goal.gains.torque_limit; imp_.set_gains(p); }
           exec_.request_mode(&imp_); traj_.emplace(imp_);   // no-op in the executor if already active
-          active_mode_kind_=ControlModeKind::kImpedance; atomic_mode_.store(1);
+          active_mode_kind_.store(ControlModeKind::kImpedance);
         } else {
           exec_.request_mode(&pos_); traj_.emplace(pos_);
-          active_mode_kind_=ControlModeKind::kPosition; atomic_mode_.store(0);
+          active_mode_kind_.store(ControlModeKind::kPosition);
         }
         traj_bound_kind_ = in.goal.control_mode;
         std::this_thread::sleep_for(                                    // let the RT loop adopt + on_enter settle
@@ -183,8 +189,11 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g){
       g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;    // trajectory execution is position/impedance only
   }
-  const uint8_t want = (g.control_mode==ControlModeKind::kImpedance)?1:0;
-  if (in_flight_.load() && want != atomic_mode_.load()) return GoalResponse::kReject; // mode-change-while-moving
+  // in_flight_ implies a goal is running, so a stream cannot be open and
+  // active_mode_kind_ is one of the same two kinds g.control_mode was just
+  // filtered to. Reading it directly keeps ONE record of the running mode.
+  if (in_flight_.load() && g.control_mode != active_mode_kind_.load())
+    return GoalResponse::kReject;                                    // mode-change-while-moving
   return GoalResponse::kAccept;
 }
 void Supervisor::on_trajectory_accepted(const GoalId& id, const TrajectoryGoal& g){
@@ -205,7 +214,7 @@ void Supervisor::on_halt(HaltReason r) {
 }
 
 kinova::JointTargetSink& Supervisor::active_sink() {
-  return active_mode_kind_ == ControlModeKind::kImpedance
+  return active_mode_kind_.load() == ControlModeKind::kImpedance
          ? static_cast<kinova::JointTargetSink&>(imp_)
          : static_cast<kinova::JointTargetSink&>(pos_);
 }
@@ -230,12 +239,11 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
 
   // Switch modes BEFORE the session is marked open, so no setpoint can land mid-switch.
   const ControlModeKind want = r.control_mode;
-  if (want != active_mode_kind_) {
+  if (want != active_mode_kind_.load()) {
     if      (want == ControlModeKind::kImpedance) exec_.request_mode(&imp_);
     else if (want == ControlModeKind::kTorque)    exec_.request_mode(&tau_);
     else                                          exec_.request_mode(&pos_);
-    active_mode_kind_ = want;
-    atomic_mode_.store(want == ControlModeKind::kImpedance ? 1 : 0);
+    active_mode_kind_.store(want);
     std::this_thread::sleep_for(std::chrono::duration_cast<clock::duration>(
         std::chrono::duration<double>(cfg_.mode_settle_s)));
   }
@@ -264,8 +272,9 @@ void Supervisor::close_stream() {
     // position would resume slewing toward the last streamed target. The spec gives
     // the session the lifecycle, so the teardown owns the hold. Written before the
     // disarm below so the mode never sees an un-held cycle.
-    if (active_mode_kind_ == ControlModeKind::kPosition ||
-        active_mode_kind_ == ControlModeKind::kImpedance) {
+    const ControlModeKind running = active_mode_kind_.load();
+    if (running == ControlModeKind::kPosition ||
+        running == ControlModeKind::kImpedance) {
       JointFeedback fb; const bool ok = snap_.load(fb);
       if (ok || have_hold_q_) {                    // a failed Seqlock read must never inject a zero
         stream_hold_q_ = sampled_q(ok, fb.q, stream_hold_q_);
@@ -278,9 +287,9 @@ void Supervisor::close_stream() {
     // outright and silently destroy a timeout somebody set at construction.
     // Torque mode has no joint target to hold; restoring its default is what makes
     // it safe, by ramping the feedforward to zero, i.e. gravity-comp hold.
-    if (active_mode_kind_ == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
-    if (active_mode_kind_ == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
-    if (active_mode_kind_ == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
+    if (running == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
+    if (running == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
+    if (running == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
   }
 }
 
