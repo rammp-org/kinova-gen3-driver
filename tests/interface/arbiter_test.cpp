@@ -1,5 +1,9 @@
 #include <gtest/gtest.h>
 #include <vector>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include "kinova_lowlevel/interface/arbiter.h"
 
 using namespace kinova;
@@ -154,12 +158,53 @@ TEST(Arbiter, EstopHaltsDropsTheGrantAndRejectsEverything) {
   RecordingSink sink; Arbiter arb{sink, sink, ArbitrationMode::kEnforced, 1234};
   const Token t = arb.grant("planner").token;
   arb.estop();
-  ASSERT_EQ(sink.halts.size(), 1u);
+  // TWICE by design: once immediately (before estop() contends for m_, so the arm
+  // stops without waiting on a mode settle) and once under m_, which is what orders
+  // the flush after any delegate that had already passed admit(). See Arbiter::estop.
+  ASSERT_EQ(sink.halts.size(), 2u);
   EXPECT_EQ(sink.halts[0], HaltReason::kEmergencyStop);
+  EXPECT_EQ(sink.halts[1], HaltReason::kEmergencyStop);
   EXPECT_EQ(arb.on_trajectory_goal(goal_with(t)), GoalResponse::kRejectUnauthorized);
   EXPECT_EQ(sink.goals, 0);
   EXPECT_TRUE(arb.status().estopped);
   EXPECT_FALSE(arb.status().owned);
+}
+
+// Regression (fix wave, finding 2): estop() latches estopped_ BEFORE it contends for
+// m_ -- that is what makes the stop fast -- while estop_clear() clears it UNDER m_. A
+// clear landing between the latch and estop()'s own acquisition must not survive: the
+// arm would be left un-estopped after estop() had returned. The window is opened
+// deterministically by gating the sink's on_halt, which estop() runs before taking m_.
+namespace {
+struct GatedHaltSink : RecordingSink {
+  std::mutex mu; std::condition_variable cv;
+  bool in_halt = false, gate_open = false;
+  void on_halt(HaltReason r) override {
+    std::unique_lock<std::mutex> l(mu);
+    RecordingSink::on_halt(r);
+    if (gate_open) return;                       // one-shot: only the FIRST delivery waits
+    in_halt = true; cv.notify_all();
+    cv.wait(l, [this]{ return gate_open; });
+  }
+};
+}  // namespace
+
+TEST(Arbiter, AnEstopClearInsideTheEstopWindowCannotUnlatchTheStop) {
+  GatedHaltSink sink; Arbiter arb{sink, sink, ArbitrationMode::kDisabled, 1234};
+  std::thread e([&]{ arb.estop(); });
+  {  // wait for estop() to be inside on_halt, i.e. latched but not yet holding m_
+    std::unique_lock<std::mutex> l(sink.mu);
+    const bool entered = sink.cv.wait_for(l, std::chrono::seconds(2), [&]{ return sink.in_halt; });
+    ASSERT_TRUE(entered) << "estop() never reached on_halt; the race window was missed";
+  }
+  arb.estop_clear();                             // m_ is free: this WILL win the store race
+  { std::lock_guard<std::mutex> l(sink.mu); sink.gate_open = true; }
+  sink.cv.notify_all();
+  e.join();
+  EXPECT_TRUE(arb.status().estopped) << "an estop_clear un-latched a stop that had already been ordered";
+  // ...and it is a real refusal, not just a status bit (kDisabled bypasses tokens).
+  EXPECT_EQ(arb.on_trajectory_goal(goal_with(Token{})), GoalResponse::kRejectUnauthorized);
+  EXPECT_EQ(sink.goals, 0);
 }
 
 TEST(Arbiter, EstopLatchesAndRefusesAFreshGrant) {

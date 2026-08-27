@@ -332,6 +332,12 @@ The general "stop the arm now" primitive — used by ownership revocation and
 `/estop` alike. The caller declares **why**; the `Supervisor` decides **how**.
 In v1 every reason produces the same action: cancel and hold.
 
+`on_halt` **must be idempotent**: `estop()` delivers it twice — once immediately,
+before it contends for the arbiter's lock (so the arm stops without waiting on a
+mode switch), and once while holding that lock, which is what orders the queue
+flush after any command that had already been admitted. `Supervisor::on_halt`
+satisfies this by construction: it latches a flag and clears a deque.
+
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**

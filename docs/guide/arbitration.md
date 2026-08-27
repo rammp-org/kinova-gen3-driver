@@ -65,6 +65,12 @@ until an explicit `estop_clear()`, which exits to *no owner* — never straight
 back to owned, so someone must deliberately re-grant. Clear works in any
 arbitration mode, so you cannot strand yourself.
 
+The latch is set *before* `estop()` takes the arbiter's lock, so a stop is never
+delayed by an in-progress mode switch, and the halt goes downstream immediately.
+It is then re-applied under the lock, which is what stops a command admitted a
+moment earlier from landing after the queue was flushed — so a `CommandSink` sees
+`on_halt(kEmergencyStop)` **twice** per e-stop and must be idempotent.
+
 !!! warning "This is a software e-stop"
     It depends on the driver process being alive and scheduled. It is **not** a
     hardware safety chain and not a substitute for a hardware E-stop.

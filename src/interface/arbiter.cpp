@@ -51,12 +51,26 @@ void Arbiter::revoke() {
 //   2. deliver the halt immediately, still without m_ (on_halt is never called
 //      under it anyway);
 //   3. only then take m_ for the ownership bookkeeping, which is not
-//      safety-critical because step 1 already refuses every command.
+//      safety-critical because step 1 already refuses every command;
+//   4. re-latch and re-deliver the halt under m_ -- see the two comments inside.
 void Arbiter::estop() {
   estopped_.store(true, std::memory_order_release);
   down_.on_halt(HaltReason::kEmergencyStop);   // unconditional: e-stop always halts
   std::lock_guard<std::mutex> l(m_);
+  // Re-latch UNDER m_. The early store races an estop_clear() already holding m_,
+  // which would otherwise clear the latch AFTER estop() set it and leave estop()
+  // returning to a non-estopped arbiter. The last writer under m_ must be the stop.
+  estopped_.store(true, std::memory_order_release);
   owned_ = false; token_ = Token{}; owner_id_.clear();
+  // Re-deliver the halt now that m_ is held. The first delivery could not see a
+  // delegate that had ALREADY passed admit(): on_trajectory_accepted holds m_ across
+  // its push into the Supervisor's inbox, so a goal admitted a moment before the
+  // latch could land after that on_halt flushed the queue -- and then be drained and
+  // executed. Motion after an e-stop. Holding m_ makes this delivery strictly later
+  // than every such in-flight delegate, so the flush cannot be outrun.
+  // Safe to repeat: Supervisor::on_halt only latches a flag and clears a deque, and
+  // its close_stream() is a no-op on an already-closed session.
+  down_.on_halt(HaltReason::kEmergencyStop);
 }
 
 void Arbiter::estop_clear() {

@@ -66,8 +66,6 @@ class Supervisor : public CommandSink, public StreamSink {
   // nullptr for the kinds that have no joint target (kTorque, kVelocity) so a
   // caller must decide what to do rather than silently writing into pos_.
   kinova::JointTargetSink* sink_for(ControlModeKind);
-  // The sink a streaming session writes to, chosen by its declared control mode.
-  kinova::JointTargetSink& stream_joint_sink();      // pos_ or imp_
   // One teardown, three callers: graceful close, deadline expiry, and on_halt.
   void close_stream();
 

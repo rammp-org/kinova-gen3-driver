@@ -355,7 +355,13 @@ void Supervisor::close_stream() {
 void Supervisor::on_setpoint_joint_position(const JointSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   if (!session_.admit(SetpointKind::kJointPosition, secs_since(t0_))) return;
-  stream_joint_sink().set_target(s.values);
+  // sink_for() is the ONE map from mode kind to joint sink -- the same one the halt
+  // and close paths use. The old binary "impedance or else" was correct only because
+  // pair_supported (another translation unit) confines kJointPosition to position and
+  // impedance; safety must not depend on a table somewhere else. nullptr here means
+  // the running mode has no joint target, so the setpoint is dropped rather than
+  // written into a mode the executor is not running.
+  if (kinova::JointTargetSink* sink = sink_for(session_.control_mode())) sink->set_target(s.values);
 }
 void Supervisor::on_setpoint_pose(const PoseSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
@@ -371,10 +377,4 @@ void Supervisor::on_setpoint_joint_torque(const JointSetpoint& s) {
 // must exist to satisfy the port until Plan 2 adds JointVelocityMode.
 void Supervisor::on_setpoint_joint_velocity(const JointSetpoint&) {}
 void Supervisor::on_setpoint_twist(const TwistSetpoint&) {}
-
-kinova::JointTargetSink& Supervisor::stream_joint_sink() {
-  return session_.control_mode() == ControlModeKind::kImpedance
-         ? static_cast<kinova::JointTargetSink&>(imp_)
-         : static_cast<kinova::JointTargetSink&>(pos_);
-}
 }  // namespace kinova::interface

@@ -12,6 +12,7 @@
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/dynamics.h"
 #include <algorithm>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -426,6 +427,67 @@ TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
   ASSERT_EQ(results.size(), 2u);
   EXPECT_EQ(results[0].second.error_code, interface::result_code::kHalted);      // halted position goal
   EXPECT_EQ(results[1].second.error_code, interface::result_code::kSuccessful);  // the new owner's goal
+}
+
+// Regression (fix wave, finding 1): estop() delivers its halt BEFORE it takes the
+// Arbiter's m_, so a delegate that had ALREADY passed admit() is still running
+// downstream -- and Supervisor::on_trajectory_accepted pushes into inbox_ *after*
+// on_halt flushed it. The sampler consumes halt_pending_ in step 0, then drains that
+// late arrival in step 1 and drives it: motion after an e-stop. The window is
+// nanoseconds wide in production, so it is widened deterministically here by holding
+// the delegate in flight -- which is also the realistic case, since a backend
+// delegate may be preempted for arbitrarily long between admit and push.
+namespace {
+struct SlowAcceptSink : interface::CommandSink {
+  interface::CommandSink& down;
+  std::chrono::milliseconds hold;
+  std::atomic<bool> entered{false};
+  SlowAcceptSink(interface::CommandSink& d, std::chrono::milliseconds h) : down(d), hold(h) {}
+  interface::GoalResponse on_trajectory_goal(const interface::TrajectoryGoal& g) override {
+    return down.on_trajectory_goal(g); }
+  void on_trajectory_accepted(const interface::GoalId& id, const interface::TrajectoryGoal& g) override {
+    entered.store(true);
+    std::this_thread::sleep_for(hold);            // admitted; the push has not happened yet
+    down.on_trajectory_accepted(id, g);
+  }
+  interface::CancelResponse on_trajectory_cancel(const interface::CancelRequest& c) override {
+    return down.on_trajectory_cancel(c); }
+  interface::GainsResult on_set_gains(const interface::GainsRequest& r) override { return down.on_set_gains(r); }
+  interface::ArmState    on_query_state() override { return down.on_query_state(); }
+  void                   on_halt(interface::HaltReason r) override { down.on_halt(r); }
+};
+}  // namespace
+
+TEST(ArbitrationIntegration, AGoalAdmittedJustBeforeAnEstopNeverReachesTheArm) {
+  SupFix f;
+  SlowAcceptSink slow{f.sup, std::chrono::milliseconds(150)};
+  interface::Arbiter arb{slow, f.sup, interface::ArbitrationMode::kDisabled, 7};
+  f.sup.start(); f.run_rt();
+
+  interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.3, 0.5);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 51;
+  ASSERT_EQ(arb.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  std::thread t([&]{ arb.on_trajectory_accepted(id, g); });      // admits, then holds in flight
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!slow.entered.load() && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  if (!slow.entered.load()) {                                    // never vacuously green
+    t.join(); f.sup.stop(); f.teardown();
+    FAIL() << "the delegate never started; the race window was missed";
+  }
+  arb.estop();                    // latches + halts, then waits on m_ for the delegate
+  t.join();
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));   // > the 0.5 s ramp
+  f.sup.stop(); f.teardown();
+  // The ramp asked for 0.3 rad from 0.0, so anything that ran at all is visible in the
+  // command. The tolerance covers the documented residual: the sampler could still
+  // drain in the microseconds between the delegate releasing m_ and the second
+  // on_halt, which costs at most one sampler period of ramp (~2 mrad).
+  EXPECT_LT(std::abs(f.sim.last_command().position[0]), 0.01)
+      << "a goal admitted before the e-stop was executed after it";
 }
 
 TEST(ValueTypes, StreamingDefaultsAndResultCodes) {
