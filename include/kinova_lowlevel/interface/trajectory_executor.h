@@ -28,7 +28,7 @@ struct Trajectory {
 kinova::JointVec sample(const Trajectory& tr, double t_s);
 
 enum class Preemption { kQueue, kLatestWins };
-enum class ControlModeKind { kPosition, kImpedance };
+enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };
 enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };
 
 struct ExecStatus {

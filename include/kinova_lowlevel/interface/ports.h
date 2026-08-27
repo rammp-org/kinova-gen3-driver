@@ -26,4 +26,15 @@ class ArbitrationSink { public: virtual ~ArbitrationSink() = default;
   virtual void              estop() = 0;
   virtual void              estop_clear() = 0;
   virtual ArbitrationStatus status() const = 0; };
+
+// Driving port for the streaming tier. Separate from CommandSink, which is
+// already six methods: a backend implements only the concerns it supports.
+class StreamSink { public: virtual ~StreamSink() = default;
+  virtual StreamOpenResult on_stream_open(const StreamOpenRequest&) = 0;
+  virtual void             on_stream_close(const StreamCloseRequest&) = 0;
+  virtual void             on_setpoint_joint_position(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_joint_velocity(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_joint_torque(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_pose(const PoseSetpoint&) = 0;
+  virtual void             on_setpoint_twist(const TwistSetpoint&) = 0; };
 }  // namespace kinova::interface

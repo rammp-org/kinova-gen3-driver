@@ -26,7 +26,7 @@ inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
 
 struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; double mode_settle_s = 0.25; };
 
-class Supervisor : public CommandSink {
+class Supervisor : public CommandSink, public StreamSink {
  public:
   Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, RtExecutor& exec,
              Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
@@ -42,6 +42,15 @@ class Supervisor : public CommandSink {
   GainsResult    on_set_gains(const GainsRequest&) override;
   ArmState       on_query_state() override;
   void           on_halt(HaltReason) override;
+
+  // StreamSink (stubbed here; real behaviour is Task 6):
+  StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
+  void             on_stream_close(const StreamCloseRequest&) override;
+  void             on_setpoint_joint_position(const JointSetpoint&) override;
+  void             on_setpoint_joint_velocity(const JointSetpoint&) override;
+  void             on_setpoint_joint_torque(const JointSetpoint&) override;
+  void             on_setpoint_pose(const PoseSetpoint&) override;
+  void             on_setpoint_twist(const TwistSetpoint&) override;
 
  private:
   struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };

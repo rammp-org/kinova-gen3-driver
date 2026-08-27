@@ -152,6 +152,10 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
 // on_trajectory_goal (backend thread): fast pre-check only, no executor mutation.
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g){
   if (g.trajectory.points.empty()) return GoalResponse::kReject;                 // INVALID_GOAL
+  if (g.control_mode == ControlModeKind::kVelocity ||
+      g.control_mode == ControlModeKind::kTorque) {
+    return GoalResponse::kReject;    // trajectory execution is position/impedance only
+  }
   const uint8_t want = (g.control_mode==ControlModeKind::kImpedance)?1:0;
   if (in_flight_.load() && want != atomic_mode_.load()) return GoalResponse::kReject; // mode-change-while-moving
   return GoalResponse::kAccept;
@@ -179,4 +183,14 @@ kinova::JointTargetSink& Supervisor::active_sink() {
 }
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }
+
+StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest&){
+  return {false, result_code::kStreamRejected, "streaming not yet wired"};   // Task 6
+}
+void Supervisor::on_stream_close(const StreamCloseRequest&){}
+void Supervisor::on_setpoint_joint_position(const JointSetpoint&){}
+void Supervisor::on_setpoint_joint_velocity(const JointSetpoint&){}
+void Supervisor::on_setpoint_joint_torque(const JointSetpoint&){}
+void Supervisor::on_setpoint_pose(const PoseSetpoint&){}
+void Supervisor::on_setpoint_twist(const TwistSetpoint&){}
 }  // namespace kinova::interface

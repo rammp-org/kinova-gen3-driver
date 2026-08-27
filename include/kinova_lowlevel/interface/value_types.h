@@ -14,6 +14,26 @@ enum class ArbitrationMode { kEnforced, kDisabled };
 // The caller declares WHY the arm must stop; the supervisor decides HOW.
 enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 
+// What a streaming client sends. The METHOD on StreamSink disambiguates which
+// struct applies -- there is deliberately no tag field on the setpoint itself,
+// so "kind says pose, pose field is garbage" is not representable.
+enum class SetpointKind { kJointPosition, kEePose, kJointVelocity, kEeTwist, kJointTorque };
+
+struct StreamOpenRequest {
+  SetpointKind    kind         = SetpointKind::kJointPosition;
+  ControlModeKind control_mode = ControlModeKind::kPosition;
+  double          timeout_s    = 0.1;   // <= 0 is REJECTED at open: no deadline, no safe-stop
+  Token           token{};
+};
+struct StreamOpenResult   { bool accepted=false; int error_code=0; std::string message; };
+struct StreamCloseRequest { Token token{}; };
+
+// One struct, three meanings -- units are per-method: rad (position), rad/s
+// (velocity), N*m (feedforward torque).
+struct JointSetpoint { JointVec values = JointVec::Zero(); Token token{}; };
+struct PoseSetpoint  { Pose     pose{};                    Token token{}; };
+struct TwistSetpoint { Vector6  twist = Vector6::Zero();   Token token{}; };  // [linear; angular], base frame
+
 struct JointImpedanceGains { JointVec kq = JointVec::Zero(); double zeta = 0.5;
                              JointVec torque_limit = JointVec::Zero(); };
 
@@ -50,6 +70,6 @@ enum class CancelResponse { kAccept, kReject };
 namespace result_code {
   constexpr int kSuccessful = 0, kInvalidGoal = -1, kPathToleranceViolated = -4,
                 kGoalToleranceViolated = -5, kPreempted = -6, kPlanningFailed = -7,
-                kNotAuthorized = -8, kHalted = -9;
+                kNotAuthorized = -8, kHalted = -9, kStreamRejected = -10;
 }
 }  // namespace kinova::interface

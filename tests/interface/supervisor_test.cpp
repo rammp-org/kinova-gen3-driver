@@ -424,3 +424,19 @@ TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
   EXPECT_EQ(results[0].second.error_code, interface::result_code::kHalted);      // halted position goal
   EXPECT_EQ(results[1].second.error_code, interface::result_code::kSuccessful);  // the new owner's goal
 }
+
+TEST(ValueTypes, StreamingDefaultsAndResultCodes) {
+  EXPECT_EQ(interface::result_code::kStreamRejected, -10);
+  interface::StreamOpenRequest r;
+  EXPECT_EQ(r.kind, interface::SetpointKind::kJointPosition);
+  EXPECT_EQ(r.control_mode, interface::ControlModeKind::kPosition);
+  EXPECT_NEAR(r.timeout_s, 0.1, 1e-12);          // a deadline is mandatory, so it has a default
+  EXPECT_EQ(r.token, (interface::Token{}));
+  interface::StreamOpenResult res;
+  EXPECT_FALSE(res.accepted);
+  interface::JointSetpoint js;
+  EXPECT_TRUE(js.values.isZero());
+  interface::TwistSetpoint ts;
+  EXPECT_TRUE(ts.twist.isZero());                // Vector6, [linear; angular]
+  EXPECT_EQ(ts.token, (interface::Token{}));
+}
