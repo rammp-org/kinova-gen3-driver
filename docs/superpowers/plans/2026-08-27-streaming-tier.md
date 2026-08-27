@@ -1285,3 +1285,21 @@ git commit -m "docs(streaming): guide, API reference, nav entry"
 ## Downstream breakage this plan causes
 
 `Supervisor`'s constructor gains a `JointTorqueMode&` (Task 5). Together with #25's `CommandSink` changes, `kinova_arm_ros2` needs both fixed in the same pass.
+
+## Reconciled 2026-08-26
+
+Task 6's code blocks above show `active_mode_kind_` as a plain (non-atomic)
+`ControlModeKind` alongside a separate `std::atomic<uint8_t> atomic_mode_` kept
+only for `on_trajectory_goal` to read without a data race. Execution found a
+second, mirrored desync bug beyond the one this plan anticipated (a
+`kImpedance` stream leaving the executor on `imp_` while `traj_bound_kind_`
+stayed `kPosition`, so a following `kPosition` goal matched `traj_bound_kind_`,
+skipped the rebind, and drove `pos_` while the executor ran `imp_` — arm
+motionless, goal settled `kSuccessful`). Fixing it properly required the rebind
+to check the goal against *both* `traj_bound_kind_` and `active_mode_kind_`,
+which meant `active_mode_kind_` itself had to be safely readable from the
+backend thread that opens a stream — so it became
+`std::atomic<ControlModeKind>`, and the redundant `atomic_mode_` mirror was
+deleted. `on_trajectory_goal` now reads `active_mode_kind_` directly: one
+record of the running mode instead of two, so a `kTorque` stream can no longer
+be transiently reported as position. See commit `c3211f1`.
