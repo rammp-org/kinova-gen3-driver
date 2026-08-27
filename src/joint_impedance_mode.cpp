@@ -75,6 +75,7 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
   ramp_elapsed_ = 0.0;
   last_ik_ = IkResult{};
   wd_.reset();
+  frozen_ = false;
 }
 
 void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
@@ -87,26 +88,30 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   // is maintaining. Done BEFORE q_prev is captured so the freeze lands this
   // cycle instead of being slewed in by the rate limiter below.
   //
-  // source_ moves to the joint path so the frozen state is coherent rather than
-  // half-pose/half-joint: the mode is holding a joint reference now, not tracking
-  // a pose. Written from the RT thread, exactly as on_enter already writes it —
-  // same benign race against a concurrent setter, and the same
-  // single-supervisor-thread usage makes it a non-issue in practice.
-  //
-  // Target resolution is SKIPPED while stale; running it would immediately
-  // overwrite the frozen q_d_ from the (stale) target buffer.
+  // The freeze LATCHES in RT-owned state and is released only by a fresh
+  // command. It deliberately does NOT touch source_: that field names which
+  // target buffer to read, every writer of it also writes the buffer it names,
+  // and steering it from here would name a buffer no setter had filled. Concretely
+  // -- stream poses only, go stale, then close the session: set_command_timeout
+  // disarms the watchdog, staleness stops being reported, and the next cycle
+  // would resolve a kJoint target out of ext_q_target_, which set_target(JointVec)
+  // never wrote. That is uninitialised storage flowing through the clamp (NaN
+  // survives std::clamp) into out.torque. Latching instead keeps the freeze in
+  // force until a real command arrives, which is also the honest reading of
+  // "frozen": disarming the watchdog is not a command and must not un-freeze.
   const bool stale = wd_.tick(dt_s);
+  if (wd_.fresh()) frozen_ = false;   // only a fresh command releases the freeze
   if (stale) {
+    frozen_ = true;
     q_d_ = fb.q;
     last_ik_ = IkResult{};
-    source_.store(TargetSource::kJoint, std::memory_order_release);
   }
 
   const TargetSource src = source_.load(std::memory_order_acquire);
   const JointVec q_prev = q_d_;
 
-  if (stale) {
-    // frozen: q_d_ already holds fb.q
+  if (frozen_) {
+    // Frozen: q_d_ already holds fb.q. Resolving a target here would overwrite it.
   } else if (src == TargetSource::kJoint) {
     // Direct joint reference: command it straight through, IK bypassed. The rate
     // limit below still ramps a teleported target in from q_prev, so a distant

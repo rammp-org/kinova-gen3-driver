@@ -133,6 +133,12 @@ class JointImpedanceMode : public ControlMode,
   // and lives in compute().
   CommandWatchdog wd_;
 
+  // RT-owned. True once the watchdog has reported staleness, cleared only by a
+  // fresh command (or on_enter). Latched rather than recomputed per cycle so that
+  // DISARMING the watchdog cannot un-freeze the reference and resurrect a target
+  // nobody is maintaining -- see compute().
+  bool frozen_ = false;
+
   JointVec q_d_ = JointVec::Zero();    // integrated reference configuration
   IkResult last_ik_{};
   double ramp_elapsed_ = 0.0;

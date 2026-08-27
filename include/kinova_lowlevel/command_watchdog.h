@@ -56,6 +56,15 @@ class CommandWatchdog {
   bool   armed()     const noexcept { return timeout_s_.load(std::memory_order_acquire) > 0.0; }
 
  private:
+  // tick() runs on the RT thread, so both atomics must be genuine lock-free
+  // instructions. A libstdc++ that falls back to a mutex for atomic<double>
+  // would put a lock in the 1 kHz path; fail the BUILD rather than discover it
+  // as jitter on the arm.
+  static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                "CommandWatchdog is on the RT path: atomic<uint64_t> must be lock-free");
+  static_assert(std::atomic<double>::is_always_lock_free,
+                "CommandWatchdog is on the RT path: atomic<double> must be lock-free");
+
   std::atomic<uint64_t> count_{0};       // writer -> RT freshness signal
   std::atomic<double>   timeout_s_{0.0};
   uint64_t last_seen_ = 0;               // RT-owned

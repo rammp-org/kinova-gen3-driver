@@ -176,6 +176,71 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
   EXPECT_EQ(ring.dropped(), 0u);
 }
 
+// The freeze branch is a DIFFERENT code path from the tracking one, and the
+// tests above never reach it: they run with the default cmd_timeout_s = 0.0, so
+// the watchdog is disarmed and compute() only ever takes the tracking branch.
+// This case arms a deadline and lets it lapse inside the MEASURED window, so the
+// staleness freeze runs under the same zero-major-faults / zero-dropped-samples
+// assertions as everything else. Targets are published for the first ~100 ms and
+// then stop, which exercises the tracking branch, the fresh->frozen transition
+// and the sustained frozen path in one window.
+TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.cmd_timeout_s = 0.05;                        // armed: the freeze branch is live
+  JointImpedanceMode mode(dyn, p);
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages -- INCLUDING the freeze
+    // branch, which is why the warm-up also runs long enough to go stale.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      // Publish from a non-RT thread once on_enter has run -- it resets the
+      // watchdog by design. Pose targets for ~100 ms, then silence: the 50 ms
+      // deadline lapses and the mode freezes for the rest of the window.
+      const Pose away = dyn.fk(JointVec::Constant(0.2));
+      for (int i = 0; i < 10; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mode.set_target(away);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(400));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
 // Position mode does no dynamics at all — no RNEA, no CRBA, no IK — so this is
 // the cheapest control path we have. The check still matters: the reference
 // integrator runs every cycle and must stay allocation-free like the rest.
