@@ -9,6 +9,11 @@ These two tests validate that the model's torques match physics on the real arm.
 Their accuracy is governed entirely by the URDF's inertial parameters —
 **including any end-effector payload**.
 
+Both tests exercise `JointTorqueMode` with no feedforward set (`tau_ff = 0`),
+i.e. gravity-compensation hold — see the
+[API reference](../reference/api.md#jointtorquemode-joint_torque_modeh). The
+commands below are unchanged.
+
 > **Confirm the URDF first.** Check that `models/gen3_7dof.urdf` includes the
 > actual tool/gripper inertia mounted on the arm. If the model omits or
 > mis-states the end-effector payload, gravity-comp will be systematically wrong
@@ -68,8 +73,9 @@ the live hold test.
 
 ## B. Hold-position test
 
-**Goal:** run live gravity-comp and confirm the arm holds itself against gravity
-(or drifts only slowly), then tune damping if needed.
+**Goal:** run `JointTorqueMode` live with no feedforward (gravity-comp hold) and
+confirm the arm holds itself against gravity (or drifts only slowly), then tune
+damping if needed.
 
 ### Procedure
 

@@ -8,11 +8,26 @@
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --rate 1000
 //       --duration 5 --csv /tmp/bench.csv
 //
+// --ee-frame <name>: URDF link name Dynamics uses as the end effector (default
+// "end_effector_link", matching the bare-arm --urdf default above). The gripper
+// model names it differently, so pass it explicitly:
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --rate 1000 --duration 5
+//
 // --dry-run: READ-ONLY gravity validation. Connects and reads feedback only —
 // never enters low-level servoing, never commands torque. Prints measured joint
 // torque vs gravity(q) per joint so the URDF/dynamics can be checked against the
 // real arm BEFORE any torque is commanded. Move the arm by pendant between reads.
-//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf --duration 0
+//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --duration 0
+//
+// --torque-limit <n|n1,...,n7>: per-joint output clamp (N·m). A bare scalar
+// broadcasts to all 7 joints; a 7-value comma-separated list sets each joint
+// individually (same convention as teleop_socket_server's --jtau-limit). If
+// omitted, JointTorqueParams' own per-joint default applies: (39,39,39,39,9,9,9)
+// — the wrist (joints 5-7) is limited to its 9 N·m URDF effort rating.
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 20
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 39,39,39,39,9,9,9
 
 #include <atomic>
 #include <chrono>
@@ -26,7 +41,7 @@
 #include <thread>
 
 #include "kinova_lowlevel/dynamics.h"
-#include "kinova_lowlevel/gravity_comp_mode.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/sim_transport.h"
@@ -42,11 +57,50 @@ using namespace kinova;
 namespace {
 std::atomic<bool> g_stop{false};
 void on_sigint(int) { g_stop.store(true); }
+
+// Parse either a single scalar (applied to every joint) or exactly kNumJoints
+// comma-separated values. Returns false on anything malformed — a silently
+// half-parsed gain vector is the kind of thing you only discover on the robot.
+// Mirrors teleop_socket_server.cpp's parse_joint_vec.
+bool parse_joint_vec(const std::string& s, JointVec& out) {
+  double vals[kNumJoints];
+  int n = 0;
+  size_t pos = 0;
+  while (true) {
+    if (n == kNumJoints) return false;            // more values than joints
+    const size_t comma = s.find(',', pos);
+    const std::string tok =
+        (comma == std::string::npos) ? s.substr(pos) : s.substr(pos, comma - pos);
+    if (tok.empty()) return false;
+    try {
+      size_t used = 0;
+      vals[n++] = std::stod(tok, &used);
+      if (used != tok.size()) return false;       // trailing garbage in the token
+    } catch (const std::exception&) {
+      return false;
+    }
+    if (comma == std::string::npos) break;
+    pos = comma + 1;
+  }
+  if (n == 1) {                                   // scalar broadcasts to all joints
+    out.setConstant(vals[0]);
+    return true;
+  }
+  if (n == kNumJoints) {
+    for (int i = 0; i < kNumJoints; ++i) out[i] = vals[i];
+    return true;
+  }
+  return false;
+}
 }  // namespace
 
 int main(int argc, char** argv) {
   std::string ip;
   std::string urdf = "../models/gen3_7dof.urdf";
+  // Matches the DEFAULT --urdf below. models/gen3_7dof.urdf (bare arm) has
+  // "end_effector_link"; Dynamics defaults to "gen3_end_effector_link", which
+  // only exists in the gripper model. See issue #18.
+  std::string ee_frame = "end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -57,7 +111,8 @@ int main(int argc, char** argv) {
   double duration_s = 10.0;
   double scale = 1.0;
   double damping = 0.0;
-  double torque_limit = 39.0;
+  JointVec torque_limit_override = JointVec::Zero();
+  bool torque_limit_set = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -68,10 +123,20 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
+    // Parse a scalar-or-7-value joint vector, exiting on anything malformed.
+    auto next_joint_vec = [&](const char* name, JointVec& out) {
+      const std::string s = next(name);
+      if (!parse_joint_vec(s, out)) {
+        std::cerr << name << " needs 1 or " << kNumJoints
+                  << " comma-separated numbers, got: " << s << "\n";
+        std::exit(2);
+      }
+    };
     if (a == "--ip") ip = next("--ip");
     else if (a == "--sim") use_sim = true;
     else if (a == "--dry-run") dry_run = true;
     else if (a == "--urdf") urdf = next("--urdf");
+    else if (a == "--ee-frame") ee_frame = next("--ee-frame");
     else if (a == "--rate") rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
     else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
@@ -80,7 +145,10 @@ int main(int argc, char** argv) {
     else if (a == "--csv") csv_path = next("--csv");
     else if (a == "--scale") scale = std::stod(next("--scale"));
     else if (a == "--damping") damping = std::stod(next("--damping"));
-    else if (a == "--torque-limit") torque_limit = std::stod(next("--torque-limit"));
+    else if (a == "--torque-limit") {
+      next_joint_vec("--torque-limit", torque_limit_override);
+      torque_limit_set = true;
+    }
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -94,12 +162,12 @@ int main(int argc, char** argv) {
     std::exit(2);
   }
 
-  std::cout << "[bench] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing="
-            << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
-            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
-            << "\n";
+  std::cout << "[bench] urdf=" << urdf << " ee_frame=" << ee_frame << " rate="
+            << rate_hz << "Hz pacing=" << pacing_str << " cpu=" << cpu
+            << " prio=" << rt_priority << " duration=" << duration_s
+            << "s sim=" << (use_sim ? "yes" : "no") << "\n";
 
-  Dynamics dyn(urdf);
+  Dynamics dyn(urdf, ee_frame);
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;
@@ -188,7 +256,15 @@ int main(int argc, char** argv) {
   t.connect();
   t.set_servoing_low_level();
 
-  GravityCompTorqueMode mode(dyn, {scale, damping, torque_limit});
+  // Default-construct so the per-joint torque_limit default (39,39,39,39,9,9,9)
+  // and the watchdog defaults (cmd_timeout_s/cmd_decay_s) survive unless the
+  // caller explicitly overrides them — this is the same code path rt_safety_test
+  // exercises, including the staleness-decay branch.
+  JointTorqueParams params;
+  params.scale = scale;
+  params.damping = damping;
+  if (torque_limit_set) params.torque_limit = torque_limit_override;
+  JointTorqueMode mode(dyn, params);
 
   RtExecutor ex(t, ring, {rate_hz, pacing, {rt_priority, cpu, true}});
   ex.request_mode(&mode);

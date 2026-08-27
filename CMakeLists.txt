@@ -77,7 +77,7 @@ set(KINOVA_LIB_SOURCES
     src/telemetry_consumers.cpp
     src/rt_system.cpp
     src/sim_transport.cpp
-    src/gravity_comp_mode.cpp
+    src/joint_torque_mode.cpp
     src/cartesian_impedance_mode.cpp
     src/diff_ik.cpp
     src/joint_impedance_mode.cpp
@@ -124,9 +124,10 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
 
 # --- apps ---------------------------------------------------------------------
-# benchmark_grav_comp runs the gravity-comp mode through the RtExecutor and
-# reports timing. Verified with --sim (SimTransport); the real KORTEX path is
-# compiled in but only built/linked, never exercised while the robot is off.
+# benchmark_grav_comp runs JointTorqueMode (zero feedforward, i.e. gravity
+# compensation) through the RtExecutor and reports timing. Verified with --sim
+# (SimTransport); the real KORTEX path is compiled in but only built/linked,
+# never exercised while the robot is off.
 add_executable(benchmark_grav_comp apps/benchmark_grav_comp.cpp)
 target_link_libraries(benchmark_grav_comp PRIVATE kinova_lowlevel Eigen3::Eigen)
 target_include_directories(benchmark_grav_comp PRIVATE include)
@@ -186,6 +187,37 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# TEMPORARY bring-up harness — delete this target with the app once answered.
+# velocity_probe answers ONE question: does this arm honour ActuatorMode::kVelocity?
+# That path is mapped in KortexTransport but has never been driven by any
+# ControlMode, and cannot be settled in sim (SimTransport is a static echo with no
+# plant). The whole streaming-setpoint design rests on it, so the probe runs first.
+# --dry-run is READ-ONLY. Defaults are deliberately tiny and the command is ramped.
+add_executable(velocity_probe apps/velocity_probe.cpp)
+target_link_libraries(velocity_probe PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(velocity_probe PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(velocity_probe PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(velocity_probe PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(velocity_probe PRIVATE KINOVA_NO_KORTEX)
+endif()
+
+# TEMPORARY bring-up harness — delete this target with the app once validated.
+# joint_torque_check is the hardware validation harness for JointTorqueMode.
+# benchmark_grav_comp covers the zero-feedforward case; this covers the thing the
+# mode exists for -- a real feedforward via set_torque, and the staleness watchdog
+# decaying it back to zero when the commands stop. --dry-run is READ-ONLY.
+add_executable(joint_torque_check apps/joint_torque_check.cpp)
+target_link_libraries(joint_torque_check PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(joint_torque_check PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(joint_torque_check PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(joint_torque_check PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(joint_torque_check PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # trajectory_run drives a joint-space trajectory on the arm through the non-RT
 # TrajectoryExecutor + JointPositionMode + RtExecutor -- the first on-robot
 # exercise of the interface execution core. --dry-run is READ-ONLY. The
@@ -233,7 +265,7 @@ add_executable(unit_tests
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
-    tests/gravity_comp_mode_test.cpp
+    tests/joint_torque_mode_test.cpp
     tests/rt_safety_test.cpp
     tests/cartesian_test.cpp
     tests/cartesian_impedance_mode_test.cpp

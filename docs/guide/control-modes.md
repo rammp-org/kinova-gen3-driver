@@ -38,17 +38,28 @@ knowing which is live.
 Everything is **SI units / radians**. Degrees and N·m conversions happen only at
 the transport boundary.
 
-## Gravity Compensation — `GravityCompTorqueMode`
+## Gravity Compensation — `JointTorqueMode`
 
 Cancels the arm's own weight so it becomes weightless and back-drivable — push it
 and it stays where you leave it.
 
+There is no separate gravity-comp mode. `JointTorqueMode` computes
+`tau = scale·gravity(q) − damping·q̇ + tau_ff`; with `tau_ff` never set (or
+decayed to zero by the staleness watchdog — see below) it **is** gravity
+compensation. `benchmark_grav_comp` runs exactly this zero-feedforward path.
+
 - **Law (conceptually):** command the joint torques that exactly oppose gravity,
-  optionally scaled, with light velocity damping, clamped to a torque limit.
+  optionally scaled, with light velocity damping, plus an optional feedforward
+  torque, clamped per joint to `torque_limit`.
 - **`scale`** — fraction of gravity to apply. `1.0` floats the arm; `0.5` makes it
   sag gently. Start at `0.5` on new hardware: a gentle, predictable sag confirms
   the torque sign and magnitude before you trust full compensation.
 - **`damping`** — adds a little joint-velocity damping to take the edge off.
+- **`tau_ff`** — an optional feedforward torque published via `set_torque()` from
+  a single non-RT supervisor thread. If no fresh command arrives within
+  `cmd_timeout_s`, a watchdog ramps it to zero over `cmd_decay_s`, reverting to
+  plain gravity-compensation hold — this is the mode's fail-safe, not something
+  you need to drive to use gravity comp.
 - **When to use it:** teaching/lead-through, a safe first hardware bring-up, or as
   the gravity term other torque laws build on.
 

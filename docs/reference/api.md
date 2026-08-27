@@ -109,19 +109,34 @@ using ActuatorModes = std::array<ActuatorMode, 7>;
 
 Implement this to add a control law. `compute()` must be RT-safe.
 
-### `GravityCompTorqueMode` — `gravity_comp_mode.h`
+### `JointTorqueMode` — `joint_torque_mode.h`
 
 ```cpp
-struct GravityCompParams {
-  double scale = 1.0;          // fraction of gravity to apply (0.5 = gentle sag)
-  double damping = 0.0;        // joint-velocity damping (N·m·s/rad)
-  double torque_limit = 39.0;  // per-joint clamp (N·m)
+struct JointTorqueParams {
+  double scale         = 1.0;   // fraction of gravity to apply (0.5 = gentle sag)
+  double damping       = 0.0;   // joint-velocity damping (N·m·s/rad)
+  // Per-joint ceiling on the TOTAL output. Joints 5-7 have a URDF effort limit
+  // of 9 N·m; a scalar sized for the proximal joints would overrun the wrist
+  // by 4x. Mirrors JointImpedanceParams::torque_limit.
+  JointVec torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  double cmd_timeout_s = 0.1;   // staleness watchdog window; <=0 disables
+  double cmd_decay_s   = 0.05;  // ramp tau_ff -> 0 over this window on staleness
+                                 // (<=0 => hard zero)
 };
-GravityCompTorqueMode(Dynamics& dyn, GravityCompParams p = {});
+JointTorqueMode(Dynamics& dyn, JointTorqueParams p = {});
+
+// Non-RT: call from a single supervisor thread. Lock-free publish (two-buffer +
+// atomic index); compute() reads once per cycle.
+void set_torque(const JointVec& tau_ff) noexcept;
 ```
 
-Law: `tau = scale·gravity(q) − damping·q̇`, clamped. Sets `command.position = q`
-(passthrough). See the [guide](../guide/control-modes.md#gravity-compensation--gravitycomptorquemode).
+Law: `tau = scale·gravity(q) − damping·q̇ + tau_ff`, clamped per joint. Sets
+`command.position = q` (passthrough). If `tau_ff` goes stale for longer than
+`cmd_timeout_s`, a watchdog ramps it to zero over `cmd_decay_s` and the mode
+reverts to gravity-compensation hold. **With `tau_ff` never set, this mode
+*is* gravity compensation** — `benchmark_grav_comp` runs exactly this
+zero-feedforward path. See the
+[guide](../guide/control-modes.md#gravity-compensation-jointtorquemode).
 
 ### `CartesianImpedanceMode` — `cartesian_impedance_mode.h`
 
@@ -147,7 +162,7 @@ void set_gains(const CartesianImpedanceParams& p) noexcept;
 
 Law: `tau = gravity + ramp·(Jᵀ(Kx∘e − Dx∘ẋ) + nullspace)`. Holds the entry pose
 until `set_target` is called. `Vector6` gain layout is `[x y z | rx ry rz]`. See
-the [guide](../guide/control-modes.md#cartesian-impedance--cartesianimpedancemode)
+the [guide](../guide/control-modes.md#cartesian-impedance-cartesianimpedancemode)
 and the [Deep Dive](../deep-dive/impedance.md).
 
 ---

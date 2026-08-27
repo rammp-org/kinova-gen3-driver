@@ -121,7 +121,7 @@ watch the console the entire time:
   --urdf ../models/gen3_7dof.urdf \
   --rate 1000 \
   --scale 0.5 \
-  --torque-limit 15 \
+  --torque-limit 20,20,20,20,7,7,7 \
   --duration 5 \
   --csv /tmp/grav_first.csv
 ```
@@ -129,8 +129,11 @@ watch the console the entire time:
 - `--scale 0.5` applies only half of computed gravity torque — the arm will
   partially sag, which is **expected and safe**, and confirms the sign/magnitude
   of the torque mapping before we trust full compensation.
-- `--torque-limit 15` (N·m) is well below the 39 N·m default — caps any
-  surprise.
+- `--torque-limit 20,20,20,20,7,7,7` (N·m, per joint) is below **each** joint's
+  own default limit — the default is *not* a flat number: `JointTorqueParams`
+  ceils joints 1-4 at 39 N·m and the wrist (5-7) at 9 N·m, matching the URDF's
+  effort rating for those joints. Never pass a single scalar here large enough
+  to exceed 9 N·m — it broadcasts to every joint, including the wrist.
 - Keep a hand on the e-stop. Be ready to SIGINT (Ctrl-C) — the app reverts to
   POSITION + `SINGLE_LEVEL_SERVOING` on shutdown.
 

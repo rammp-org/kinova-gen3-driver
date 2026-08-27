@@ -4,7 +4,7 @@
 #include <thread>
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/sim_transport.h"
-#include "kinova_lowlevel/gravity_comp_mode.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
@@ -29,7 +29,7 @@ TEST(RtSafety, NoMajorFaultsSteadyState) {
   JointFeedback init; init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  GravityCompTorqueMode mode(dyn);
+  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -239,7 +239,7 @@ TEST(RtSafety, NanosleepPacingProducesSamples) {
   JointFeedback init; init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  GravityCompTorqueMode mode(dyn);
+  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {1000.0, Pacing::kClockNanosleep, {0, -1, true}});
   ex.request_mode(&mode);
