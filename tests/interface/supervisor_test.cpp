@@ -589,3 +589,39 @@ TEST(Supervisor, AnAcceptedTorqueGoalIsSettledInvalidNotDrivenAsPosition) {
   EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kInvalidGoal);
   EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);   // never executed
 }
+
+// Regression: a streaming session moves active_mode_kind_ from the BACKEND thread,
+// but only the sampler may rebuild traj_. When the rebind condition compared the
+// goal against active_mode_kind_, this sequence left traj_ bound to pos_ while the
+// executor ran imp_: the goal settled SUCCESSFUL while the arm never moved. The
+// result code alone cannot catch that, so this asserts the running mode's reference.
+TEST(Supervisor, AnImpedanceGoalAfterAnImpedanceStreamDrivesTheRunningMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;   // switches the executor to imp_
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Zero();
+  f.sup.on_setpoint_joint_position(sp);
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.2, 0.5);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 31;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1000));   // settle + duration
+  f.sup.stop(); f.teardown();
+
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
+  // The discriminating assertion: the trajectory reached the mode the EXECUTOR is
+  // running. Bound to the wrong sink, imp_ would never leave its entry reference.
+  EXPECT_GT(f.imp.reference()[0], 1e-2);
+}

@@ -69,8 +69,17 @@ class Supervisor : public CommandSink, public StreamSink {
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
   StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
 
-  std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch (Task 8)
+  std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch
+  // Which mode the EXECUTOR is running. Written by the sampler on a goal-driven
+  // mode change AND by the backend thread when a streaming session opens in a
+  // different mode. It deliberately does NOT say what traj_ is bound to -- see
+  // traj_bound_kind_. Merging the two is what let a stream's mode change leave
+  // traj_ writing into a mode nobody is running.
   ControlModeKind active_mode_kind_ = ControlModeKind::kPosition;
+  // Which mode's sink traj_ is actually bound to. SAMPLER-OWNED: set at every
+  // traj_.emplace() and read only by the sampler, so no backend-thread mode
+  // change can desynchronise it from traj_.
+  ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
   std::atomic<bool> in_flight_{false};                // read by on_trajectory_goal
   std::atomic<uint8_t> atomic_mode_{0};               // 0=pos 1=imp; read by on_trajectory_goal
 

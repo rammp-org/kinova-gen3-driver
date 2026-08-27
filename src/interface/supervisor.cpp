@@ -24,6 +24,7 @@ void Supervisor::start() {
   exec_.request_mode(&pos_);                       // initial mode = position
   traj_.emplace(pos_);                             // executor bound to the active mode's sink
   active_mode_kind_ = ControlModeKind::kPosition;  atomic_mode_.store(0);
+  traj_bound_kind_  = ControlModeKind::kPosition;
   t0_ = clock::now();                              // origin for every session/expiry stamp
   running_.store(true);
   sampler_ = std::thread([this]{ sampler_loop(); });
@@ -65,7 +66,7 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
       TrajectoryResult r; r.error_code = result_code::kHalted; r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
       if (have_queued) action_.settle(queued_id, r);   // ACCEPTed already; dropping it orphans the client
-      traj_.emplace(active_sink());
+      traj_.emplace(active_sink()); traj_bound_kind_ = active_mode_kind_;
       have_active = false; have_queued = false; in_flight_.store(false);
       JointFeedback fb; const bool ok = snap_.load(fb);
       q_meas = sampled_q(ok, fb.q, q_meas);            // never inject a phantom zero here of all places
@@ -88,6 +89,7 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         traj_.emplace(active_mode_kind_==ControlModeKind::kImpedance
                       ? static_cast<kinova::JointTargetSink&>(imp_)
                       : static_cast<kinova::JointTargetSink&>(pos_));
+        traj_bound_kind_ = active_mode_kind_;
         have_active=false; have_queued=false; in_flight_.store(false);
         continue;
       }
@@ -102,7 +104,12 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         r.error_string = "trajectory execution supports position and impedance only";
         action_.settle(in.id, r); continue;
       }
-      if (in.goal.control_mode != active_mode_kind_) {
+      // Compare against what traj_ is BOUND to, not what the executor is running.
+      // A streaming session can have moved active_mode_kind_ from the backend
+      // thread without touching traj_ (which only this thread may rebuild), so
+      // comparing against active_mode_kind_ would skip the rebind and leave the
+      // executor driving one mode while traj_ wrote targets into another.
+      if (in.goal.control_mode != traj_bound_kind_) {
         if (have_active) {   // cross-mode goal slipped past the accept-time pre-check (in_flight_ lag); a mode change requires the arm at rest
           TrajectoryResult r; r.error_code = result_code::kInvalidGoal;
           r.error_string = "mode change while a trajectory is in flight";
@@ -111,12 +118,13 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         if (in.goal.control_mode == ControlModeKind::kImpedance) {
           if (in.goal.has_gains) { JointImpedanceParams p; p.Kq=in.goal.gains.kq; p.zeta=in.goal.gains.zeta;
                                    p.torque_limit=in.goal.gains.torque_limit; imp_.set_gains(p); }
-          exec_.request_mode(&imp_); traj_.emplace(imp_);
+          exec_.request_mode(&imp_); traj_.emplace(imp_);   // no-op in the executor if already active
           active_mode_kind_=ControlModeKind::kImpedance; atomic_mode_.store(1);
         } else {
           exec_.request_mode(&pos_); traj_.emplace(pos_);
           active_mode_kind_=ControlModeKind::kPosition; atomic_mode_.store(0);
         }
+        traj_bound_kind_ = in.goal.control_mode;
         std::this_thread::sleep_for(                                    // let the RT loop adopt + on_enter settle
             std::chrono::duration_cast<clock::duration>(std::chrono::duration<double>(cfg_.mode_settle_s)));
       }
@@ -265,10 +273,13 @@ void Supervisor::close_stream() {
         active_sink().set_target(stream_hold_q_);  // hold at MEASURED q
       }
     }
-    // Torque mode has no joint target to hold: restoring its own default watchdog
-    // (negative argument) ramps the feedforward to zero, i.e. gravity-comp hold.
-    if (active_mode_kind_ == ControlModeKind::kPosition)  pos_.set_command_timeout(0.0);
-    if (active_mode_kind_ == ControlModeKind::kImpedance) imp_.set_command_timeout(0.0);
+    // Hand the mode back to its OWN supervision: a negative argument restores the
+    // mode's configured cmd_timeout_s. Passing 0.0 would disable the watchdog
+    // outright and silently destroy a timeout somebody set at construction.
+    // Torque mode has no joint target to hold; restoring its default is what makes
+    // it safe, by ramping the feedforward to zero, i.e. gravity-comp hold.
+    if (active_mode_kind_ == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
+    if (active_mode_kind_ == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
     if (active_mode_kind_ == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
   }
 }
