@@ -363,7 +363,7 @@ TEST(Supervisor, HaltLatchesTheTargetAtMeasuredQ) {
 
 TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
   SupFix f;
-  interface::Arbiter arb{f.sup, interface::ArbitrationMode::kEnforced, 99};
+  interface::Arbiter arb{f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
   f.sup.start(); f.run_rt();
   const interface::Token t = arb.grant("planner").token;
 
@@ -392,7 +392,7 @@ TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
 
 TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
   SupFix f;
-  interface::Arbiter arb{f.sup, interface::ArbitrationMode::kEnforced, 99};
+  interface::Arbiter arb{f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
   f.sup.start(); f.run_rt();
 
   const interface::Token a = arb.grant("planner").token;

@@ -290,9 +290,10 @@ precise analysis.
 
 ## Arbitration — `interface/arbiter.h`, `interface/ports.h`
 
-`Arbiter` decides **who may command the arm**. It implements `CommandSink` and
-decorates another `CommandSink` (the `Supervisor`), so it sits in the command
-path without any coupling to control code. See the
+`Arbiter` decides **who may command the arm**. It implements both `CommandSink`
+and `StreamSink` and decorates a downstream instance of each (in practice the
+same `Supervisor`), so it gates both the command and streaming tiers without
+any coupling to control code. See the
 [arbitration guide](../guide/arbitration.md) for the model.
 
 ```cpp
@@ -301,7 +302,8 @@ using Token = std::array<uint8_t, 16>;   // 128-bit capability token
 enum class ArbitrationMode { kEnforced, kDisabled };
 enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 
-Arbiter(CommandSink& downstream, ArbitrationMode mode, uint64_t seed = 0);
+Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
+        uint64_t seed = 0);
 ```
 
 `seed == 0` seeds the token RNG from `std::random_device`; a non-zero seed makes

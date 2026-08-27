@@ -18,10 +18,11 @@ namespace kinova::interface {
 // delegation, so admit-and-deliver is atomic against revoke()/estop() -- otherwise a
 // command admitted a moment before a revoke could reach the Supervisor AFTER the halt
 // and restart a stopped arm. It is NEVER held across on_halt().
-class Arbiter : public CommandSink, public ArbitrationSink {
+class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
  public:
   // seed == 0 -> seed the token RNG from std::random_device.
-  Arbiter(CommandSink& downstream, ArbitrationMode mode, uint64_t seed = 0);
+  Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
+          uint64_t seed = 0);
 
   // ArbitrationSink
   GrantResult       grant(const std::string& owner_id) override;
@@ -38,11 +39,21 @@ class Arbiter : public CommandSink, public ArbitrationSink {
   ArmState       on_query_state() override;       // never gated -- reads are always open
   void           on_halt(HaltReason) override;    // pass-through
 
+  // StreamSink
+  StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
+  void             on_stream_close(const StreamCloseRequest&) override;
+  void             on_setpoint_joint_position(const JointSetpoint&) override;
+  void             on_setpoint_joint_velocity(const JointSetpoint&) override;
+  void             on_setpoint_joint_torque(const JointSetpoint&) override;
+  void             on_setpoint_pose(const PoseSetpoint&) override;
+  void             on_setpoint_twist(const TwistSetpoint&) override;
+
  private:
   bool  admit(const Token&) const;   // caller holds m_
   Token mint();                      // caller holds m_
 
   CommandSink&    down_;
+  StreamSink&     down_stream_;
   ArbitrationMode mode_;
   mutable std::mutex m_;
   std::mt19937_64 rng_;

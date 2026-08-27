@@ -8,7 +8,8 @@ to. Commands that do not carry the live token are refused.
 The same mechanism expresses the degenerate case — *nobody* may command — which
 is what an emergency stop is.
 
-This layer lives in `kinova::interface::Arbiter`, which decorates `CommandSink`.
+This layer lives in `kinova::interface::Arbiter`, which decorates both
+`CommandSink` and `StreamSink` — the same token gates the streaming tier too.
 It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 `Dynamics`. Every transport (ROS2, socket, ATOS) inherits it for free.
 

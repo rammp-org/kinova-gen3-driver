@@ -2,8 +2,10 @@
 #include <cstring>
 namespace kinova::interface {
 
-Arbiter::Arbiter(CommandSink& downstream, ArbitrationMode mode, uint64_t seed)
-  : down_(downstream), mode_(mode), rng_(seed ? seed : std::random_device{}()) {}
+Arbiter::Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
+                 uint64_t seed)
+  : down_(downstream), down_stream_(downstream_stream), mode_(mode),
+    rng_(seed ? seed : std::random_device{}()) {}
 
 Token Arbiter::mint() {
   Token t{}; const uint64_t a = rng_(), b = rng_();
@@ -80,4 +82,40 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
 }
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
 void     Arbiter::on_halt(HaltReason r) { down_.on_halt(r); }
+
+StreamOpenResult Arbiter::on_stream_open(const StreamOpenRequest& r) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(r.token)) { ++rejected_; return {false, result_code::kNotAuthorized, "not authorized"}; }
+  return down_stream_.on_stream_open(r);
+}
+void Arbiter::on_stream_close(const StreamCloseRequest& r) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(r.token)) { ++rejected_; return; }
+  down_stream_.on_stream_close(r);
+}
+void Arbiter::on_setpoint_joint_position(const JointSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_stream_.on_setpoint_joint_position(s);
+}
+void Arbiter::on_setpoint_joint_velocity(const JointSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_stream_.on_setpoint_joint_velocity(s);
+}
+void Arbiter::on_setpoint_joint_torque(const JointSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_stream_.on_setpoint_joint_torque(s);
+}
+void Arbiter::on_setpoint_pose(const PoseSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_stream_.on_setpoint_pose(s);
+}
+void Arbiter::on_setpoint_twist(const TwistSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_stream_.on_setpoint_twist(s);
+}
 }  // namespace kinova::interface
