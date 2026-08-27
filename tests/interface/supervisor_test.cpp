@@ -6,6 +6,7 @@
 #include "kinova_lowlevel/interface/arbiter.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -81,9 +82,10 @@ struct SupFix {
   SampleRing ring{1u << 12};
   JointPositionMode pos{dyn};
   JointImpedanceMode imp{dyn};
+  JointTorqueMode tau{dyn};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
   FakeBackend be;
-  interface::Supervisor sup{pos, imp, exec, snap, pump_dyn, be, be};
+  interface::Supervisor sup{pos, imp, tau, exec, snap, pump_dyn, be, be};
   std::atomic<bool> stop{false};
   std::thread rt;
 

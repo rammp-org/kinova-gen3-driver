@@ -13,10 +13,10 @@ static const char* halt_reason_string(HaltReason r) {
   return "halted";
 }
 
-Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, RtExecutor& exec,
+Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, RtExecutor& exec,
                        Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
                        StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg)
-  : pos_(pos), imp_(imp), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
+  : pos_(pos), imp_(imp), tau_(tau), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
     stream_(stream), action_(action), cfg_(cfg) {}
 Supervisor::~Supervisor(){ stop(); }
 

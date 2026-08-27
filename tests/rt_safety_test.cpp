@@ -356,9 +356,10 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   SampleRing ring(8192);
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
+  JointTorqueMode tau(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, ex, snap, pump_dyn, be, be);
+  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};

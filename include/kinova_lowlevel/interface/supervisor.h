@@ -9,6 +9,7 @@
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_target_sink.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
@@ -28,7 +29,7 @@ struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; dou
 
 class Supervisor : public CommandSink, public StreamSink {
  public:
-  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, RtExecutor& exec,
+  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, RtExecutor& exec,
              Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
              StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg = {});
   ~Supervisor();
@@ -58,7 +59,7 @@ class Supervisor : public CommandSink, public StreamSink {
   void pump_loop();
   kinova::JointTargetSink& active_sink();            // pos_ or imp_, per active_mode_kind_
 
-  JointPositionMode& pos_;  JointImpedanceMode& imp_;  RtExecutor& exec_;
+  JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  RtExecutor& exec_;
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
   StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
 
