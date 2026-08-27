@@ -46,8 +46,11 @@ Rejection is the valid-pair table doing its job, not a stub. Adding the rest lat
 | `src/interface/streaming_session.cpp` (create) | its implementation |
 | `include/kinova_lowlevel/interface/arbiter.h`, `src/interface/arbiter.cpp` (modify) | `Arbiter` also decorates `StreamSink` |
 | `include/kinova_lowlevel/interface/supervisor.h`, `src/interface/supervisor.cpp` (modify) | implement `StreamSink`; hold a `JointTorqueMode&`; goal/stream mutual exclusion; teardown |
-| `include/kinova_lowlevel/joint_position_mode.h`, `src/joint_position_mode.cpp` (modify) | staleness watchdog → freeze reference at measured q |
-| `include/kinova_lowlevel/joint_impedance_mode.h`, `src/joint_impedance_mode.cpp` (modify) | same watchdog |
+| `include/kinova_lowlevel/command_watchdog.h` (create) | `CommandWatchdog` — staleness **detection**, shared by every streaming-capable mode |
+| `tests/command_watchdog_test.cpp` (create) | its unit tests, once, directly |
+| `include/kinova_lowlevel/joint_torque_mode.h`, `src/joint_torque_mode.cpp` (modify) | adopt `CommandWatchdog`; keep its decay-ramp **response** |
+| `include/kinova_lowlevel/joint_position_mode.h`, `src/joint_position_mode.cpp` (modify) | adopt it; response = freeze reference at measured q |
+| `include/kinova_lowlevel/joint_impedance_mode.h`, `src/joint_impedance_mode.cpp` (modify) | adopt it; same response |
 | `tests/interface/streaming_session_test.cpp` (create) | Tier-1 session unit tests |
 | `tests/interface/supervisor_test.cpp` (modify) | integration: streaming through a real Supervisor, **and** the Tier-2 write-handoff race (the `SupFix` fixture lives here) |
 | `tests/rt_safety_test.cpp` (modify) | supervisor-in-loop with a session open |
@@ -539,42 +542,217 @@ git commit -m "feat(interface): Arbiter gates the streaming port too"
 
 ---
 
-### Task 4: Per-mode staleness watchdogs
+### Task 4: Extract `CommandWatchdog`; adopt it in all three modes
 
-`JointTorqueMode` already has this. Position and impedance modes need it, and their safe behaviour is **freeze the reference at measured q** rather than a decay ramp — there is nothing to ramp, and freezing is instantaneous and safe.
+`JointTorqueMode` already carries this mechanism inline. Position and impedance need it, and a velocity mode will. Rather than write the same release/acquire pairing three more times, extract the **detection** and leave the **response** in each mode — because the response is the mode's contract, not shared behaviour:
 
-This touches `compute()` in two modes, so it is an **RT-path change**: `RtSafety` and the benchmarks are obligations, not optional.
+| mode | response when the command goes stale |
+| --- | --- |
+| torque | ramp `tau_ff` to zero over `cmd_decay_s` |
+| position / impedance | freeze the reference at measured q |
+| velocity (Plan 2) | command zero |
+
+The duplicated part is the *subtle* part — a release/acquire pair on a counter that gates a double-buffer read — so replicating it is three more chances to get a `memory_order` wrong, where the failure is a torn read at 1 kHz rather than a compile error. Same reasoning as `b33ff0b`, which pulled `FeedbackTap` and `Seqlock` out of teleop's anonymous namespace.
+
+This touches `compute()` in three modes, so it is an **RT-path change**: `RtSafety` and the benchmark are obligations, not optional.
 
 **Files:**
-- Modify: `include/kinova_lowlevel/joint_position_mode.h`, `src/joint_position_mode.cpp`, `include/kinova_lowlevel/joint_impedance_mode.h`, `src/joint_impedance_mode.cpp`
-- Test: `tests/joint_position_mode_test.cpp`, `tests/joint_impedance_mode_test.cpp` (find the actual filenames with `ls tests/`)
+- Create: `include/kinova_lowlevel/command_watchdog.h`, `tests/command_watchdog_test.cpp`
+- Modify: all three mode headers and sources, `CMakeLists.txt`
+- Test: the mode test files (find them with `ls tests/`)
 
 **Interfaces:**
-- Produces: on **all three** streaming-capable modes, `void set_command_timeout(double) noexcept;` so the Supervisor can push a session's deadline in at open. Position and impedance additionally gain `double cmd_timeout_s = 0.0;` in their params struct (**0 disables**, preserving today's behaviour for every existing caller). Task 6 calls the setter.
+- Produces: `kinova::CommandWatchdog` with `arm(double)`, `bump()`, `reset()`, `tick(double) -> bool`, `stale_for() -> double`, `armed() -> bool`; and on all three modes `void set_command_timeout(double) noexcept` where **`s >= 0` arms with `s`, and `s < 0` restores the mode's own params default**. Task 6 calls that setter.
 
-> **`JointTorqueMode` needs the setter too.** It already has the watchdog, but its `JointTorqueParams p_` is a plain member fixed at construction — there is no thread-safe way to change the timeout at runtime. Without a setter, a torque session declaring `timeout_s = 0.5` would silently run against the mode's own 0.1, which is exactly the kind of quiet disagreement the one-deadline rule exists to prevent. Add `std::atomic<double> cmd_timeout_override_{-1.0}` (negative = use the params value) and have `compute()` prefer the override when it is non-negative.
+- [ ] **Step 1: Write the failing test**
 
-- [ ] **Step 1: Write the failing test (position mode)**
+Create `tests/command_watchdog_test.cpp`:
 
-Append to the position-mode test file:
+```cpp
+#include <gtest/gtest.h>
+#include "kinova_lowlevel/command_watchdog.h"
+
+using kinova::CommandWatchdog;
+
+TEST(CommandWatchdog, DisarmedNeverGoesStale) {
+  CommandWatchdog w;                      // default: not armed
+  EXPECT_FALSE(w.armed());
+  for (int i = 0; i < 1000; ++i) EXPECT_FALSE(w.tick(0.001));
+}
+
+TEST(CommandWatchdog, GoesStaleOnlyAfterTheTimeout) {
+  CommandWatchdog w; w.arm(0.05); w.bump(); w.reset(); w.bump();
+  for (int i = 0; i < 49; ++i) EXPECT_FALSE(w.tick(0.001));   // 49 ms
+  EXPECT_TRUE(w.tick(0.001));                                 // 50 ms -> stale
+}
+
+TEST(CommandWatchdog, AFreshBumpClearsStaleness) {
+  CommandWatchdog w; w.arm(0.05); w.reset(); w.bump();
+  for (int i = 0; i < 60; ++i) w.tick(0.001);
+  ASSERT_TRUE(w.tick(0.001));
+  w.bump();
+  EXPECT_FALSE(w.tick(0.001));            // re-armed by the new command
+  EXPECT_NEAR(w.stale_for(), 0.0, 1e-12);
+}
+
+TEST(CommandWatchdog, StaleForGrowsAndSizesADecayRamp) {
+  CommandWatchdog w; w.arm(0.01); w.reset(); w.bump();
+  for (int i = 0; i < 30; ++i) w.tick(0.001);
+  EXPECT_NEAR(w.stale_for(), 0.030, 1e-9);   // torque's ramp reads this
+}
+
+TEST(CommandWatchdog, ResetDoesNotTreatAPriorCommandAsFresh) {
+  CommandWatchdog w; w.arm(0.05);
+  w.bump();                                // command sent BEFORE entry
+  w.reset();                               // on_enter adopts the count without honouring it
+  for (int i = 0; i < 49; ++i) EXPECT_FALSE(w.tick(0.001));
+  EXPECT_TRUE(w.tick(0.001));              // still goes stale on schedule
+}
+
+TEST(CommandWatchdog, ArmingWithZeroDisablesItMidRun) {
+  CommandWatchdog w; w.arm(0.01); w.reset(); w.bump();
+  for (int i = 0; i < 30; ++i) w.tick(0.001);
+  ASSERT_TRUE(w.tick(0.001));
+  w.arm(0.0);                              // session closed
+  EXPECT_FALSE(w.tick(0.001));
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `./build/unit_tests --gtest_filter='CommandWatchdog*'`
+Expected: compile error — `command_watchdog.h` does not exist.
+
+- [ ] **Step 3: Write the header**
+
+Create `include/kinova_lowlevel/command_watchdog.h`:
+
+```cpp
+#pragma once
+#include <atomic>
+#include <cstdint>
+namespace kinova {
+
+// Staleness watchdog for a single-writer command stream.
+//
+// DETECTION ONLY. What to do when a command goes stale is the control mode's
+// contract and deliberately lives there: JointTorqueMode ramps its feedforward
+// to zero, the position and impedance modes freeze their reference at measured
+// q, a velocity mode commands zero. stale_for() serves the ramping style;
+// tick()'s bool serves the rest.
+//
+// RT-safe: tick() makes no clock call, allocates nothing and takes no lock --
+// elapsed time is accumulated from the dt the caller already has. Freshness is a
+// monotonic COUNTER rather than a timestamp, so the non-RT writer needs no clock
+// either.
+//
+// Threading: arm() and bump() belong to the ONE non-RT thread that publishes
+// commands; reset(), tick() and stale_for() belong to the RT thread.
+class CommandWatchdog {
+ public:
+  // <= 0 disables. Armed when a streaming session opens, disarmed when it closes.
+  void arm(double timeout_s) noexcept { timeout_s_.store(timeout_s, std::memory_order_release); }
+
+  // Call from EVERY setter that publishes a command. The release pairs with
+  // tick()'s acquire, so a bump the RT side observes guarantees the payload the
+  // writer stored beforehand is visible too.
+  void bump() noexcept { count_.fetch_add(1, std::memory_order_release); }
+
+  // RT thread, from on_enter: adopt the current count WITHOUT treating it as
+  // fresh, so a command sent before entry is not honoured after it.
+  void reset() noexcept {
+    last_seen_ = count_.load(std::memory_order_acquire);
+    stale_s_ = 0.0;
+  }
+
+  // RT thread, once per cycle. True if the command is stale THIS cycle.
+  bool tick(double dt_s) noexcept {
+    const uint64_t c = count_.load(std::memory_order_acquire);
+    if (c != last_seen_) { last_seen_ = c; stale_s_ = 0.0; }
+    else                 { stale_s_ += dt_s; }
+    const double t = timeout_s_.load(std::memory_order_acquire);
+    return t > 0.0 && stale_s_ >= t;
+  }
+
+  double stale_for() const noexcept { return stale_s_; }
+  bool   armed()     const noexcept { return timeout_s_.load(std::memory_order_acquire) > 0.0; }
+
+ private:
+  std::atomic<uint64_t> count_{0};       // writer -> RT freshness signal
+  std::atomic<double>   timeout_s_{0.0};
+  uint64_t last_seen_ = 0;               // RT-owned
+  double   stale_s_   = 0.0;             // RT-owned
+};
+}  // namespace kinova
+```
+
+Register `tests/command_watchdog_test.cpp` in the `unit_tests` list in `CMakeLists.txt`. The header needs no `.cpp`.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cmake -S . -B build -DCMAKE_PREFIX_PATH=/usr/local/lib/python3.10/dist-packages/cmeel.prefix && cmake --build build -j && ./build/unit_tests --gtest_filter='CommandWatchdog*'`
+Expected: 6 tests PASS.
+
+- [ ] **Step 5: Adopt it in `JointTorqueMode` — its existing tests are the regression gate**
+
+Replace the inline mechanism with the shared one. Delete `write_count_`, `last_seen_write_` and `stale_s_`; add `CommandWatchdog wd_;`. In the constructor and `on_enter`, `wd_.arm(p_.cmd_timeout_s)` and `wd_.reset()`. In `set_torque`, call `wd_.bump()` after publishing the buffer index. In `compute()`, the freshness block becomes:
+
+```cpp
+  const bool stale = wd_.tick(dt_s);
+  const int active = tau_ff_active_.load(std::memory_order_acquire);
+  if (!stale) tau_ff_target_ = tau_ff_buf_[active];
+```
+
+and the decay branch uses `wd_.stale_for()` where it previously used `stale_s_`.
+
+Add the setter, and note the negative-value contract:
+
+```cpp
+// s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointTorqueMode::set_command_timeout(double s) noexcept {
+  wd_.arm(s >= 0.0 ? s : p_.cmd_timeout_s);
+}
+```
+
+Run: `./build/unit_tests --gtest_filter='JointTorque*'`
+Expected: **all existing tests still PASS, unchanged.** They are the proof the extraction is behaviour-preserving — if any fails, the extraction is wrong, not the test.
+
+- [ ] **Step 6: Adopt it in `JointPositionMode`, with its own response**
+
+Add to `JointPositionParams`:
+
+```cpp
+  // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
+  // and preserves the behaviour every existing caller relies on.
+  double cmd_timeout_s = 0.0;
+```
+
+Add `CommandWatchdog wd_;`, `wd_.arm(p.cmd_timeout_s)` at construction, `wd_.reset()` in `on_enter`, `wd_.bump()` in `set_target`, and the same `set_command_timeout` as above. At the top of `compute()`:
+
+```cpp
+  if (wd_.tick(dt_s)) {
+    // Freeze where the arm actually IS. Parking at the last reference would keep
+    // the rate limiter slewing toward a destination nobody is asking for.
+    q_ref_ = fb.q;
+  }
+```
+
+Append its tests to the position-mode test file:
 
 ```cpp
 TEST(JointPositionMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
   Dynamics dyn(URDF_PATH);
   JointPositionParams p;
   p.max_ref_speed.setConstant(1.0);
-  p.cmd_timeout_s = 0.05;                       // 50 ms of staleness is enough
+  p.cmd_timeout_s = 0.05;
   JointPositionMode m(dyn, p);
   JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
   m.on_enter(fb);
-  m.set_target(JointVec::Constant(0.5));        // a target far from where the arm is
+  m.set_target(JointVec::Constant(0.5));
   JointCommand out;
-  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // 10 ms: fresh, reference advances
-  const double advanced = m.reference()[0];
-  EXPECT_GT(advanced, 0.0);
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // fresh: reference advances
+  EXPECT_GT(m.reference()[0], 0.0);
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
-  // Frozen at MEASURED q, not parked at the advanced reference: a stale target must
-  // not keep slewing the arm toward a destination nobody is asking for any more.
   EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
 }
 
@@ -582,57 +760,45 @@ TEST(JointPositionMode, ZeroTimeoutDisablesTheWatchdog) {
   Dynamics dyn(URDF_PATH);
   JointPositionParams p;
   p.max_ref_speed.setConstant(1.0);
-  EXPECT_EQ(p.cmd_timeout_s, 0.0);              // default preserves existing behaviour
+  EXPECT_EQ(p.cmd_timeout_s, 0.0);                          // default preserves old behaviour
   JointPositionMode m(dyn, p);
   JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(JointVec::Constant(0.5));
   JointCommand out;
-  for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);  // half a second, no refresh
-  EXPECT_GT(m.reference()[0], 0.1);             // still tracking; nothing froze
+  for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
+  EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 7: Adopt it in `JointImpedanceMode`**
 
-Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='JointPositionMode.*Watchdog*:JointPositionMode.Stale*:JointPositionMode.ZeroTimeout*'`
-Expected: compile error — `JointPositionParams` has no `cmd_timeout_s`.
+Identical shape. **This mode has TWO setters** — `set_target(Pose)` and `set_target(JointVec)` — and **both must call `wd_.bump()`**, or streaming a pose would look stale to the watchdog. Freezing sets `q_d_ = fb.q` and also sets `source_` to the joint path, so the frozen state is coherent.
 
-- [ ] **Step 3: Implement in position mode**
-
-Mirror `JointTorqueMode`'s mechanism exactly — a monotonic write counter bumped by the setter, staleness accumulated by summing `dt_s`, **no clock call in `compute()`**.
-
-In `JointPositionParams`:
+Append the same two tests to the impedance-mode test file, substituting `JointImpedanceParams` / `JointImpedanceMode`, plus one that a streamed **pose** also keeps it fresh:
 
 ```cpp
-  // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
-  // and preserves the behaviour every existing caller relies on. The Supervisor
-  // pushes a session's timeout in here when a streaming session opens.
-  double cmd_timeout_s = 0.0;
-```
-
-In the class: `std::atomic<uint64_t> write_count_{0};`, RT-owned `uint64_t last_seen_write_ = 0;` and `double stale_s_ = 0.0;`, and `void set_command_timeout(double) noexcept;`. Bump `write_count_` (release) at the end of `set_target`; reset `last_seen_write_` and `stale_s_` in `on_enter`.
-
-At the top of `compute()`, before the reference update:
-
-```cpp
-  const uint64_t wc = write_count_.load(std::memory_order_acquire);
-  if (wc != last_seen_write_) { last_seen_write_ = wc; stale_s_ = 0.0; }
-  else                        { stale_s_ += dt_s; }
-  const double timeout = p.cmd_timeout_s;         // from the params snapshot
-  if (timeout > 0.0 && stale_s_ >= timeout) {
-    // Freeze where the arm actually IS. Parking at the last reference would keep
-    // the rate limiter slewing toward a destination nobody is asking for.
-    q_ref_ = fb.q;
+TEST(JointImpedanceMode, AStreamedPoseKeepsTheWatchdogFresh) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;                       // 50 ms deadline
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  // A pose the arm is NOT already at, so "did the reference move" discriminates.
+  const Pose away = dyn.fk(JointVec::Constant(0.2));
+  JointCommand out;
+  for (int i = 0; i < 200; ++i) {               // 200 ms, well past the deadline
+    if (i % 10 == 0) m.set_target(away);        // a pose setpoint every 10 ms
+    m.compute(fb, 0.001, out);
   }
-```
+  // Had the pose setter failed to bump the watchdog, the reference would have
+  // frozen at measured q (zero) after 50 ms. It kept tracking instead.
+  EXPECT_GT(std::abs(m.reference()[0]), 1e-3);
+}
 
-- [ ] **Step 4: Write the failing test (impedance mode)**
-
-Append to the impedance-mode test file, mirroring the position-mode pair:
-
-```cpp
-TEST(JointImpedanceMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
+TEST(JointImpedanceMode, AStreamedPoseThatSTOPSDoesGoStale) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.max_ref_speed.setConstant(1.0);
@@ -640,81 +806,43 @@ TEST(JointImpedanceMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
   JointImpedanceMode m(dyn, p);
   JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
   m.on_enter(fb);
-  m.set_target(JointVec::Constant(0.5));
+  m.set_target(dyn.fk(JointVec::Constant(0.2)));
   JointCommand out;
-  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);
-  EXPECT_GT(m.reference()[0], 0.0);
-  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
-  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
-}
-
-TEST(JointImpedanceMode, ZeroTimeoutDisablesTheWatchdog) {
-  Dynamics dyn(URDF_PATH);
-  JointImpedanceParams p;
-  p.max_ref_speed.setConstant(1.0);
-  EXPECT_EQ(p.cmd_timeout_s, 0.0);
-  JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
-  m.on_enter(fb);
-  m.set_target(JointVec::Constant(0.5));
-  JointCommand out;
-  for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
-  EXPECT_GT(m.reference()[0], 0.1);
+  for (int i = 0; i < 10; ++i)  m.compute(fb, 0.001, out);   // fresh: advances
+  ASSERT_GT(std::abs(m.reference()[0]), 0.0);
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);   // stream stops
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);              // frozen at measured q
 }
 ```
 
-- [ ] **Step 5: Implement in impedance mode**
+The pair matters: the first test fails if the pose setter forgets to `bump()`, the second fails if freezing never happens. Either alone could pass with the watchdog wired wrong.
 
-Same mechanism. Note this mode has **two** setters (`set_target(Pose)` and `set_target(JointVec)`) — **both** must bump `write_count_`, or streaming a pose would look stale to the watchdog. Freezing sets `q_d_ = fb.q` and, so the frozen state is coherent, also sets `source_` to the joint path.
+- [ ] **Step 8: Run all the mode tests**
 
-- [ ] **Step 6: Add the setter to `JointTorqueMode`**
+Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='CommandWatchdog*:JointTorque*:JointPositionMode*:JointImpedanceMode*'`
+Expected: all PASS.
 
-It already has the watchdog; it needs a runtime setter so the Supervisor can push a session's deadline in. Its params are a plain member, so introduce an atomic override rather than making the whole struct double-buffered:
-
-```cpp
-  // Session deadline pushed in by the Supervisor at stream open. Negative means
-  // "use cmd_timeout_s from the params". Atomic because the Supervisor writes it
-  // from a non-RT thread while compute() reads it at 1 kHz.
-  std::atomic<double> cmd_timeout_override_{-1.0};
-```
-
-```cpp
-void JointTorqueMode::set_command_timeout(double s) noexcept {
-  cmd_timeout_override_.store(s, std::memory_order_release);
-}
-```
-
-and in `compute()`, replace the two uses of `p_.cmd_timeout_s` with:
-
-```cpp
-  const double ov = cmd_timeout_override_.load(std::memory_order_acquire);
-  const double timeout = (ov >= 0.0) ? ov : p_.cmd_timeout_s;
-```
-
-Add a test asserting the override wins: set a 0.5 s override, drive 200 ms of staleness, and confirm the feedforward has **not** decayed (it would have under the 0.1 s default).
-
-- [ ] **Step 7: Run the mode tests**
-
-Run: `cmake --build build -j && ./build/unit_tests --gtest_filter='JointPositionMode*:JointImpedanceMode*'`
-Expected: all PASS, including the four new cases.
-
-- [ ] **Step 8: Run the RT gate — this is an RT-path change**
+- [ ] **Step 9: Run the RT gate — this is an RT-path change**
 
 Run: `./build/unit_tests --gtest_filter='RtSafety*'`
 Expected: every entry PASS, zero major page faults, zero dropped samples. Read the output.
 
-- [ ] **Step 9: Benchmark before/after**
+- [ ] **Step 10: Benchmark before/after**
 
 Run: `./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf --rate 1000 --duration 5`
-Compare p50 / p99 / p99.9 / max and the overruns/faults/dropped counts against a run from `origin/main`. The added work is one acquire-load, a branch and an addition, so expect no change — but the project's bar is that RT changes are measured, not assumed. Record both runs in your report.
+and `./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --rate 1000 --duration 5`
 
-- [ ] **Step 10: Commit**
+Compare p50 / p99 / p99.9 / max and overruns/faults/dropped against runs from `origin/main`. The torque path is the one that changed shape (inline mechanism → shared object), so its numbers matter most. Record both in your report. Remember the histogram is power-of-two bucketed: a single-bucket move at p99.9 carries no signal.
+
+- [ ] **Step 11: Commit**
 
 ```bash
-git add include/kinova_lowlevel/joint_position_mode.h src/joint_position_mode.cpp \
+git add include/kinova_lowlevel/command_watchdog.h tests/command_watchdog_test.cpp \
+        include/kinova_lowlevel/joint_torque_mode.h src/joint_torque_mode.cpp \
+        include/kinova_lowlevel/joint_position_mode.h src/joint_position_mode.cpp \
         include/kinova_lowlevel/joint_impedance_mode.h src/joint_impedance_mode.cpp \
-        include/kinova_lowlevel/joint_torque_mode.h src/joint_torque_mode.cpp tests/
-git commit -m "feat(modes): clock-free staleness watchdog freezes the reference at measured q"
+        tests/ CMakeLists.txt
+git commit -m "refactor(modes): extract CommandWatchdog; adopt in torque, position, impedance"
 ```
 
 ---
@@ -887,6 +1015,7 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if      (want == ControlModeKind::kPosition)  pos_.set_command_timeout(r.timeout_s);
   else if (want == ControlModeKind::kImpedance) imp_.set_command_timeout(r.timeout_s);
   else if (want == ControlModeKind::kTorque)    tau_.set_command_timeout(r.timeout_s);
+  // set_command_timeout is CommandWatchdog::arm under the hood -- see Task 4.
 
   const StreamOpenResult res = session_.open(r, secs_since(t0_));
   if (res.accepted) stream_open_.store(true);      // marked LAST
@@ -901,7 +1030,7 @@ void Supervisor::close_stream() {
   session_.close();
   if (active_mode_kind_ == ControlModeKind::kPosition)  pos_.set_command_timeout(0.0);
   if (active_mode_kind_ == ControlModeKind::kImpedance) imp_.set_command_timeout(0.0);
-  if (active_mode_kind_ == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);  // back to its own default
+  if (active_mode_kind_ == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);  // negative: restore the mode's own default
 }
 ```
 
