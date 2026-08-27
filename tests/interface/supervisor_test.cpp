@@ -702,3 +702,81 @@ TEST(Supervisor, StreamingJointTorqueDrivesTheTorqueMode) {
   g.path_tolerance = JointVec::Constant(-1.0);
   EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
 }
+
+// The write-handoff invariant -- exactly one thread writes targets at any instant --
+// cannot be proven behaviourally. It has to be raced: a writer thread hammers
+// on_setpoint_joint_position() concurrently with the close, and we check whether any
+// post-close setpoint reached the mode. During the session it streams a setpoint equal
+// to where the arm already is (zero), so nothing moves either way; only after the close
+// does it switch to a clearly different value. A test streaming one constant throughout
+// could not distinguish "the handoff held" from "the handoff leaked."
+TEST(StreamingHandoff, NoSetpointReachesTheModeAfterClose) {
+  for (int round = 0; round < 50; ++round) {
+    SupFix f; f.sup.start(); f.run_rt();
+    interface::StreamOpenRequest r;
+    r.kind = interface::SetpointKind::kJointPosition;
+    r.control_mode = interface::ControlModeKind::kPosition;
+    r.timeout_s = 5.0;                       // long: this test is about close, not expiry
+    ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+    std::atomic<bool> stop_writer{false};
+    std::atomic<bool> closed{false};
+
+    // Before the close: stream where the arm already is, so nothing moves.
+    // After the close: stream somewhere obviously different. Any leak shows up
+    // as commanded motion.
+    std::thread writer([&] {
+      while (!stop_writer.load(std::memory_order_acquire)) {
+        interface::JointSetpoint sp;
+        sp.values = closed.load(std::memory_order_acquire) ? JointVec::Constant(0.4)
+                                                           : JointVec::Zero();
+        f.sup.on_setpoint_joint_position(sp);
+        std::this_thread::yield();
+      }
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    interface::StreamCloseRequest c;
+    f.sup.on_stream_close(c);
+    closed.store(true, std::memory_order_release);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));   // let the writer hammer
+    stop_writer.store(true, std::memory_order_release);
+    writer.join();
+
+    EXPECT_FALSE(f.sup.stream_is_open());
+    f.sup.stop(); f.teardown();
+    // The post-close setpoints asked for 0.4 rad. If the handoff held, none of
+    // them reached the mode and the command never left the entry configuration.
+    EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6)
+        << "a setpoint landed after the session was closed (round " << round << ")";
+  }
+}
+
+TEST(StreamingHandoff, NoSetpointReachesTheModeAfterHalt) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  std::atomic<bool> stop_writer{false}, halted{false};
+  std::thread writer([&] {
+    while (!stop_writer.load(std::memory_order_acquire)) {
+      interface::JointSetpoint sp;
+      sp.values = halted.load(std::memory_order_acquire) ? JointVec::Constant(0.4)
+                                                         : JointVec::Zero();
+      f.sup.on_setpoint_joint_position(sp);
+      std::this_thread::yield();
+    }
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  halted.store(true, std::memory_order_release);
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  stop_writer.store(true, std::memory_order_release);
+  writer.join();
+  f.sup.stop(); f.teardown();
+  // An e-stopped arm must not be restartable by a client that has not noticed.
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}

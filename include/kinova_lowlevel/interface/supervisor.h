@@ -55,6 +55,9 @@ class Supervisor : public CommandSink, public StreamSink {
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
 
+  // Test/diagnostic: is a streaming session currently admitting setpoints?
+  bool stream_is_open() const { return stream_open_.load(); }
+
  private:
   struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };
   void sampler_loop();
