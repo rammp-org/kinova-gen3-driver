@@ -287,3 +287,59 @@ counter if full). All formatting/CSV/histogram work happens on a non-RT drain
 thread that calls `pop` + `consume`. **`percentile` is coarse** (log2 buckets) —
 fine for characterizing a 1 kHz loop, not an exact percentile; use the CSV for
 precise analysis.
+
+## Arbitration — `interface/arbiter.h`, `interface/ports.h`
+
+`Arbiter` decides **who may command the arm**. It implements `CommandSink` and
+decorates another `CommandSink` (the `Supervisor`), so it sits in the command
+path without any coupling to control code. See the
+[arbitration guide](../guide/arbitration.md) for the model.
+
+```cpp
+using Token = std::array<uint8_t, 16>;   // 128-bit capability token
+
+enum class ArbitrationMode { kEnforced, kDisabled };
+enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
+
+Arbiter(CommandSink& downstream, ArbitrationMode mode, uint64_t seed = 0);
+```
+
+`seed == 0` seeds the token RNG from `std::random_device`; a non-zero seed makes
+tests deterministic.
+
+### `ArbitrationSink` (driving port)
+
+The orchestrator's side of the interface. The backend calls these; the `Arbiter`
+implements them.
+
+| Method | Effect |
+|---|---|
+| `GrantResult grant(const std::string& owner_id)` | mints and returns a fresh token; halts first if the arm was already owned; refused while e-stopped |
+| `void revoke()` | drops the grant and halts (`kOwnershipRevoked`) |
+| `void estop()` | drops all grants, halts (`kEmergencyStop`), and **latches** |
+| `void estop_clear()` | leaves the latch, to *no owner*; works in any mode |
+| `ArbitrationStatus status() const` | mode, e-stop latch, owner, generation, rejection count |
+
+### `CommandSink::on_halt(HaltReason)`
+
+The general "stop the arm now" primitive — used by ownership revocation and
+`/estop` alike. The caller declares **why**; the `Supervisor` decides **how**.
+In v1 every reason produces the same action: cancel and hold.
+
+`Supervisor::on_halt` latches on the caller's thread and clears the queue; the
+sampler thread performs the control action, which keeps `settle()`
+single-threaded and therefore exactly-once. It settles the active goal **and**
+every queued goal with `result_code::kHalted`, then holds the active mode's
+target at the last-good **measured** q.
+
+### Gating
+
+Every `CommandSink` method is gated except `on_query_state()` — reads are always
+open. `on_trajectory_accepted()` re-checks the token on the goal rather than
+trusting that a matching `on_trajectory_goal()` preceded it. `CancelRequest`
+exists so that cancel carries a token too.
+
+Rejections return `GoalResponse::kRejectUnauthorized` (goals),
+`CancelResponse::kReject` (cancel), or `{accepted=false}` (gains), and increment
+`ArbitrationStatus::rejected_count`. `result_code::kNotAuthorized = -8` is the
+constant for backends that produce a result message.

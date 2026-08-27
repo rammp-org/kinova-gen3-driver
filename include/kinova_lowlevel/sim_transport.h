@@ -13,6 +13,9 @@ class SimTransport : public Transport {
   void send(const JointCommand&) override;
   void receive(JointFeedback&) override;
   void safe_shutdown() override;
+  // Test/bench observability: the last command the loop wrote. Read it only after the
+  // RT thread is joined -- it is not synchronised.
+  const JointCommand& last_command() const { return last_cmd_; }
  private:
   JointFeedback state_;
   JointCommand last_cmd_;

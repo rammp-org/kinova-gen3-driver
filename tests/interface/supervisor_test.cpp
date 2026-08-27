@@ -3,6 +3,7 @@
 #include "kinova_lowlevel/interface/ports.h"
 #include "fake_backend.h"
 #include "kinova_lowlevel/interface/supervisor.h"
+#include "kinova_lowlevel/interface/arbiter.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
@@ -28,6 +29,23 @@ TEST(ValueTypes, DefaultsAndResultCodes) {
   ArmState s; s.q = JointVec::Constant(0.1);
   EXPECT_NEAR(s.q[0], 0.1, 1e-12);
   GoalId id{}; EXPECT_EQ(id.size(), 16u);
+}
+
+TEST(ValueTypes, ArbitrationDefaultsAndResultCodes) {
+  EXPECT_EQ(interface::result_code::kNotAuthorized, -8);
+  EXPECT_EQ(interface::result_code::kHalted,        -9);
+  interface::TrajectoryGoal g;
+  EXPECT_EQ(g.token, (interface::Token{}));          // zero-initialised, not garbage
+  interface::CancelRequest c;
+  EXPECT_EQ(c.token, (interface::Token{}));
+  interface::GrantResult gr;
+  EXPECT_FALSE(gr.accepted);
+  EXPECT_EQ(gr.generation, 0u);
+  interface::ArbitrationStatus st;
+  EXPECT_FALSE(st.estopped);
+  EXPECT_FALSE(st.owned);
+  EXPECT_EQ(st.rejected_count, 0u);
+  EXPECT_EQ(st.mode, interface::ArbitrationMode::kEnforced);
 }
 
 TEST(Ports, FakeBackendRecordsDrivenCalls) {
@@ -200,7 +218,8 @@ TEST(Supervisor, CancelSettlesActivePreempted) {
   ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
   f.sup.on_trajectory_accepted(a, g);
   std::this_thread::sleep_for(std::chrono::milliseconds(80));                       // mid-flight
-  EXPECT_EQ(f.sup.on_trajectory_cancel(a), interface::CancelResponse::kAccept);
+  interface::CancelRequest cr; cr.id = a;
+  EXPECT_EQ(f.sup.on_trajectory_cancel(cr), interface::CancelResponse::kAccept);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
   f.sup.stop(); f.teardown();
   ASSERT_EQ(f.be.result_count(), 1u);                                              // no further results
@@ -274,4 +293,134 @@ TEST(SupervisorSampler, ReusesLastGoodQOnFailedSnapshotRead) {
   const kinova::JointVec r = sampled_q(false, kinova::JointVec::Zero(), last);
   EXPECT_NEAR(r[0], 1.64, 1e-12);
   EXPECT_NEAR(r[6], 1.64, 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+// Halt path: settle everything ACCEPTed, then hold where the arm actually is.
+// ---------------------------------------------------------------------------
+
+TEST(Supervisor, HaltSettlesTheActiveGoalAsHalted) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.1, 2.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption   = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 3;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));   // mid-motion
+  f.sup.on_halt(interface::HaltReason::kOwnershipRevoked);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_EQ(f.be.last_result_id()[0], 3);
+}
+
+TEST(Supervisor, HaltSettlesTheQueuedGoalToo) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.1, 2.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.preemption = interface::Preemption::kLatestWins;
+  interface::GoalId a{}; a[0] = 1;
+  f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(a, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  interface::TrajectoryGoal q = g; q.preemption = interface::Preemption::kQueue;
+  interface::GoalId b{}; b[0] = 2;
+  f.sup.on_trajectory_goal(q); f.sup.on_trajectory_accepted(b, q);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop(); f.teardown();
+  // Both were ACCEPTed, so both must settle -- dropping the queued one silently
+  // orphans a client that waits forever (the a835bf5 / d0791df bug class).
+  ASSERT_EQ(f.be.result_count(), 2u);
+  for (const auto& kv : f.be.all_results())
+    EXPECT_EQ(kv.second.error_code, interface::result_code::kHalted);
+}
+
+TEST(Supervisor, HaltLatchesTheTargetAtMeasuredQ) {
+  SupFix f(0.0); f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.5, 4.0);   // slow ramp away from 0
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption   = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 5;
+  f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  f.sup.stop(); f.teardown();
+  // SimTransport is a static echo: measured q never leaves the seed, so a hold at
+  // MEASURED q must snap the command back to it -- not park at the last reference.
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
+// ---------------------------------------------------------------------------
+// A real Arbiter in front of a real Supervisor.
+// ---------------------------------------------------------------------------
+
+TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
+  SupFix f;
+  interface::Arbiter arb{f.sup, interface::ArbitrationMode::kEnforced, 99};
+  f.sup.start(); f.run_rt();
+  const interface::Token t = arb.grant("planner").token;
+
+  interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.4, 3.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption   = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.token = t;
+  interface::GoalId id{}; id[0] = 11;
+  ASSERT_EQ(arb.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  arb.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  arb.revoke();                                  // ownership pulled mid-motion
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // A command from the ex-owner after the revoke must not restart the arm.
+  EXPECT_EQ(arb.on_trajectory_goal(g), interface::GoalResponse::kRejectUnauthorized);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  f.sup.stop(); f.teardown();
+
+  ASSERT_EQ(f.be.result_count(), 1u);            // exactly once, not zero and not twice
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);   // held at measured q
+}
+
+TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
+  SupFix f;
+  interface::Arbiter arb{f.sup, interface::ArbitrationMode::kEnforced, 99};
+  f.sup.start(); f.run_rt();
+
+  const interface::Token a = arb.grant("planner").token;
+  interface::TrajectoryGoal gp; gp.trajectory = ramp7(0.0, 0.4, 3.0);
+  gp.control_mode = interface::ControlModeKind::kPosition;
+  gp.preemption = interface::Preemption::kLatestWins;
+  gp.path_tolerance = JointVec::Constant(-1.0); gp.token = a;
+  interface::GoalId ida{}; ida[0] = 21;
+  arb.on_trajectory_goal(gp); arb.on_trajectory_accepted(ida, gp);
+  std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+  const interface::Token b = arb.grant("teleop").token;   // re-grant halts, then grants
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // After a halt the arm is at rest, so mode-switch-at-rest is satisfied and an
+  // impedance goal from the NEW owner is accepted.
+  interface::TrajectoryGoal gi; gi.trajectory = ramp7(0.0, 0.05, 1.0);
+  gi.control_mode = interface::ControlModeKind::kImpedance;
+  gi.preemption = interface::Preemption::kLatestWins;
+  gi.path_tolerance = JointVec::Constant(-1.0); gi.token = b;
+  interface::GoalId idb{}; idb[0] = 22;
+  ASSERT_EQ(arb.on_trajectory_goal(gi), interface::GoalResponse::kAccept);
+  arb.on_trajectory_accepted(idb, gi);
+  std::this_thread::sleep_for(std::chrono::milliseconds(1800));
+  f.sup.stop(); f.teardown();
+
+  const auto results = f.be.all_results();
+  ASSERT_EQ(results.size(), 2u);
+  EXPECT_EQ(results[0].second.error_code, interface::result_code::kHalted);      // halted position goal
+  EXPECT_EQ(results[1].second.error_code, interface::result_code::kSuccessful);  // the new owner's goal
 }

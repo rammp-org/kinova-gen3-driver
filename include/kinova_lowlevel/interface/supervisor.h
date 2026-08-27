@@ -8,6 +8,7 @@
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
+#include "kinova_lowlevel/joint_target_sink.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
@@ -37,14 +38,16 @@ class Supervisor : public CommandSink {
   // CommandSink (called on the backend thread):
   GoalResponse   on_trajectory_goal(const TrajectoryGoal&) override;
   void           on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
-  CancelResponse on_trajectory_cancel(const GoalId&) override;
+  CancelResponse on_trajectory_cancel(const CancelRequest&) override;
   GainsResult    on_set_gains(const GainsRequest&) override;
   ArmState       on_query_state() override;
+  void           on_halt(HaltReason) override;
 
  private:
   struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };
   void sampler_loop();
   void pump_loop();
+  kinova::JointTargetSink& active_sink();            // pos_ or imp_, per active_mode_kind_
 
   JointPositionMode& pos_;  JointImpedanceMode& imp_;  RtExecutor& exec_;
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
@@ -56,6 +59,8 @@ class Supervisor : public CommandSink {
   std::atomic<uint8_t> atomic_mode_{0};               // 0=pos 1=imp; read by on_trajectory_goal
 
   std::mutex q_mtx_;  std::deque<Inbound> inbox_;     // backend -> sampler handoff
+  bool       halt_pending_ = false;                  // guarded by q_mtx_
+  HaltReason halt_reason_  = HaltReason::kOwnershipRevoked;   // guarded by q_mtx_
   Seqlock<ArmState> state_snap_;                      // pump -> query_state
 
   std::atomic<bool> running_{false};
