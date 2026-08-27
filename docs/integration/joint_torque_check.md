@@ -1,5 +1,10 @@
 # Joint-torque check — feedforward and the staleness watchdog
 
+!!! warning "Temporary"
+    This procedure and the `joint_torque_check` app it drives are **bring-up
+    scaffolding**. Both get deleted once `JointTorqueMode` has been validated on
+    the arm. Do not build tooling on top of them.
+
 **Attended procedure.** Companion to
 [`grav_comp_static_check.md`](grav_comp_static_check.md), which covers the
 zero-feedforward case.

@@ -1,3 +1,8 @@
+// TEMPORARY — bring-up harness, not a maintained tool. Delete this app, its
+// CMake block and docs/integration/velocity_mode_probe.md once the kVelocity
+// question below has an answer on the real arm. Nothing in the library depends
+// on it; removal is `git rm` plus one CMake block. Do not build on it.
+//
 // velocity_probe — DIAGNOSTIC. Answers one question: does this arm honour
 // ActuatorMode::kVelocity at all?
 //

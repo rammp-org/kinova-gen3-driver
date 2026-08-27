@@ -1,3 +1,8 @@
+// TEMPORARY — bring-up harness, not a maintained tool. Delete this app, its
+// CMake block and docs/integration/joint_torque_check.md once JointTorqueMode
+// has been validated on the arm. Nothing in the library depends on it; removal
+// is `git rm` plus one CMake block. Do not build on it.
+//
 // joint_torque_check — hardware validation harness for JointTorqueMode. The
 // procedure that uses it is docs/integration/joint_torque_check.md.
 //

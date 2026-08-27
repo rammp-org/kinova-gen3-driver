@@ -187,6 +187,7 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# TEMPORARY bring-up harness — delete this target with the app once answered.
 # velocity_probe answers ONE question: does this arm honour ActuatorMode::kVelocity?
 # That path is mapped in KortexTransport but has never been driven by any
 # ControlMode, and cannot be settled in sim (SimTransport is a static echo with no
@@ -200,6 +201,9 @@ if(KINOVA_ENABLE_KORTEX)
     target_compile_definitions(velocity_probe PRIVATE _OS_UNIX)
 else()
     target_compile_definitions(velocity_probe PRIVATE KINOVA_NO_KORTEX)
+endif()
+
+# TEMPORARY bring-up harness — delete this target with the app once validated.
 # joint_torque_check is the hardware validation harness for JointTorqueMode.
 # benchmark_grav_comp covers the zero-feedforward case; this covers the thing the
 # mode exists for -- a real feedforward via set_torque, and the staleness watchdog

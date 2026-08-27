@@ -1,5 +1,10 @@
 # Velocity-mode probe — does the arm honour `kVelocity`?
 
+!!! warning "Temporary"
+    This procedure and the `velocity_probe` app it drives are **bring-up
+    scaffolding**. Both get deleted once the question below has an answer on the
+    real arm. Do not build tooling on top of them.
+
 **Attended procedure. One joint, tiny speed, short duration.**
 
 ## Why this exists
