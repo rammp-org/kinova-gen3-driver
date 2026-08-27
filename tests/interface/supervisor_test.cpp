@@ -442,3 +442,150 @@ TEST(ValueTypes, StreamingDefaultsAndResultCodes) {
   EXPECT_TRUE(ts.twist.isZero());                // Vector6, [linear; angular]
   EXPECT_EQ(ts.token, (interface::Token{}));
 }
+
+// ---------------------------------------------------------------------------
+// Streaming tier (Task 6): setpoints reach the mode, and a session is exclusive
+// with trajectory goals in BOTH directions.
+// ---------------------------------------------------------------------------
+
+TEST(Supervisor, StreamingJointPositionDrivesTheMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_joint_position(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  // Deliberately SHORT: closing the session latches hold-at-measured-q, and
+  // SimTransport is a static echo, so the commanded reference immediately starts
+  // walking back toward the entry configuration at max_ref_speed (0.5 rad/s ->
+  // 0.05 rad in 100 ms). Sample before it arrives; the hold itself is asserted by
+  // ClosingAStreamLatchesHoldAtMeasuredQ below.
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  f.sup.stop(); f.teardown();
+  EXPECT_GT(f.sim.last_command().position[0], 1e-3);   // the setpoint actually reached the arm
+}
+
+TEST(Supervisor, ClosingAStreamLatchesHoldAtMeasuredQ) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_joint_position(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));   // > 0.05 rad / 0.5 rad/s
+  f.sup.stop(); f.teardown();
+  // The teardown commands the hold EXPLICITLY. Without it, position mode keeps the
+  // last streamed target once its watchdog is disarmed and the command stays at
+  // 0.05 rad -- the asymmetry against impedance that Task 4 surfaced.
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-3);
+}
+
+TEST(Supervisor, StreamOpenRefusesABadRequestBeforeSwitchingModes) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest no_deadline; no_deadline.timeout_s = 0.0;
+  auto res = f.sup.on_stream_open(no_deadline);
+  EXPECT_FALSE(res.accepted);
+  EXPECT_EQ(res.error_code, interface::result_code::kStreamRejected);
+  interface::StreamOpenRequest negative; negative.timeout_s = -1.0;
+  EXPECT_FALSE(f.sup.on_stream_open(negative).accepted);
+  interface::StreamOpenRequest bad_pair;                       // velocity needs Plan 2
+  bad_pair.kind = interface::SetpointKind::kJointVelocity;
+  bad_pair.control_mode = interface::ControlModeKind::kImpedance;
+  bad_pair.timeout_s = 1.0;
+  EXPECT_FALSE(f.sup.on_stream_open(bad_pair).accepted);
+  // A refused open leaves the arm exactly where it was: no mode switch happened.
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.2);
+  f.sup.on_setpoint_joint_position(sp);                        // no session -> dropped
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.stop(); f.teardown();
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
+TEST(Supervisor, AGoalIsRefusedWhileAStreamIsOpen) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r; r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+  f.sup.stop(); f.teardown();
+}
+
+TEST(Supervisor, AStreamIsRefusedWhileAGoalIsInFlight) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.1, 2.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 1;
+  f.sup.on_trajectory_goal(g); f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  interface::StreamOpenRequest r; r.timeout_s = 1.0;
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+  f.sup.stop(); f.teardown();
+}
+
+TEST(Supervisor, StreamTimeoutClosesTheSession) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r; r.timeout_s = 0.1;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.05);
+  f.sup.on_setpoint_joint_position(sp);
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));   // let the deadline lapse
+  // The session is gone, so a goal is admissible again -- that is the observable
+  // consequence of the lifecycle teardown.
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.stop(); f.teardown();
+}
+
+TEST(Supervisor, HaltClosesAnOpenStream) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r; r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.2);
+  f.sup.on_setpoint_joint_position(sp);            // must not restart a halted arm
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  f.sup.stop(); f.teardown();
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
+// Ruling B: a backend that calls on_trajectory_accepted WITHOUT a preceding
+// accepted goal must not have a torque/velocity goal silently driven as position.
+TEST(Supervisor, AnAcceptedTorqueGoalIsSettledInvalidNotDrivenAsPosition) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.3, 0.4);
+  g.control_mode = interface::ControlModeKind::kTorque;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 9;
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+  f.sup.on_trajectory_accepted(id, g);             // backend ignored the pre-check
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kInvalidGoal);
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);   // never executed
+}
