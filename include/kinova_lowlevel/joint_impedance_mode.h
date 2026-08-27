@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <atomic>
+#include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/diff_ik.h"
 #include "kinova_lowlevel/dynamics.h"
@@ -37,6 +38,9 @@ struct JointImpedanceParams {
   JointVec max_ref_speed = JointVec::Constant(
       std::numeric_limits<double>::infinity());
   double gain_ramp_s        = 0.5;    // fade the spring in over this window on entry
+  // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
+  // and preserves the behaviour every existing caller relies on.
+  double cmd_timeout_s      = 0.0;
   DiffIkParams ik{};
 };
 
@@ -73,6 +77,10 @@ class JointImpedanceMode : public ControlMode,
   // lossy round-trip that could land on a different branch. Latest setter wins:
   // a joint target supersedes any pose target and vice-versa.
   void set_target(const JointVec& q_d) noexcept override;
+
+  // Re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores this
+  // mode's own configured default (params().cmd_timeout_s).
+  void set_command_timeout(double s) noexcept;
 
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
   // do not call these from another thread while the RT loop is running.
@@ -118,6 +126,12 @@ class JointImpedanceMode : public ControlMode,
   JointVec ext_q_target_[2];
   std::atomic<int> jt_active_{0};
   std::atomic<TargetSource> source_{TargetSource::kEntryPose};
+
+  // Staleness detection for the streamed target -- shared by BOTH setters, so a
+  // streamed pose keeps it just as fresh as a streamed joint reference. The
+  // RESPONSE -- freezing the reference at measured q -- is this mode's contract
+  // and lives in compute().
+  CommandWatchdog wd_;
 
   JointVec q_d_ = JointVec::Zero();    // integrated reference configuration
   IkResult last_ik_{};

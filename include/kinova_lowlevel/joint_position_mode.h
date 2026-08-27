@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <limits>
+#include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/joint_target_sink.h"
@@ -32,6 +33,10 @@ struct JointPositionParams {
   // is never unbounded. Continuous joints are ±inf in the URDF and stay that way.
   JointVec q_lower = JointVec::Constant(-std::numeric_limits<double>::infinity());
   JointVec q_upper = JointVec::Constant(std::numeric_limits<double>::infinity());
+
+  // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
+  // and preserves the behaviour every existing caller relies on.
+  double cmd_timeout_s = 0.0;
 };
 
 // Joint-space position control. Commands every actuator in kPosition and lets
@@ -63,6 +68,10 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   // Non-RT setters (call from one supervisor thread).
   void set_target(const JointVec& q_d) noexcept override;
   void set_params(const JointPositionParams& p) noexcept;
+
+  // Re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores this
+  // mode's own configured default (params().cmd_timeout_s).
+  void set_command_timeout(double s) noexcept;
 
   // Returns the ACTIVE parameters, i.e. after URDF seeding and clamping — not
   // necessarily what was passed in. Worth reading back when a speed request
@@ -99,6 +108,10 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   JointVec ext_target_[2];
   std::atomic<int> ext_active_{0};
   std::atomic<bool> has_ext_target_{false};
+
+  // Staleness detection for the streamed target. The RESPONSE -- freezing the
+  // reference at measured q -- is this mode's contract and lives in compute().
+  CommandWatchdog wd_;
 
   JointVec q_ref_ = JointVec::Zero();   // integrated reference configuration
 };

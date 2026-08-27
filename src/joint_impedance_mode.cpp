@@ -18,6 +18,7 @@ JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
   ik_.set_params(p.ik);
   gains_[0] = p;
   gains_[1] = p;
+  wd_.arm(p.cmd_timeout_s);
 }
 
 void JointImpedanceMode::seed_limits(JointImpedanceParams& p) const noexcept {
@@ -48,6 +49,7 @@ void JointImpedanceMode::set_target(const Pose& x_d) noexcept {
   ext_target_[next] = x_d;
   ext_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kPose, std::memory_order_release);
+  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
 }
 
 void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
@@ -55,6 +57,12 @@ void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
   ext_q_target_[next] = q_d;
   jt_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kJoint, std::memory_order_release);
+  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
+}
+
+// s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointImpedanceMode::set_command_timeout(double s) noexcept {
+  wd_.arm(s >= 0.0 ? s : params().cmd_timeout_s);
 }
 
 void JointImpedanceMode::on_enter(const JointFeedback& fb) {
@@ -66,15 +74,40 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
   source_.store(TargetSource::kEntryPose, std::memory_order_release);
   ramp_elapsed_ = 0.0;
   last_ik_ = IkResult{};
+  wd_.reset();
 }
 
 void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
                                  JointCommand& out) {
   const JointImpedanceParams p = params();   // own a snapshot for the whole cycle
+
+  // Staleness: the stream stopped, so stop chasing it. Freeze the reference at
+  // the MEASURED configuration -- the spring error collapses to zero and the arm
+  // settles into gravity-comp hold rather than pulling toward a setpoint nobody
+  // is maintaining. Done BEFORE q_prev is captured so the freeze lands this
+  // cycle instead of being slewed in by the rate limiter below.
+  //
+  // source_ moves to the joint path so the frozen state is coherent rather than
+  // half-pose/half-joint: the mode is holding a joint reference now, not tracking
+  // a pose. Written from the RT thread, exactly as on_enter already writes it —
+  // same benign race against a concurrent setter, and the same
+  // single-supervisor-thread usage makes it a non-issue in practice.
+  //
+  // Target resolution is SKIPPED while stale; running it would immediately
+  // overwrite the frozen q_d_ from the (stale) target buffer.
+  const bool stale = wd_.tick(dt_s);
+  if (stale) {
+    q_d_ = fb.q;
+    last_ik_ = IkResult{};
+    source_.store(TargetSource::kJoint, std::memory_order_release);
+  }
+
   const TargetSource src = source_.load(std::memory_order_acquire);
   const JointVec q_prev = q_d_;
 
-  if (src == TargetSource::kJoint) {
+  if (stale) {
+    // frozen: q_d_ already holds fb.q
+  } else if (src == TargetSource::kJoint) {
     // Direct joint reference: command it straight through, IK bypassed. The rate
     // limit below still ramps a teleported target in from q_prev, so a distant
     // joint command is not slammed at the arm.

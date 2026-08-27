@@ -322,3 +322,35 @@ TEST(JointPosition, SetParamsTakesEffectOnTheNextCycle) {
   m.compute(fb, 0.001, c);
   EXPECT_NEAR(c.position[0], 0.0005 + 0.001, 1e-12);
 }
+
+// --- staleness watchdog ------------------------------------------------------
+
+TEST(JointPositionMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;
+  JointPositionMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(JointVec::Constant(0.5));
+  JointCommand out;
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // fresh: reference advances
+  EXPECT_GT(m.reference()[0], 0.0);
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
+}
+
+TEST(JointPositionMode, ZeroTimeoutDisablesTheWatchdog) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(1.0);
+  EXPECT_EQ(p.cmd_timeout_s, 0.0);                          // default preserves old behaviour
+  JointPositionMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(JointVec::Constant(0.5));
+  JointCommand out;
+  for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
+  EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
+}
