@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <mutex>
 #include <random>
 #include <string>
@@ -17,7 +18,10 @@ namespace kinova::interface {
 // Lock discipline (spec: "Thread safety"): the mutex IS held across command
 // delegation, so admit-and-deliver is atomic against revoke()/estop() -- otherwise a
 // command admitted a moment before a revoke could reach the Supervisor AFTER the halt
-// and restart a stopped arm. It is NEVER held across on_halt().
+// and restart a stopped arm. It is NEVER held across on_halt(). The one thing that
+// does NOT wait for it is estop(): a delegated call may block for hundreds of
+// milliseconds (the streaming tier's mode settle), so the e-stop latch and its halt
+// both run outside m_ -- see estopped_ below.
 class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
  public:
   // seed == 0 -> seed the token RNG from std::random_device.
@@ -58,7 +62,12 @@ class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
   mutable std::mutex m_;
   std::mt19937_64 rng_;
   bool        owned_ = false;
-  bool        estopped_ = false;
+  // ATOMIC and deliberately readable WITHOUT m_. Delegated calls run under m_, and
+  // Supervisor::on_stream_open now sleeps mode_settle_s (250 ms) inside one of
+  // them -- an e-stop that has to queue behind that is not an e-stop. estop()
+  // latches this BEFORE it contends for m_, so admission is refused from that
+  // instant regardless of who holds the lock.
+  std::atomic<bool> estopped_{false};
   Token       token_{};
   std::string owner_id_;
   uint64_t    generation_ = 0;

@@ -419,3 +419,88 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
 }
+
+// The Tier-4 configuration the streaming design actually rests on: a Supervisor in
+// the loop with a SESSION OPEN, so setpoints are written into the active mode's
+// target sink DIRECTLY from a backend thread while the RT loop runs. Every other
+// RtSafety case has the sampler as the only off-RT writer; this is the one where an
+// arbitrary client thread writes at its own rate. Same structure as
+// RtSafety.SupervisorInLoopNoMajorFaultsSteadyState (warm-up run, then a re-armed
+// measured run, read_usage() sampled on the loop thread itself) -- the only
+// difference is that a streaming session, not a trajectory goal, is what keeps
+// set_target() traffic flowing across the measured window.
+TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
+  using namespace kinova::interface;
+  JointFeedback init; init.q.setZero();
+  SimTransport sim(init);
+  Dynamics dyn(URDF_PATH), pump_dyn(URDF_PATH);
+  Seqlock<JointFeedback> snap;
+  FeedbackTap tap(sim, snap);
+  SampleRing ring(8192);
+  JointPositionMode pos(dyn);
+  JointImpedanceMode imp(dyn);
+  JointTorqueMode tau(dyn);
+  RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
+  FakeBackend be;
+  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  sup.start();   // requests position mode; spawns sampler + pump threads now
+
+  StreamOpenRequest r;
+  r.kind = SetpointKind::kJointPosition;
+  r.control_mode = ControlModeKind::kPosition;   // already active: no mode settle
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(sup.on_stream_open(r).accepted);
+
+  // ~200 Hz of setpoints, comfortably inside the 1 s deadline, for the whole
+  // warm-up + measured window. Zero is where the arm already is (SimTransport is a
+  // static echo), so this measures the WRITE traffic, not any motion.
+  std::atomic<bool> stop_writer{false};
+  std::thread writer([&] {
+    JointSetpoint sp; sp.values = JointVec::Zero();
+    while (!stop_writer.load(std::memory_order_acquire)) {
+      sup.on_setpoint_joint_position(sp);
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  });
+
+  std::thread loop([&] {
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+
+    ex.request_mode(&pos);        // the warm-up run consumed the previous request
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+
+    stop.store(true);  // release the drain thread
+  });
+
+  loop.join();
+  stop_writer.store(true, std::memory_order_release);
+  writer.join();
+  drain.join();
+  EXPECT_TRUE(sup.stream_is_open());   // the writer kept the deadline fresh throughout
+  sup.stop();
+
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}

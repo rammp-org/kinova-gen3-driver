@@ -62,7 +62,10 @@ class Supervisor : public CommandSink, public StreamSink {
   struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };
   void sampler_loop();
   void pump_loop();
-  kinova::JointTargetSink& active_sink();            // pos_ or imp_, per active_mode_kind_
+  // The joint-target sink a control mode kind owns, EXPLICIT over all four kinds.
+  // nullptr for the kinds that have no joint target (kTorque, kVelocity) so a
+  // caller must decide what to do rather than silently writing into pos_.
+  kinova::JointTargetSink* sink_for(ControlModeKind);
   // The sink a streaming session writes to, chosen by its declared control mode.
   kinova::JointTargetSink& stream_joint_sink();      // pos_ or imp_
   // One teardown, three callers: graceful close, deadline expiry, and on_halt.
@@ -95,8 +98,10 @@ class Supervisor : public CommandSink, public StreamSink {
   // hold latch. The mark-closed-first ordering decides WHETHER a setpoint is
   // admitted; this makes admit-and-write atomic with respect to close_stream(),
   // so a setpoint that has already passed admit() can never interleave with the
-  // teardown's write into the same single-writer double buffer. Backend/sampler
-  // threads only -- never taken on the RT path.
+  // teardown's write into the same single-writer double buffer. It ALSO serialises
+  // close_stream() against on_stream_open()'s tail, so a close still in flight
+  // cannot disarm the watchdog a re-open has just armed. Backend/sampler threads
+  // only -- never taken on the RT path, and never held across the mode settle.
   std::mutex stream_mtx_;
   JointVec   stream_hold_q_ = JointVec::Zero();       // last-good measured q for the teardown hold
   bool       have_hold_q_   = false;                  // false until the first successful snapshot read

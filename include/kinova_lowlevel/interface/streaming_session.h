@@ -29,16 +29,21 @@ class StreamingSession {
   bool             expired(double now_s) const;
 
   bool            is_open()        const { return open_.load(std::memory_order_acquire); }
-  SetpointKind    kind()           const { return kind_; }
-  ControlModeKind control_mode()   const { return mode_; }
-  double          timeout_s()      const { return timeout_s_; }
+  SetpointKind    kind()           const { return kind_.load(std::memory_order_relaxed); }
+  ControlModeKind control_mode()   const { return mode_.load(std::memory_order_relaxed); }
+  double          timeout_s()      const { return timeout_s_.load(std::memory_order_relaxed); }
   uint64_t        rejected_count() const { return rejected_.load(std::memory_order_relaxed); }
 
  private:
   std::atomic<bool> open_{false};
-  SetpointKind      kind_ = SetpointKind::kJointPosition;
-  ControlModeKind   mode_ = ControlModeKind::kPosition;
-  double            timeout_s_ = 0.1;
+  // ATOMIC, though the release/acquire on open_ already orders the FIRST read after
+  // an open. A close->re-open on the backend thread can land while the sampler is
+  // mid-expired(), and that is an unsynchronised read of a plain member: harmless
+  // in practice, a genuine data race to TSan, and free to close. Relaxed is enough
+  // -- open_ still carries the ordering; these just must not tear.
+  std::atomic<SetpointKind>    kind_{SetpointKind::kJointPosition};
+  std::atomic<ControlModeKind> mode_{ControlModeKind::kPosition};
+  std::atomic<double>          timeout_s_{0.1};
   std::atomic<double> last_s_{0.0};        // last accepted setpoint, or the open time
   std::atomic<uint64_t> rejected_{0};
 };

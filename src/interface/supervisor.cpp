@@ -66,11 +66,22 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
       TrajectoryResult r; r.error_code = result_code::kHalted; r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
       if (have_queued) action_.settle(queued_id, r);   // ACCEPTed already; dropping it orphans the client
-      traj_.emplace(active_sink()); traj_bound_kind_ = active_mode_kind_.load();
+      // ONE load of the running mode: a backend on_stream_open landing between two
+      // reads would bind traj_ to one sink and record the OTHER kind, which is the
+      // silent mis-mapping traj_bound_kind_ exists to prevent.
+      const ControlModeKind k = active_mode_kind_.load();
+      kinova::JointTargetSink* sink = sink_for(k);
+      // A kind with no joint sink (kTorque) still needs traj_ reset to idle; pos_ is
+      // an inert placeholder there, because traj_bound_kind_ = k forces a rebind
+      // before any position/impedance goal can be driven through it.
+      traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_));
+      traj_bound_kind_ = k;
       have_active = false; have_queued = false; in_flight_.store(false);
       JointFeedback fb; const bool ok = snap_.load(fb);
       q_meas = sampled_q(ok, fb.q, q_meas);            // never inject a phantom zero here of all places
-      active_sink().set_target(q_meas);                // hold at MEASURED q, not the last reference
+      // Torque's safe-stop is gravity-comp hold, already restored by close_stream()
+      // above -- it has no joint target to latch, so there is nothing to write.
+      if (sink) sink->set_target(q_meas);              // hold at MEASURED q, not the last reference
     }
     // 0b) lifecycle half of the streaming deadline. The mode has already made the
     //     OUTPUT safe at 1 kHz (its own watchdog); this closes the session, latches
@@ -86,12 +97,23 @@ void Supervisor::sampler_loop() {                 // fleshed out in Tasks 6-9
         // commanding its last reference, so the arm holds where it was.
         if (have_active) { TrajectoryResult r; r.error_code=result_code::kPreempted; action_.settle(active_id, r); }
         if (have_queued) { TrajectoryResult r; r.error_code=result_code::kPreempted; action_.settle(queued_id, r); }
-        traj_.emplace(active_mode_kind_.load()==ControlModeKind::kImpedance
-                      ? static_cast<kinova::JointTargetSink&>(imp_)
-                      : static_cast<kinova::JointTargetSink&>(pos_));
-        traj_bound_kind_ = active_mode_kind_.load();
+        const ControlModeKind k = active_mode_kind_.load();   // ONE load: see the halt path
+        kinova::JointTargetSink* sink = sink_for(k);
+        traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_));
+        traj_bound_kind_ = k;
         have_active=false; have_queued=false; in_flight_.store(false);
         continue;
+      }
+      // A goal ACCEPTed before a stream opened, drained after. in_flight_ is set
+      // HERE, not at accept time, so on_stream_open's in_flight_ check cannot see a
+      // goal still sitting in inbox_ -- up to one sampler period (4 ms at 250 Hz)
+      // wide. Executing it now would tick the trajectory into the very sink the
+      // backend thread is streaming into: two writers, one double buffer, which is
+      // exactly what the direct-write design says can never happen. Refuse instead.
+      if (stream_open_.load()) {
+        TrajectoryResult r; r.error_code = result_code::kInvalidGoal;
+        r.error_string = "a streaming session opened before this goal could start";
+        action_.settle(in.id, r); continue;
       }
       // Second-layer guard on the mode enum. on_trajectory_goal refuses kVelocity
       // and kTorque, but a backend may call on_trajectory_accepted without a
@@ -213,10 +235,22 @@ void Supervisor::on_halt(HaltReason r) {
   halt_pending_ = true;
 }
 
-kinova::JointTargetSink& Supervisor::active_sink() {
-  return active_mode_kind_.load() == ControlModeKind::kImpedance
-         ? static_cast<kinova::JointTargetSink&>(imp_)
-         : static_cast<kinova::JointTargetSink&>(pos_);
+// EXPLICIT over all four kinds rather than a binary "impedance or else". The old
+// fall-through mapped kTorque and kVelocity onto pos_, so a halt during a torque
+// stream wrote its hold into a mode the executor is not running -- silently a
+// no-op. nullptr says "this kind has no joint target" out loud:
+//   * kTorque   -- its safe-stop IS gravity-comp hold (spec decision 6), which
+//                  close_stream() produces by restoring the mode's own timeout.
+//   * kVelocity -- JointVelocityMode does not exist yet (Plan 2).
+// A switch with no default makes adding a kind a compile error, not a silent case.
+kinova::JointTargetSink* Supervisor::sink_for(ControlModeKind k) {
+  switch (k) {
+    case ControlModeKind::kPosition:  return &pos_;
+    case ControlModeKind::kImpedance: return &imp_;
+    case ControlModeKind::kTorque:    return nullptr;
+    case ControlModeKind::kVelocity:  return nullptr;
+  }
+  return nullptr;
 }
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }
@@ -247,6 +281,12 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
     std::this_thread::sleep_for(std::chrono::duration_cast<clock::duration>(
         std::chrono::duration<double>(cfg_.mode_settle_s)));
   }
+  // Serialised against close_stream()'s teardown, and taken AFTER the settle sleep
+  // so an e-stop's halt never waits on it. On the designed hiccup-recovery path
+  // (expiry closes the session, the client immediately re-opens) an in-flight close
+  // would otherwise land its set_command_timeout(-1.0) on the FRESHLY opened
+  // session, silently downgrading its watchdog to the mode default.
+  std::lock_guard<std::mutex> l(stream_mtx_);
   // One deadline, pushed into the mode so it can make the OUTPUT safe at 1 kHz
   // while the session handles lifecycle at sampler rate. set_command_timeout is
   // CommandWatchdog::arm under the hood -- see Task 4.
@@ -255,7 +295,16 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   else if (want == ControlModeKind::kTorque)    tau_.set_command_timeout(r.timeout_s);
 
   const StreamOpenResult res = session_.open(r, secs_since(t0_));
-  if (res.accepted) stream_open_.store(true);      // marked LAST
+  if (!res.accepted) {
+    // Refused AFTER the mode switch and the re-arm: hand the mode straight back to
+    // its own supervision rather than leaving an armed watchdog with no session
+    // behind it. (-1.0 restores the configured default; 0.0 would disable it.)
+    if      (want == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
+    else if (want == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
+    else if (want == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
+    return res;
+  }
+  stream_open_.store(true);                        // marked LAST
   return res;
 }
 
@@ -263,34 +312,41 @@ void Supervisor::on_stream_close(const StreamCloseRequest&) { close_stream(); }
 
 // One teardown, three callers: graceful close, deadline expiry, and on_halt.
 void Supervisor::close_stream() {
+  // Taken BEFORE the exchange so the whole teardown is atomic against a re-open:
+  // otherwise a close that had already marked the session shut could still be
+  // running its disarm when on_stream_open re-armed the watchdog, and would then
+  // overwrite it. Also keeps in-flight setpoints out of the hold latch.
+  std::lock_guard<std::mutex> l(stream_mtx_);
   if (!stream_open_.exchange(false)) return;       // marked FIRST: setpoints are refused from here
   session_.close();
-  {
-    std::lock_guard<std::mutex> l(stream_mtx_);    // no in-flight setpoint may overlap the latch
-    // Latch the safe state EXPLICITLY rather than relying on what each mode happens
-    // to do when its watchdog is disarmed: impedance stays frozen at measured q,
-    // position would resume slewing toward the last streamed target. The spec gives
-    // the session the lifecycle, so the teardown owns the hold. Written before the
-    // disarm below so the mode never sees an un-held cycle.
-    const ControlModeKind running = active_mode_kind_.load();
-    if (running == ControlModeKind::kPosition ||
-        running == ControlModeKind::kImpedance) {
-      JointFeedback fb; const bool ok = snap_.load(fb);
-      if (ok || have_hold_q_) {                    // a failed Seqlock read must never inject a zero
-        stream_hold_q_ = sampled_q(ok, fb.q, stream_hold_q_);
-        have_hold_q_ = true;
-        active_sink().set_target(stream_hold_q_);  // hold at MEASURED q
-      }
+  // Latch the safe state EXPLICITLY rather than relying on what each mode happens
+  // to do when its watchdog is disarmed: impedance stays frozen at measured q,
+  // position would resume slewing toward the last streamed target. The spec gives
+  // the session the lifecycle, so the teardown owns the hold. Written before the
+  // disarm below so the mode never sees an un-held cycle.
+  const ControlModeKind running = active_mode_kind_.load();
+  if (kinova::JointTargetSink* sink = sink_for(running)) {
+    JointFeedback fb; const bool ok = snap_.load(fb);
+    if (!ok && !have_hold_q_) {
+      // FIRST close and a failed Seqlock read: there is no last-good q yet. Skipping
+      // the hold here is not an option -- position mode would disarm, un-stale, and
+      // slew back toward the last streamed setpoint AFTER the session closed. The
+      // running mode's own reference is always valid, so hold there instead.
+      stream_hold_q_ = (running == ControlModeKind::kImpedance) ? imp_.reference()
+                                                                : pos_.reference();
     }
-    // Hand the mode back to its OWN supervision: a negative argument restores the
-    // mode's configured cmd_timeout_s. Passing 0.0 would disable the watchdog
-    // outright and silently destroy a timeout somebody set at construction.
-    // Torque mode has no joint target to hold; restoring its default is what makes
-    // it safe, by ramping the feedforward to zero, i.e. gravity-comp hold.
-    if (running == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
-    if (running == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
-    if (running == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
+    stream_hold_q_ = sampled_q(ok, fb.q, stream_hold_q_);   // no phantom zero, ever
+    have_hold_q_ = true;
+    sink->set_target(stream_hold_q_);              // hold at MEASURED q
   }
+  // Hand the mode back to its OWN supervision: a negative argument restores the
+  // mode's configured cmd_timeout_s. Passing 0.0 would disable the watchdog
+  // outright and silently destroy a timeout somebody set at construction.
+  // Torque mode has no joint target to hold; restoring its default is what makes
+  // it safe, by ramping the feedforward to zero, i.e. gravity-comp hold.
+  if (running == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
+  if (running == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
+  if (running == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
 }
 
 // Each setpoint admits through the session, then writes the sink DIRECTLY from this

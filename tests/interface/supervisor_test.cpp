@@ -543,6 +543,40 @@ TEST(Supervisor, AStreamIsRefusedWhileAGoalIsInFlight) {
   f.sup.stop(); f.teardown();
 }
 
+// Regression (whole-branch review, finding 1): the accept-time exclusivity checks
+// are BOTH necessary and BOTH insufficient. in_flight_ is set by the SAMPLER when it
+// drains the inbox, not by on_trajectory_accepted, so for up to one sampler period
+// (4 ms at 250 Hz) an accepted goal sits in inbox_ with in_flight_ still false and
+// on_stream_open is admitted. Left unguarded the sampler then rebinds traj_ and ticks
+// the trajectory into the very sink the backend thread is streaming into -- two
+// writers on one double buffer, which is the whole safety argument for writing
+// setpoints directly from the backend thread. The sampler must refuse the goal.
+TEST(Supervisor, AGoalAcceptedJustBeforeAStreamOpensIsSettledInvalid) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.3, 0.5);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{}; id[0] = 41;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);       // inbox_ only -- in_flight_ still false
+  // NO sleep: opening inside the drain window is the whole point of the test.
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;   // same mode: no settle sleep
+  r.timeout_s = 5.0;                          // long enough not to expire during the test
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted)
+      << "the sampler drained before the open; the race window was missed";
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));   // > the 0.5 s ramp
+  f.sup.stop(); f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kInvalidGoal);
+  // And it really was refused rather than run: the ramp asked for 0.3 rad and no
+  // setpoint was ever streamed, so the command never left the entry configuration.
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
 TEST(Supervisor, StreamTimeoutClosesTheSession) {
   SupFix f; f.sup.start(); f.run_rt();
   interface::StreamOpenRequest r; r.timeout_s = 0.1;

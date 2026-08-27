@@ -118,11 +118,31 @@ watchdog by writing zero over whatever the caller configured.
 ## Mutual exclusion with trajectory goals
 
 A stream and a trajectory goal can never run at once, and each side refuses
-the other loudly rather than queuing or interleaving:
+the other loudly rather than queuing or interleaving. It takes **three** checks,
+not two, because the two accept-time ones are each one-sided:
 
 - `on_stream_open` rejects with `kStreamRejected` if a trajectory goal is
   currently in flight.
 - `on_trajectory_goal` rejects if a stream is currently open.
+- The sampler re-checks when it **drains** an accepted goal, and settles it
+  `INVALID_GOAL` if a stream has opened in the meantime.
+
+The third check closes a real window. A goal becomes "in flight" when the
+sampler drains the inbox, not when the backend accepts it, so an accepted goal
+sits queued for up to one sampler period (4 ms at the default 250 Hz) while
+`on_stream_open` still sees no goal in flight and admits the session. Without
+the drain-time re-check the sampler would then rebind the trajectory executor
+and tick that goal into the very sink the backend thread is streaming into —
+two writers on one double buffer, which is precisely what the exclusivity
+invariant exists to rule out (setpoints are written **directly** from the
+backend thread, and that is only sound because the sampler writes no targets
+while a session is open).
+
+The practical consequence for a client: opening a stream immediately after
+submitting a goal is not a way to preempt it. The goal is refused, not
+interrupted mid-motion, and the client sees `INVALID_GOAL` with
+`"a streaming session opened before this goal could start"`. To hand over
+deliberately, cancel the goal (or let it finish) and then open the stream.
 
 The reasoning is the same in both directions: a trajectory goal and a stream
 both want to be the one thing writing the active mode's target every cycle,

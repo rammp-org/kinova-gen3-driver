@@ -16,7 +16,7 @@ Token Arbiter::mint() {
 // Admitted iff the bypass is on, or the command carries the live token.
 // E-stop latches over BOTH -- it is the one thing kDisabled does not bypass.
 bool Arbiter::admit(const Token& t) const {
-  if (estopped_) return false;
+  if (estopped_.load(std::memory_order_acquire)) return false;
   if (mode_ == ArbitrationMode::kDisabled) return true;
   return owned_ && t == token_;
 }
@@ -24,12 +24,13 @@ bool Arbiter::admit(const Token& t) const {
 GrantResult Arbiter::grant(const std::string& owner_id) {
   bool need_halt = false;
   { std::lock_guard<std::mutex> l(m_);
-    if (estopped_) return {false, Token{}, generation_, "e-stopped"};
+    if (estopped_.load(std::memory_order_acquire)) return {false, Token{}, generation_, "e-stopped"};
     // A re-grant is revoke-then-grant, never a silent swap under a moving arm.
     if (owned_) { owned_ = false; token_ = Token{}; need_halt = true; } }
   if (need_halt) down_.on_halt(HaltReason::kOwnershipRevoked);   // lock NOT held
   std::lock_guard<std::mutex> l(m_);
-  if (estopped_) return {false, Token{}, generation_, "e-stopped"};  // raced an estop in the halt window
+  if (estopped_.load(std::memory_order_acquire))
+    return {false, Token{}, generation_, "e-stopped"};                // raced an estop in the halt window
   token_ = mint(); owned_ = true; owner_id_ = owner_id; ++generation_;
   return {true, token_, generation_, ""};
 }
@@ -41,20 +42,32 @@ void Arbiter::revoke() {
   if (need_halt) down_.on_halt(HaltReason::kOwnershipRevoked);
 }
 
+// The ONE path that never waits for m_. Delegated calls run under m_, and
+// Supervisor::on_stream_open sleeps mode_settle_s (250 ms) inside one of them, so an
+// estop() that acquired m_ first could sit a quarter of a second before latching --
+// and another quarter before the halt reached the arm. Instead:
+//   1. latch estopped_ (atomic, release) -- admit() refuses from this instant, so
+//      nothing can slip through the window below no matter who holds m_;
+//   2. deliver the halt immediately, still without m_ (on_halt is never called
+//      under it anyway);
+//   3. only then take m_ for the ownership bookkeeping, which is not
+//      safety-critical because step 1 already refuses every command.
 void Arbiter::estop() {
-  { std::lock_guard<std::mutex> l(m_);
-    estopped_ = true; owned_ = false; token_ = Token{}; owner_id_.clear(); }
+  estopped_.store(true, std::memory_order_release);
   down_.on_halt(HaltReason::kEmergencyStop);   // unconditional: e-stop always halts
+  std::lock_guard<std::mutex> l(m_);
+  owned_ = false; token_ = Token{}; owner_id_.clear();
 }
 
 void Arbiter::estop_clear() {
   std::lock_guard<std::mutex> l(m_);
-  estopped_ = false;              // exits to no-owner, never straight back to owned
+  // Cleared UNDER m_ (unlike the latch): re-enabling the arm may wait its turn.
+  estopped_.store(false, std::memory_order_release);   // exits to no-owner, never straight back to owned
 }
 
 ArbitrationStatus Arbiter::status() const {
   std::lock_guard<std::mutex> l(m_);
-  return {mode_, estopped_, owned_, owner_id_, generation_, rejected_};
+  return {mode_, estopped_.load(std::memory_order_acquire), owned_, owner_id_, generation_, rejected_};
 }
 
 GoalResponse Arbiter::on_trajectory_goal(const TrajectoryGoal& g) {

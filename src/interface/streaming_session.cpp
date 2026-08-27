@@ -27,7 +27,9 @@ StreamOpenResult StreamingSession::open(const StreamOpenRequest& r, double now_s
   if (!pair_supported(r.kind, r.control_mode))
     return {false, result_code::kStreamRejected, "unsupported (setpoint kind, control mode) pair"};
 
-  kind_ = r.kind; mode_ = r.control_mode; timeout_s_ = r.timeout_s;
+  kind_.store(r.kind, std::memory_order_relaxed);
+  mode_.store(r.control_mode, std::memory_order_relaxed);
+  timeout_s_.store(r.timeout_s, std::memory_order_relaxed);
   last_s_.store(now_s, std::memory_order_relaxed);
   open_.store(true, std::memory_order_release);      // marked LAST -- see the handoff rule
   return {true, 0, ""};
@@ -38,7 +40,7 @@ void StreamingSession::close() {
 }
 
 bool StreamingSession::admit(SetpointKind k, double now_s) {
-  if (!is_open() || k != kind_) {
+  if (!is_open() || k != kind_.load(std::memory_order_relaxed)) {
     rejected_.fetch_add(1, std::memory_order_relaxed);
     return false;
   }
@@ -48,6 +50,6 @@ bool StreamingSession::admit(SetpointKind k, double now_s) {
 
 bool StreamingSession::expired(double now_s) const {
   if (!is_open()) return false;                      // nothing open, nothing to tear down
-  return (now_s - last_s_.load(std::memory_order_relaxed)) > timeout_s_;
+  return (now_s - last_s_.load(std::memory_order_relaxed)) > timeout_s_.load(std::memory_order_relaxed);
 }
 }  // namespace kinova::interface
