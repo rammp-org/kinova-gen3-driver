@@ -71,12 +71,12 @@ void JointTorqueMode::compute(const JointFeedback& fb, double dt_s,
       // exactly zero after cmd_decay_s of staleness. Sign preserved.
       const double frac = dt_s / p_.cmd_decay_s;
       for (int i = 0; i < kNumJoints; ++i) {
-        const double dec = frac * std::abs(tau_ff_target_[i]);
-        double a = tau_ff_applied_[i];
-        if (a > dec) a -= dec;
-        else if (a < -dec) a += dec;
-        else a = 0.0;
-        tau_ff_applied_[i] = a;
+        const double step = frac * std::abs(tau_ff_target_[i]);
+        double applied = tau_ff_applied_[i];
+        if (applied > step) applied -= step;
+        else if (applied < -step) applied += step;
+        else applied = 0.0;          // within one step of zero: land exactly on it
+        tau_ff_applied_[i] = applied;
       }
     } else {
       tau_ff_applied_.setZero();
