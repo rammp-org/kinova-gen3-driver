@@ -58,6 +58,10 @@ class Supervisor : public CommandSink, public StreamSink {
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
+  // Why the last session ended. Distinct causes because a client cannot otherwise
+  // tell a lapsed deadline (its own fault, retry) from an IK fault (the pose path
+  // stopped converging, retrying the same stream reproduces it).
+  StreamCloseCause stream_close_cause() const { return close_cause_.load(); }
 
  private:
   struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };
@@ -71,8 +75,8 @@ class Supervisor : public CommandSink, public StreamSink {
   // sink_for is: an inline "impedance or else" ternary would recreate the exact
   // binary mapping sink_for's own comment records as having been wrong before.
   kinova::PoseTargetSink* pose_sink_for(ControlModeKind);
-  // One teardown, three callers: graceful close, deadline expiry, and on_halt.
-  void close_stream();
+  // One teardown, four callers: graceful close, deadline expiry, IK fault, on_halt.
+  void close_stream(StreamCloseCause);
 
   JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  JointVelocityMode& vel_;
   RtExecutor& exec_;
@@ -98,6 +102,9 @@ class Supervisor : public CommandSink, public StreamSink {
 
   StreamingSession  session_;                         // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};              // mirrors session_, read by the sampler + goal pre-check
+  // Why the last session ended. Written by whichever thread ran the teardown,
+  // read by anyone asking after the fact.
+  std::atomic<StreamCloseCause> close_cause_{StreamCloseCause::kNone};
   // Serialises the streaming WRITES (admit + set_target) against the teardown's
   // hold latch. The mark-closed-first ordering decides WHETHER a setpoint is
   // admitted; this makes admit-and-write atomic with respect to close_stream(),
