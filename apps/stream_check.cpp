@@ -66,6 +66,7 @@
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/sim_transport.h"
@@ -254,10 +255,11 @@ int main(int argc, char** argv) {
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   JointTorqueMode tau(dyn);
+  JointVelocityMode vel(dyn);
   SampleRing ring(8192);
   RtExecutor ex(tap, ring, {rate_hz, pacing, {rt_priority, cpu, true, true}});
   ConsoleBackend backend;
-  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, backend, backend);
+  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, backend, backend);
 
   sup.start();
   std::atomic<bool> stop{false};

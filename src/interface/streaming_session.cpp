@@ -1,19 +1,18 @@
 #include "kinova_lowlevel/interface/streaming_session.h"
 namespace kinova::interface {
 
-// The valid-pair table. Plan 2 adds the velocity rows and EE pose -> position;
-// until then those are refused, which is the table working, not a stub.
+// The valid-pair table.
 bool pair_supported(SetpointKind k, ControlModeKind m) {
   switch (k) {
     case SetpointKind::kJointPosition:
       return m == ControlModeKind::kPosition || m == ControlModeKind::kImpedance;
     case SetpointKind::kEePose:
-      return m == ControlModeKind::kImpedance;      // position mode has no IK path yet (Plan 2)
+      return m == ControlModeKind::kImpedance || m == ControlModeKind::kPosition;
     case SetpointKind::kJointTorque:
       return m == ControlModeKind::kTorque;
     case SetpointKind::kJointVelocity:
     case SetpointKind::kEeTwist:
-      return false;                                  // JointVelocityMode does not exist yet (Plan 2)
+      return m == ControlModeKind::kVelocity;
   }
   return false;
 }

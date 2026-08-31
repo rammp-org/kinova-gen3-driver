@@ -8,6 +8,7 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -357,9 +358,10 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   JointTorqueMode tau(dyn);
+  JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
+  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
@@ -440,9 +442,10 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   JointTorqueMode tau(dyn);
+  JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
+  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};

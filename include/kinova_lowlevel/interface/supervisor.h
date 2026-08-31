@@ -11,6 +11,7 @@
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_target_sink.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/streaming_session.h"
@@ -31,8 +32,8 @@ struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; dou
 
 class Supervisor : public CommandSink, public StreamSink {
  public:
-  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, RtExecutor& exec,
-             Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
+  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
+             RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
              StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg = {});
   ~Supervisor();
   void start();   // request initial (position) mode; spawn sampler + pump threads
@@ -66,10 +67,15 @@ class Supervisor : public CommandSink, public StreamSink {
   // nullptr for the kinds that have no joint target (kTorque, kVelocity) so a
   // caller must decide what to do rather than silently writing into pos_.
   kinova::JointTargetSink* sink_for(ControlModeKind);
+  // The pose-target sink a control mode kind owns, EXPLICIT for the same reason
+  // sink_for is: an inline "impedance or else" ternary would recreate the exact
+  // binary mapping sink_for's own comment records as having been wrong before.
+  kinova::PoseTargetSink* pose_sink_for(ControlModeKind);
   // One teardown, three callers: graceful close, deadline expiry, and on_halt.
   void close_stream();
 
-  JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  RtExecutor& exec_;
+  JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  JointVelocityMode& vel_;
+  RtExecutor& exec_;
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
   StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
 

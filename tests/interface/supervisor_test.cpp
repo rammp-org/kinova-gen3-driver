@@ -7,6 +7,7 @@
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -85,9 +86,10 @@ struct SupFix {
   JointPositionMode pos{dyn};
   JointImpedanceMode imp{dyn};
   JointTorqueMode tau{dyn};
+  JointVelocityMode vel{dyn};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
   FakeBackend be;
-  interface::Supervisor sup{pos, imp, tau, exec, snap, pump_dyn, be, be};
+  interface::Supervisor sup{pos, imp, tau, vel, exec, snap, pump_dyn, be, be};
   std::atomic<bool> stop{false};
   std::thread rt;
 
@@ -875,4 +877,91 @@ TEST(StreamingHandoff, NoSetpointReachesTheModeAfterHalt) {
   f.sup.stop(); f.teardown();
   // An e-stopped arm must not be restartable by a client that has not noticed.
   EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
+TEST(Supervisor, StreamingJointVelocityDrivesTheVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Freeze qd_cmd_ before reading it -- mirrors StreamingJointTorqueDrivesTheTorque-
+  // Mode's "freeze last_cmd_ before reading it". close_stream()'s explicit
+  // set_velocity_target(Zero()) is velocity mode's safe-stop (Plan 2 decision):
+  // called before the RT thread is joined, it would land within a cycle or two
+  // and zero exactly the value this test exists to observe.
+  f.teardown();
+  const JointVec cmd = f.vel.commanded();
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop();
+
+  EXPECT_GT(cmd.cwiseAbs().maxCoeff(), 0.0);
+}
+
+TEST(Supervisor, StreamingATwistDrivesTheVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEeTwist;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::TwistSetpoint sp; sp.twist = Vector6::Zero(); sp.twist[0] = 0.02;
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_twist(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop(); f.teardown();
+
+  EXPECT_GT(f.vel.last_manipulability(), 0.0);   // the DLS solve actually ran
+}
+
+TEST(Supervisor, StreamingAPoseIntoPositionModeIsAccepted) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEePose;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::PoseSetpoint sp; sp.pose = f.pump_dyn.fk(f.init.q);
+  sp.pose.p.x() += 0.02;
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_pose(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Freeze last_ik_ before reading it -- mirrors StreamingJointTorqueDrivesThe-
+  // TorqueMode's "freeze last_cmd_ before reading it". close_stream()'s
+  // pre-existing hold-at-measured-q latch calls pos_.set_target(JointVec), which
+  // switches the target source away from kPose; JointPositionMode::compute()
+  // explicitly resets last_ik_ on that branch ("last_ik() means THIS cycle's
+  // solve"), so reading it after a close would see the reset, not the IK that
+  // actually ran while streaming.
+  f.teardown();
+  const IkResult ik = f.pos.last_ik();
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop();
+
+  EXPECT_GT(ik.iters, 0);           // IK ran in position mode
+}
+
+TEST(Supervisor, RefusesAJointPositionSetpointInVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+  f.sup.stop(); f.teardown();
 }

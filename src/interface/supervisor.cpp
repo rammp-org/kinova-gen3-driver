@@ -13,10 +13,10 @@ static const char* halt_reason_string(HaltReason r) {
   return "halted";
 }
 
-Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, RtExecutor& exec,
-                       Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
+Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
+                       RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
                        StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg)
-  : pos_(pos), imp_(imp), tau_(tau), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
+  : pos_(pos), imp_(imp), tau_(tau), vel_(vel), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
     stream_(stream), action_(action), cfg_(cfg) {}
 Supervisor::~Supervisor(){ stop(); }
 
@@ -241,7 +241,10 @@ void Supervisor::on_halt(HaltReason r) {
 // no-op. nullptr says "this kind has no joint target" out loud:
 //   * kTorque   -- its safe-stop IS gravity-comp hold (spec decision 6), which
 //                  close_stream() produces by restoring the mode's own timeout.
-//   * kVelocity -- JointVelocityMode does not exist yet (Plan 2).
+//   * kVelocity -- JointVelocityMode is deliberately not a JointTargetSink: it has
+//                  no position target, only a velocity one. Its own safe-stop is
+//                  zero velocity, latched in close_stream() directly, not through
+//                  this map.
 // A switch with no default makes adding a kind a compile error, not a silent case.
 kinova::JointTargetSink* Supervisor::sink_for(ControlModeKind k) {
   switch (k) {
@@ -249,6 +252,18 @@ kinova::JointTargetSink* Supervisor::sink_for(ControlModeKind k) {
     case ControlModeKind::kImpedance: return &imp_;
     case ControlModeKind::kTorque:    return nullptr;
     case ControlModeKind::kVelocity:  return nullptr;
+  }
+  return nullptr;
+}
+// The pose-target sink a control mode kind owns, EXPLICIT for the same reason
+// sink_for is: an inline "impedance or else" ternary here would recreate exactly
+// the binary mapping sink_for's own comment records as having been wrong before.
+kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
+  switch (k) {
+    case ControlModeKind::kImpedance: return &imp_;
+    case ControlModeKind::kPosition:  return &pos_;   // Plan 2: position gained IK
+    case ControlModeKind::kVelocity:
+    case ControlModeKind::kTorque:    return nullptr;
   }
   return nullptr;
 }
@@ -276,6 +291,7 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if (want != active_mode_kind_.load()) {
     if      (want == ControlModeKind::kImpedance) exec_.request_mode(&imp_);
     else if (want == ControlModeKind::kTorque)    exec_.request_mode(&tau_);
+    else if (want == ControlModeKind::kVelocity)  exec_.request_mode(&vel_);
     else                                          exec_.request_mode(&pos_);
     active_mode_kind_.store(want);
     std::this_thread::sleep_for(std::chrono::duration_cast<clock::duration>(
@@ -293,6 +309,7 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if      (want == ControlModeKind::kPosition)  pos_.set_command_timeout(r.timeout_s);
   else if (want == ControlModeKind::kImpedance) imp_.set_command_timeout(r.timeout_s);
   else if (want == ControlModeKind::kTorque)    tau_.set_command_timeout(r.timeout_s);
+  else if (want == ControlModeKind::kVelocity)  vel_.set_command_timeout(r.timeout_s);
 
   const StreamOpenResult res = session_.open(r, secs_since(t0_));
   if (!res.accepted) {
@@ -302,6 +319,7 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
     if      (want == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
     else if (want == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
     else if (want == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
+    else if (want == ControlModeKind::kVelocity)  vel_.set_command_timeout(-1.0);
     return res;
   }
   stream_open_.store(true);                        // marked LAST
@@ -339,6 +357,11 @@ void Supervisor::close_stream() {
     have_hold_q_ = true;
     sink->set_target(stream_hold_q_);              // hold at MEASURED q
   }
+  // Velocity mode has no joint target to hold either, but unlike torque its
+  // safe-stop is not "restore the default and let it ramp" -- it is zero velocity,
+  // commanded directly, so a closed session can never leave the arm coasting on
+  // its last streamed velocity.
+  if (running == ControlModeKind::kVelocity) vel_.set_velocity_target(JointVec::Zero());
   // Hand the mode back to its OWN supervision: a negative argument restores the
   // mode's configured cmd_timeout_s. Passing 0.0 would disable the watchdog
   // outright and silently destroy a timeout somebody set at construction.
@@ -347,6 +370,7 @@ void Supervisor::close_stream() {
   if (running == ControlModeKind::kPosition)  pos_.set_command_timeout(-1.0);
   if (running == ControlModeKind::kImpedance) imp_.set_command_timeout(-1.0);
   if (running == ControlModeKind::kTorque)    tau_.set_command_timeout(-1.0);
+  if (running == ControlModeKind::kVelocity)  vel_.set_command_timeout(-1.0);
 }
 
 // Each setpoint admits through the session, then writes the sink DIRECTLY from this
@@ -366,15 +390,24 @@ void Supervisor::on_setpoint_joint_position(const JointSetpoint& s) {
 void Supervisor::on_setpoint_pose(const PoseSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   if (!session_.admit(SetpointKind::kEePose, secs_since(t0_))) return;
-  imp_.set_target(s.pose);                         // only impedance has a PoseTargetSink
+  // nullptr means the running mode has no pose sink, so the setpoint is dropped
+  // rather than written into a mode the executor is not running.
+  if (kinova::PoseTargetSink* sink = pose_sink_for(session_.control_mode()))
+    sink->set_target(s.pose);
 }
 void Supervisor::on_setpoint_joint_torque(const JointSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   if (!session_.admit(SetpointKind::kJointTorque, secs_since(t0_))) return;
   tau_.set_torque(s.values);
 }
-// Unreachable in practice -- pair_supported refuses these kinds at open -- but they
-// must exist to satisfy the port until Plan 2 adds JointVelocityMode.
-void Supervisor::on_setpoint_joint_velocity(const JointSetpoint&) {}
-void Supervisor::on_setpoint_twist(const TwistSetpoint&) {}
+void Supervisor::on_setpoint_joint_velocity(const JointSetpoint& s) {
+  std::lock_guard<std::mutex> l(stream_mtx_);
+  if (!session_.admit(SetpointKind::kJointVelocity, secs_since(t0_))) return;
+  if (session_.control_mode() == ControlModeKind::kVelocity) vel_.set_velocity_target(s.values);
+}
+void Supervisor::on_setpoint_twist(const TwistSetpoint& s) {
+  std::lock_guard<std::mutex> l(stream_mtx_);
+  if (!session_.admit(SetpointKind::kEeTwist, secs_since(t0_))) return;
+  if (session_.control_mode() == ControlModeKind::kVelocity) vel_.set_twist_target(s.twist);
+}
 }  // namespace kinova::interface
