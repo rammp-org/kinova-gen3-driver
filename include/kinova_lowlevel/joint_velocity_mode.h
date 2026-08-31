@@ -18,19 +18,41 @@ struct JointVelocityParams {
   // Baseline Levenberg-Marquardt damping for the 6x7 twist solve.
   double dls_damping = 1e-3;
   // Manipulability w = sqrt(det(J J^T)) below which damping is raised toward
-  // dls_damping_max. This is the ONLY thing keeping commanded velocity bounded
-  // near a singularity: in a torque law a bad solve produces a bounded torque,
-  // but here whatever is computed goes straight to the actuators.
+  // dls_damping_max.
+  //
+  // What damping does and does NOT do: it preserves the CONDITIONING of the solve,
+  // so a near-singular Jacobian produces a finite, well-behaved qd instead of an
+  // enormous one. It is NOT what bounds the command -- limit() does that
+  // unconditionally, with a uniform scale plus a hard per-joint clamp, and across
+  // most of the near-singular band (w_threshold is one tenth of the nominal w)
+  // limit() is in practice the PRIMARY bound. The observable behaviour near a
+  // singularity is therefore the EE slowing down -- the uniform scale shrinks the
+  // whole command, preserving its direction -- not tracking degrading in some
+  // direction. Reach for dls_damping_max only when the solve itself is
+  // ill-conditioned; if the tool is merely sluggish, that is limit() scaling.
+  //
   // Grounded in measurement, not guessed: on this URDF the elbow-up nominal_q()
   // pose measures w_nominal=0.0325, and the straight-arm singularity straight_q()
   // measures w_singular=0.0000 (see JointVelocityModeTwist.ManipulabilityIsLower-
   // AtTheSingularity). Set to roughly one tenth of w_nominal.
+  //
+  // REVISIT THIS IF THE URDF OR THE EE FRAME CHANGES. w = sqrt(det(J J^T)) mixes
+  // linear and angular units, so its magnitude is scale-dependent and frame-
+  // dependent: the 2F-85 gripper URDF moves the EE frame and changes w, and the
+  // threshold is only meaningful relative to the w this model actually produces.
   double w_threshold     = 0.0033;
   double dls_damping_max = 0.10;
 
   // Null-space posture bias [1/s]. Without it the redundant DOF drifts and the
   // elbow wanders while the tool tracks the twist perfectly.
-  double posture_gain = 0.5;
+  //
+  // Matches DiffIkParams::posture_gain. Deliberately modest: this mode has NO
+  // entry ramp (unlike JointTorqueMode and both impedance modes), so the bias is
+  // applied as a STEP on the first setpoint of a session. Against a posture error
+  // that can reach ~pi, a gain of 0.5 asks for ~1.6 rad/s of null-space velocity
+  // -- over the URDF cap, which then makes limit()'s uniform scale throttle the
+  // TASK velocity too. See docs/guide/streaming.md.
+  double posture_gain = 0.15;
   JointVec q_rest =   // elbow-up home; matches DiffIkParams::q_rest
       (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
 

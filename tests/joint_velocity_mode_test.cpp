@@ -123,28 +123,32 @@ TEST(JointVelocityMode, OnEnterDropsATargetSentBeforeEntry) {
 TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheFrozenPath) {
   // RtExecutor reuses one JointCommand across mode switches. A prior mode may
   // have left non-zero position/torque in it; this mode owns velocity and must
-  // not let those fields survive, even on the early-return no-target path.
+  // not let those fields survive, even on the early-return no-target path. The
+  // position field ECHOES the measurement, as every other mode does -- zero there
+  // is not "unset", it is "all joints at 0 rad".
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
-  m.on_enter(fb_at(JointVec::Zero()));
+  const JointVec q = JointVec::Constant(0.3);
+  m.on_enter(fb_at(q));
   JointCommand out;
   out.position = JointVec::Constant(1.0);
   out.torque = JointVec::Constant(1.0);
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);   // no target -> frozen/no-target path
-  EXPECT_TRUE(out.position.isZero());
+  m.compute(fb_at(q), 0.001, out);   // no target -> frozen/no-target path
+  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
   EXPECT_TRUE(out.torque.isZero());
 }
 
 TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheTrackingPath) {
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
-  m.on_enter(fb_at(JointVec::Zero()));
+  const JointVec q = JointVec::Constant(0.3);
+  m.on_enter(fb_at(q));
   m.set_velocity_target(JointVec::Constant(0.2));
   JointCommand out;
   out.position = JointVec::Constant(1.0);
   out.torque = JointVec::Constant(1.0);
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_TRUE(out.position.isZero());
+  m.compute(fb_at(q), 0.001, out);
+  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
   EXPECT_TRUE(out.torque.isZero());
 }
 
@@ -291,4 +295,109 @@ TEST(JointVelocityModePosture, ConvergesTowardQRestOverRepeatedCycles) {
     q += out.velocity * 0.001;
   }
   EXPECT_LT(std::abs(q[2] - p.q_rest[2]), err0);
+}
+
+// Finding: the wrap guard in solve_twist was untested. The sibling test above
+// perturbs q[2] to 3.44, which is ALREADY in (-pi, pi] only by accident of being
+// unwrapped -- wrap_to_pi is a no-op on it and the guard never runs. On the arm,
+// KortexTransport wraps every measured angle, so 3.44 arrives as -2.843: without
+// the wrap, q_rest[2] - q[2] reads 5.983 instead of -0.300 and the posture bias
+// drives joint 3 most of a turn the WRONG way at the limiter's cap.
+TEST(JointVelocityModePosture, TakesTheShortWayOnAContinuousJointAcrossTheWrap) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.posture_gain = 0.5;
+  p.max_qd = JointVec::Constant(10.0);
+  JointVelocityMode m(dyn, p);
+
+  // Feedback arrives wrapped to (-pi, pi], as the transport delivers it.
+  JointVec q = nominal_q();
+  q[2] = -2.843;                        // == 3.44 rad (q_rest[2] + 0.30), wrapped
+  m.on_enter(fb_at(q));
+  m.set_twist_target(Vector6::Zero());  // hold the tool still; isolate the posture term
+
+  JointCommand out;
+  m.compute(fb_at(q), 0.001, out);
+  // Short way is -0.30 rad; the long way is +5.98 and saturates the limiter.
+  EXPECT_LT(out.velocity[2], 0.0);
+  EXPECT_LT(std::abs(out.velocity[2]), 1.0);
+}
+
+
+// A NEAR-singular configuration: the shoulder is 0.10 rad off straight, which puts
+// manipulability at w=0.00031, well inside the w < w_threshold ramp. The exactly
+// straight pose is useless for this: there the commanded direction lies in the
+// null space of J^T, so the solve returns ~0 whatever the damping is.
+namespace {
+JointVec near_singular_q() {
+  JointVec q = JointVec::Zero(); q[1] = 0.10; q[3] = -0.20; return q;
+}
+}  // namespace
+
+// The damping SCHEDULE (the w < w_threshold ramp) had no test that it ever fires:
+// StaysBoundedAtAStraightArmSingularity asserts a bound that limit()'s hard clamp
+// guarantees whatever the DLS produced, and the nominal w=0.0325 never enters the
+// ramp. This observes the damping's OWN effect instead -- it sacrifices tracking
+// (that is what damping buys) and leaves the command far below the limiter's cap,
+// so the bound observed here is the damping's and not the clamp's.
+TEST(JointVelocityModeTwist, DampingNotTheLimiterIsWhatBoundsTheSolveNearASingularity) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.posture_gain = 0.0;                 // isolate the task term
+  JointVelocityMode m(dyn, p);
+  const JointVec q = near_singular_q();
+  m.on_enter(fb_at(q));
+
+  Vector6 V = Vector6::Zero();
+  V[2] = 0.10;                          // along the near-degenerate direction
+  m.set_twist_target(V);
+  JointCommand out;
+  m.compute(fb_at(q), 0.001, out);
+  ASSERT_LT(m.last_manipulability(), p.w_threshold);   // the ramp branch really ran
+  ASSERT_GT(m.last_manipulability(), 0.0);             // and it is not the trivial null case
+
+  Jacobian6 J; dyn.jacobian(q, J);
+  // Damping deliberately gives up tracking rather than producing an enormous qd.
+  EXPECT_GT((J * out.velocity - V).norm(), 0.05);
+  // And the result is small on its own account -- nowhere near the cap the limiter
+  // would have applied (measured: max|qd| 0.31 rad/s against a 1.22 rad/s cap).
+  JointVec v_max; dyn.velocity_limits(v_max);
+  EXPECT_LT(out.velocity.cwiseAbs().maxCoeff(), 0.5 * v_max.minCoeff());
+}
+
+// Pins the schedule directly, and records the measurement behind the docs' claim
+// about what actually bounds the command. dls_damping_max == dls_damping makes the
+// ramp flat, i.e. the schedule disabled; any difference is the schedule alone.
+TEST(JointVelocityModeTwist, TheDampingRampIsWhatSeparatesTheseTwoSolves) {
+  Dynamics dyn(URDF_PATH);
+  const JointVec q = near_singular_q();
+  Vector6 V = Vector6::Zero(); V[2] = 0.10;
+  JointVec v_max; dyn.velocity_limits(v_max);
+
+  auto solve_with = [&](double dmax) {
+    JointVelocityParams p;
+    p.posture_gain = 0.0;
+    p.dls_damping_max = dmax;
+    JointVelocityMode m(dyn, p);
+    m.on_enter(fb_at(q));
+    m.set_twist_target(V);
+    JointCommand out;
+    m.compute(fb_at(q), 0.001, out);
+    return out.velocity;
+  };
+
+  JointVelocityParams def;
+  const JointVec flat   = solve_with(def.dls_damping);   // schedule disabled
+  const JointVec ramped = solve_with(def.dls_damping_max);
+
+  EXPECT_LT(ramped.norm(), 0.5 * flat.norm());
+  // With the schedule off the solve runs straight into the LIMITER -- some joint
+  // sits exactly on its URDF cap. That is the concrete evidence for what the
+  // header says: limit() is the unconditional bound, damping is about the solve's
+  // conditioning.
+  bool at_cap = false;
+  for (int i = 0; i < kNumJoints; ++i)
+    if (std::abs(std::abs(flat[i]) - v_max[i]) < 1e-9) at_cap = true;
+  EXPECT_TRUE(at_cap);
+  EXPECT_LT(ramped.cwiseAbs().maxCoeff(), 0.5 * v_max.minCoeff());
 }

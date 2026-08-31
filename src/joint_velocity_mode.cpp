@@ -111,10 +111,14 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
     qd_cmd_.setZero();
     out.velocity = qd_cmd_;
     // RtExecutor reuses one JointCommand across mode changes, so a position or
-    // torque left by a previous mode would still be sitting in these fields.
-    // The transport ignores them in kVelocity today; that is not a reason to
-    // leave stale setpoints where something later could act on them.
-    out.position.setZero();
+    // torque left by a previous mode would still be sitting in these fields --
+    // don't leave a previous mode's setpoint lying around. ECHO the measured
+    // position, exactly as every other mode does (joint_torque_mode.cpp,
+    // joint_impedance_mode.cpp, cartesian_impedance_mode.cpp,
+    // joint_position_mode.cpp), rather than writing zero: zero is not "unset", it
+    // is "all joints at 0 rad", a meaningful and wrong command that is harmless
+    // only because KortexTransport happens to overwrite the field.
+    out.position = fb.q;
     out.torque.setZero();
     return;
   }
@@ -132,11 +136,10 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
 
   limit(p, qd_cmd_);
   out.velocity = qd_cmd_;
-  // RtExecutor reuses one JointCommand across mode changes, so a position or
-  // torque left by a previous mode would still be sitting in these fields.
-  // The transport ignores them in kVelocity today; that is not a reason to
-  // leave stale setpoints where something later could act on them.
-  out.position.setZero();
+  // Same as the frozen path above: echo the measured position rather than zeroing
+  // it, so a previous mode's setpoint cannot survive here and the field still
+  // carries the value every other mode puts there.
+  out.position = fb.q;
   out.torque.setZero();
 }
 
