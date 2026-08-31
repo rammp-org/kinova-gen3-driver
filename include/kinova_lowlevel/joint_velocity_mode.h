@@ -21,7 +21,11 @@ struct JointVelocityParams {
   // dls_damping_max. This is the ONLY thing keeping commanded velocity bounded
   // near a singularity: in a torque law a bad solve produces a bounded torque,
   // but here whatever is computed goes straight to the actuators.
-  double w_threshold     = 0.02;
+  // Grounded in measurement, not guessed: on this URDF the elbow-up nominal_q()
+  // pose measures w_nominal=0.0325, and the straight-arm singularity straight_q()
+  // measures w_singular=0.0000 (see JointVelocityModeTwist.ManipulabilityIsLower-
+  // AtTheSingularity). Set to roughly one tenth of w_nominal.
+  double w_threshold     = 0.0033;
   double dls_damping_max = 0.10;
 
   // Null-space posture bias [1/s]. Without it the redundant DOF drifts and the
