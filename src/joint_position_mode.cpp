@@ -53,7 +53,6 @@ void JointPositionMode::set_params(const JointPositionParams& p) noexcept {
   params_[next] = p;
   seed_limits(params_[next]);
   params_active_.store(next, std::memory_order_release);
-  ik_.set_params(params_[next].ik);
 }
 
 void JointPositionMode::set_target(const JointVec& q_d) noexcept {
@@ -117,6 +116,12 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
         // Warm-start from the current reference: the solve refines in place, and
         // seeding from q_ref_ keeps the solution on the branch we are already on.
         ik_q_ = q_ref_;
+        // Pushed here, not from set_params(): ik_'s internal params are a plain
+        // (non-double-buffered) struct, so writing them from the non-RT thread
+        // while this thread is inside solve() would be a torn read. Pushing from
+        // this cycle's own snapshot p is a same-thread, fixed-size copy -- no
+        // alloc -- exactly like JointImpedanceMode::compute().
+        ik_.set_params(p.ik);
         last_ik_ = ik_.solve(pose_target_[pose_active_.load(std::memory_order_acquire)],
                              ik_q_);
         // Sustained non-convergence is a fault; a single miss is not. Accumulated
