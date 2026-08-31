@@ -118,3 +118,31 @@ TEST(JointVelocityMode, OnEnterDropsATargetSentBeforeEntry) {
   m.compute(fb_at(JointVec::Zero()), 0.001, out);
   EXPECT_TRUE(out.velocity.isZero());
 }
+
+TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheFrozenPath) {
+  // RtExecutor reuses one JointCommand across mode switches. A prior mode may
+  // have left non-zero position/torque in it; this mode owns velocity and must
+  // not let those fields survive, even on the early-return no-target path.
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode m(dyn);
+  m.on_enter(fb_at(JointVec::Zero()));
+  JointCommand out;
+  out.position = JointVec::Constant(1.0);
+  out.torque = JointVec::Constant(1.0);
+  m.compute(fb_at(JointVec::Zero()), 0.001, out);   // no target -> frozen/no-target path
+  EXPECT_TRUE(out.position.isZero());
+  EXPECT_TRUE(out.torque.isZero());
+}
+
+TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheTrackingPath) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode m(dyn);
+  m.on_enter(fb_at(JointVec::Zero()));
+  m.set_velocity_target(JointVec::Constant(0.2));
+  JointCommand out;
+  out.position = JointVec::Constant(1.0);
+  out.torque = JointVec::Constant(1.0);
+  m.compute(fb_at(JointVec::Zero()), 0.001, out);
+  EXPECT_TRUE(out.position.isZero());
+  EXPECT_TRUE(out.torque.isZero());
+}

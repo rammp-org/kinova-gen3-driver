@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include <limits>
 #include <Eigen/Cholesky>

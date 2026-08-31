@@ -110,6 +110,12 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
   if (frozen_ || src == Source::kNone) {
     qd_cmd_.setZero();
     out.velocity = qd_cmd_;
+    // RtExecutor reuses one JointCommand across mode changes, so a position or
+    // torque left by a previous mode would still be sitting in these fields.
+    // The transport ignores them in kVelocity today; that is not a reason to
+    // leave stale setpoints where something later could act on them.
+    out.position.setZero();
+    out.torque.setZero();
     return;
   }
 
@@ -126,6 +132,12 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
 
   limit(p, qd_cmd_);
   out.velocity = qd_cmd_;
+  // RtExecutor reuses one JointCommand across mode changes, so a position or
+  // torque left by a previous mode would still be sitting in these fields.
+  // The transport ignores them in kVelocity today; that is not a reason to
+  // leave stale setpoints where something later could act on them.
+  out.position.setZero();
+  out.torque.setZero();
 }
 
 // Task 2 fills this in.
