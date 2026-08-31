@@ -50,6 +50,10 @@ cd build
 # Cartesian impedance (holds the entry pose; push -> springs back)
 ./benchmark_cartesian_impedance --sim --urdf ../models/gen3_7dof_2f85.urdf \
   --rate 1000 --duration 5
+
+# Joint velocity, EE-twist path (--kind joint drives the native pass-through)
+./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf \
+  --rate 1000 --duration 5 --kind twist
 ```
 
 You'll see ~1 Hz console lines (loop rate, cycle/compute percentiles, overruns,

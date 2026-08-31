@@ -80,6 +80,29 @@ on it:
   velocity and **latches** — exactly like `JointImpedanceMode`'s freeze,
   disarming the watchdog cannot resurrect a target nobody is maintaining.
 
+### The first twist setpoint can swing the elbow
+
+`JointVelocityMode` resolves the redundant DOF with a **null-space posture
+bias** toward `q_rest` — without it the elbow wanders wherever the twist stream
+happens to drag it. Two consequences a client must plan for:
+
+- **The bias is applied as a step, not a ramp.** Unlike `JointTorqueMode` and
+  both impedance modes, this mode has no entry ramp. Open a twist session with
+  the arm far from `q_rest` and send a *zero* twist, and the elbow starts moving
+  immediately — motion the client did not ask for and is not commanding. If that
+  matters, bring the arm near `q_rest` before opening the session, set
+  `posture_gain = 0` and own the redundant DOF yourself, or expect the swing.
+- **A large posture error slows task tracking.** The posture term and the task
+  term are summed before `limit()`, and `limit()` scales the *sum* uniformly.
+  A big posture correction therefore eats headroom that would otherwise go to
+  the twist you asked for. The direction of the achieved twist is preserved —
+  uniform scaling is what guarantees that — so it is not wrong, it is slow.
+
+`posture_gain` defaults to `0.15` (matching `DiffIkParams`) rather than
+something livelier for exactly this reason: against a posture error that can
+reach ~π, a gain of 0.5 asks for ~1.6 rad/s of null-space velocity, over the
+URDF cap, as an unramped step.
+
 The EE-twist path additionally saturates by **scaling, not clamping**: when the
 damped-least-squares solve would ask a joint to exceed its velocity cap, every
 joint's commanded velocity is scaled down **uniformly** so the fastest joint
@@ -130,19 +153,47 @@ watch it, at two different rates, and each owns a different job:
   | `JointTorqueMode` | ramps `tau_ff` to zero over `cmd_decay_s`, reverting to gravity-compensation hold |
   | `JointPositionMode` | freezes the reference at measured q |
   | `JointImpedanceMode` | freezes the reference at measured q, **latched** until a fresh command arrives (disarming the watchdog cannot resurrect a target nobody is maintaining) |
+  | `JointVelocityMode` | commands **zero** velocity, **latched** — holding the last velocity would keep the arm travelling toward nothing |
 
   So the arm is never left chasing a stale target for longer than one control
   cycle, even though the session that requested the stream may not tear down
   for up to `timeout_s` more.
 
 Each mode also has its own default timeout (`JointTorqueParams::cmd_timeout_s`,
-`JointPositionParams::cmd_timeout_s`, `JointImpedanceParams::cmd_timeout_s` — all
-`0.0`, i.e. disabled, except torque's `0.1`) that applies whenever the mode is
+`JointPositionParams::cmd_timeout_s`, `JointImpedanceParams::cmd_timeout_s`,
+`JointVelocityParams::cmd_timeout_s` — all `0.0`, i.e. disabled, except torque's
+`0.1`) that applies whenever the mode is
 *not* backing an open stream. `set_command_timeout(s)` with `s >= 0` arms the
 watchdog with `s`; `s < 0` restores that default. `Supervisor::close_stream()`
 calls it with a negative value on teardown for exactly this reason — closing a
 stream must hand the mode back to its own supervision, not silently disable its
 watchdog by writing zero over whatever the caller configured.
+
+## When the pose path cannot solve
+
+The deadline is not the only thing that ends a session. Streaming an **EE pose**
+into `JointPositionMode` runs in-loop IK every cycle, and a pose the solver
+cannot reach to tolerance for longer than `JointPositionParams::ik_fault_s`
+(default `0.1 s`) is a fault. Two things then happen, at two different rates,
+the same split the deadline uses:
+
+- **The mode, at 1 kHz**, freezes the reference at the measured configuration
+  immediately. Position mode is stiff: holding a stale reference while the
+  client believes it is tracking is exactly the silent divergence this driver
+  exists to fail loud on.
+- **The sampler, on its next tick**, closes the session — with
+  `StreamCloseCause::kIkFault`, distinct from `kDeadlineExpired`. That
+  distinction is the point: a lapsed deadline means the client went quiet and
+  should re-open; an IK fault means the driver could not solve for what was
+  being asked, and re-opening the same session will reproduce it.
+
+The latch is re-armed on teardown, so reconnecting works — but reconnecting
+without changing the target does not. Check that the poses being streamed are
+actually reachable. The most common cause is not a wild target but a **marginal**
+one: a pose a fraction of a millimetre outside the workspace, typically produced
+by taking the arm's current pose at or near full extension and offsetting it
+outward. `ik_fault_s <= 0` disables the fault entirely, at the cost of the arm
+silently sitting frozen while the client streams into the void.
 
 ## Mutual exclusion with trajectory goals
 

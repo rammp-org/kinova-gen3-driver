@@ -201,9 +201,17 @@ IK — the cheapest control path in the driver. Implements both
 same in-loop `DiffIkSolver` `JointImpedanceMode` uses, and the result feeds the
 **same** `rate_limit → leash → wrap → clamp` reference pipeline a native joint
 target does, so the pose path inherits the whole safety envelope unchanged.
-`ik_faulted()` is published for a sampler thread to observe: the mode itself
+`ik_faulted()` is published for the sampler thread to observe: the mode itself
 freezes the reference immediately at 1 kHz on sustained non-convergence,
-independent of anything upstream noticing. See the
+independent of anything upstream noticing, and `Supervisor`'s sampler loop then
+closes any open streaming session with
+`StreamCloseCause::kIkFault` (see
+[the streaming guide](../guide/streaming.md#when-the-pose-path-cannot-solve)).
+The latch is re-armed by `close_stream()` and on the transition into a pose
+target, so a client that reconnects is not stuck behind the previous session's
+fault. The IK seed is **persistent** across cycles — it is not re-seeded from
+the rate-limited reference, or `converged` could never become true for a pose
+more than one solve's travel away. See the
 [guide](../guide/control-modes.md#joint-space-position-jointpositionmode).
 
 ### `JointVelocityMode` — `joint_velocity_mode.h`
@@ -215,7 +223,7 @@ struct JointVelocityParams {
   double dls_damping     = 1e-3;   // baseline LM damping for the twist solve
   double w_threshold      = 0.0033; // manipulability below which damping rises
   double dls_damping_max = 0.10;
-  double posture_gain = 0.5;       // 1/s; null-space posture bias, 0 disables it
+  double posture_gain = 0.15;      // 1/s; null-space posture bias, 0 disables it
   JointVec q_rest = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
   double cmd_timeout_s = 0.0;      // staleness watchdog; 0 disables
 };
@@ -240,9 +248,13 @@ different mode. Two target shapes: `set_velocity_target` is native
 `set_twist_target` maps an EE twist `[linear; angular]` (base frame) by damped
 least squares (`qd = Jᵀ(JJᵀ + λ²I)⁻¹V`) plus a projector-free null-space
 posture bias toward `q_rest`. `λ` rises as manipulability
-`w = sqrt(det(JJᵀ))` falls below `w_threshold` — the only thing bounding
-commanded velocity near a singularity, since whatever the solve produces goes
-straight to the actuators with no torque clamp standing behind it. Staleness
+`w = sqrt(det(JJᵀ))` falls below `w_threshold`, which keeps the **solve**
+well-conditioned near a singularity. What bounds the **command** is `limit()`:
+a uniform scale so the fastest joint just reaches its cap, plus a hard per-joint
+clamp, applied unconditionally. Since `w_threshold` sits at a tenth of the
+nominal `w`, `limit()` is in practice the primary bound across the whole
+near-singular band — reach for `dls_damping_max` when the solve is
+ill-conditioned, not when the tool is merely sluggish. Staleness
 commands **zero** velocity and **latches**, exactly like `JointImpedanceMode`'s
 freeze. See the [Deep Dive](../deep-dive/velocity-mode.md) for the full
 derivation and the [guide](../guide/streaming.md#jointvelocitymode-specifics).
@@ -509,10 +521,24 @@ source of truth for exactly which combinations exist.
 that lets the driver detect and tear down a dead stream is not optional, since
 an unbounded stream has no safe-stop if the client disappears mid-session.
 
+### Why the last session ended — `StreamCloseCause`
+
+```cpp
+enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
+StreamCloseCause Supervisor::stream_close_cause() const;   // the LAST close
+```
+
+Every path through `Supervisor::close_stream()` records one of these. The
+distinction that matters operationally is `kDeadlineExpired` versus `kIkFault`:
+the first says the client went quiet and re-opening is the right response, the
+second says the driver could not solve for the poses being streamed, and
+re-opening the same session will just reproduce it. See
+[the streaming guide](../guide/streaming.md#when-the-pose-path-cannot-solve).
+
 ### `CommandWatchdog` — `command_watchdog.h`
 
-Shared staleness **detection**, used by all three of `JointTorqueMode`,
-`JointPositionMode`, and `JointImpedanceMode`. It is a lock-free counter bumped
+Shared staleness **detection**, used by all four of `JointTorqueMode`,
+`JointPositionMode`, `JointImpedanceMode`, and `JointVelocityMode`. It is a lock-free counter bumped
 by every non-RT setter and ticked once per RT cycle against an armed timeout —
 no clock call, no allocation, so it is safe on the RT path. What a mode *does*
 about staleness is deliberately not this class's job — each mode owns that

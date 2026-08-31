@@ -19,8 +19,31 @@ actuator — the worst case is a hard shove, not an unbounded motion. Velocity
 mode commands `ActuatorMode::kVelocity` directly: whatever `solve_twist`
 computes goes straight to the joint servo, with no dynamics standing between
 the number and the motor. That single fact drives every design choice below —
-in particular, damping near a singularity is not a refinement here, it is the
-only thing keeping the commanded velocity finite.
+in particular, damping near a singularity is not a refinement here, it is what
+keeps the *solve* well-conditioned rather than returning an enormous `qd` in
+the direction the arm has just lost.
+
+!!! note "What actually bounds the command"
+
+    Damping is about **conditioning**, not about bounding. What bounds the
+    command is `limit()`: a uniform scale so the fastest joint just reaches its
+    `max_qd` cap, followed by a hard per-joint clamp, applied on **every** cycle
+    regardless of `w`. And because `w_threshold` sits at roughly one tenth of a
+    nominal `w`, `limit()` is in practice the *primary* bound across most of the
+    near-singular band — an undamped solve there runs straight into the clamp.
+
+    The behaviour you observe near a singularity is therefore the EE **slowing
+    down**: the uniform scale shrinks the whole command while preserving its
+    direction. It is not tracking degrading in one direction. If the tool feels
+    sluggish, that is `limit()` scaling, and reaching for `dls_damping_max` will
+    make it worse, not better.
+
+    Both halves are pinned by test:
+    `JointVelocityModeTwist.DampingNotTheLimiterIsWhatBoundsTheSolveNearASingularity`
+    and `…TheDampingRampIsWhatSeparatesTheseTwoSolves`, which measure a
+    near-singular pose (`w = 0.00031`, inside the ramp) with the schedule on and
+    off: flat, the solve pins a joint exactly at its 1.3963 rad/s URDF cap;
+    ramped, it stays at 0.31 rad/s and gives up tracking instead.
 
 ## The DLS twist map
 
@@ -111,6 +134,13 @@ range established, `w_threshold` is set to roughly one tenth of the nominal
 value: comfortably inside "normal operation" territory so ordinary teleop
 motion never triggers extra damping, while still leaving headroom before the
 arm reaches the actual singularity.
+
+`w` is **unit-mixed and scale-dependent** — `J` stacks linear (m/rad) on angular
+(rad/rad) rows, so `det(J Jᵀ)` has no clean physical dimension and its magnitude
+depends on the arm's link lengths and on where the EE frame sits. Changing the
+URDF or the EE frame — the 2F-85 gripper model moves the EE frame — changes the
+numbers in the table above, and `w_threshold` must be re-derived from a fresh
+measurement rather than carried over.
 
 ### Getting `w` for free
 
