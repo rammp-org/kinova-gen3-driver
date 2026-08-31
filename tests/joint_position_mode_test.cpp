@@ -354,3 +354,112 @@ TEST(JointPositionMode, ZeroTimeoutDisablesTheWatchdog) {
   for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
   EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
 }
+
+// --- Cartesian pose target via in-loop IK ------------------------------------
+
+TEST(JointPositionModePose, APoseTargetDrivesTheReferenceTowardIt) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose target = dyn.fk(q0);
+  target.p.x() += 0.05;                 // 5 cm along base x
+  m.set_target(target);
+
+  JointCommand out;
+  for (int i = 0; i < 500; ++i) { m.compute(fb, 0.001, out); fb.q = out.position; }
+
+  const Pose reached = dyn.fk(out.position);
+  EXPECT_LT((reached.p - target.p).norm(), (dyn.fk(q0).p - target.p).norm());
+}
+
+TEST(JointPositionModePose, AJointTargetStillBypassesIkEntirely) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  JointFeedback fb; fb.q = JointVec::Zero();
+  m.on_enter(fb);
+  const JointVec q_d = JointVec::Constant(0.1);
+  m.set_target(q_d);                    // JointTargetSink overload
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  // iters stays 0: a joint target must not pay for a solve it does not use.
+  EXPECT_EQ(m.last_ik().iters, 0);
+}
+
+TEST(JointPositionModePose, TheLatestSetterWins) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose pose = dyn.fk(q0); pose.p.x() += 0.05;
+  m.set_target(pose);
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  ASSERT_GT(m.last_ik().iters, 0);
+
+  m.set_target(q0);                     // joint target supersedes the pose
+  m.compute(fb, 0.001, out);
+  EXPECT_EQ(m.last_ik().iters, 0);
+}
+
+TEST(JointPositionModePose, SustainedNonConvergenceRaisesIkFaulted) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0);
+  unreachable.p.x() += 5.0;             // metres away: never reachable
+  m.set_target(unreachable);
+
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  EXPECT_FALSE(m.ik_faulted());         // one bad solve is NOT a fault
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+  EXPECT_TRUE(m.ik_faulted());          // sustained non-convergence IS
+}
+
+TEST(JointPositionModePose, AConvergedSolveClearsTheFaultAccumulator) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  m.set_target(unreachable);
+  JointCommand out;
+  for (int i = 0; i < 40; ++i) m.compute(fb, 0.001, out);   // under the threshold
+  ASSERT_FALSE(m.ik_faulted());
+
+  m.set_target(dyn.fk(q0));             // reachable: converges immediately
+  for (int i = 0; i < 40; ++i) m.compute(fb, 0.001, out);
+  EXPECT_FALSE(m.ik_faulted());
+}
+
+TEST(JointPositionModePose, OnEnterClearsAPreviousIkFault) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  m.set_target(unreachable);
+  JointCommand out;
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+  ASSERT_TRUE(m.ik_faulted());
+
+  m.on_enter(fb);
+  EXPECT_FALSE(m.ik_faulted());
+}
