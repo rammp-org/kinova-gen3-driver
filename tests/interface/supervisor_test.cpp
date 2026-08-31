@@ -1067,6 +1067,7 @@ TEST(Supervisor, AGracefulCloseAndADeadlineLapseReportDifferentCauses) {
   EXPECT_FALSE(f.sup.stream_is_open());
   EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
   f.sup.stop(); f.teardown();
+}
 
 // ee_twist must come from the SAME model and the SAME feedback sample as ee_pose, or a
 // client reading both gets a pose and a velocity that disagree about where the tool is.
