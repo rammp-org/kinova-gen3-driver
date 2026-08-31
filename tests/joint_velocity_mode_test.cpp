@@ -230,3 +230,65 @@ TEST(JointVelocityModeTwist, AZeroTwistCommandsZero) {
   m.compute(fb_at(nominal_q()), 0.001, out);
   EXPECT_NEAR(out.velocity.norm(), 0.0, 1e-9);
 }
+
+TEST(JointVelocityModePosture, DrivesTheRedundantDofTowardQRestUnderAZeroTwist) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.posture_gain = 0.5;
+  p.max_qd = JointVec::Constant(10.0);
+  JointVelocityMode m(dyn, p);
+
+  JointVec q = nominal_q();
+  q[2] += 0.30;                         // perturb the redundant DOF off the rest posture
+  m.on_enter(fb_at(q));
+  m.set_twist_target(Vector6::Zero());  // hold the tool still
+
+  JointCommand out;
+  m.compute(fb_at(q), 0.001, out);
+  // The posture term must push joint 2 back DOWN toward q_rest.
+  EXPECT_LT(out.velocity[2], 0.0);
+  EXPECT_GT(out.velocity.norm(), 1e-6);   // it is not simply doing nothing
+}
+
+TEST(JointVelocityModePosture, DoesNotDisturbTheCommandedTwist) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.posture_gain = 0.5;
+  p.max_qd = JointVec::Constant(10.0);
+  JointVelocityMode m(dyn, p);
+
+  JointVec q = nominal_q();
+  q[2] += 0.30;                         // a posture error the null-space term will fight
+  m.on_enter(fb_at(q));
+  Vector6 V = Vector6::Zero(); V[1] = 0.04;
+  m.set_twist_target(V);
+  JointCommand out;
+  m.compute(fb_at(q), 0.001, out);
+
+  Jacobian6 J; dyn.jacobian(q, J);
+  const Vector6 achieved = J * out.velocity;
+  // The whole point of a NULL-space term: posture correction lives where it
+  // cannot show up in the task velocity.
+  EXPECT_NEAR((achieved - V).norm(), 0.0, 1e-3);
+}
+
+TEST(JointVelocityModePosture, ConvergesTowardQRestOverRepeatedCycles) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.posture_gain = 0.5;
+  p.max_qd = JointVec::Constant(10.0);
+  JointVelocityMode m(dyn, p);
+
+  JointVec q = nominal_q();
+  q[2] += 0.30;
+  const double err0 = std::abs(q[2] - p.q_rest[2]);
+  m.on_enter(fb_at(q));
+
+  JointCommand out;
+  for (int i = 0; i < 500; ++i) {       // integrate the commanded velocity forward
+    m.set_twist_target(Vector6::Zero());
+    m.compute(fb_at(q), 0.001, out);
+    q += out.velocity * 0.001;
+  }
+  EXPECT_LT(std::abs(q[2] - p.q_rest[2]), err0);
+}
