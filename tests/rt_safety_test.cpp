@@ -298,6 +298,75 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
   EXPECT_EQ(ring.dropped(), 0u);
 }
 
+// The POSE path is a different animal from the joint path measured above: it runs
+// up to max_iters (4) Gauss-Newton iterations inside compute(), each an fk plus a
+// Jacobian plus a 6x6 LDLT. The joint-target test never enters this branch, so
+// without this case the pose path shipped unmeasured. A LIVE pose target is
+// published throughout, exactly as a streaming client would -- a stale target
+// freezes the reference and the solve would never run.
+TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode mode(dyn);
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  // Reachable and a real distance away, so the solve does actual work every cycle
+  // instead of converging on iteration 0 and returning early.
+  const Pose target = dyn.fk(JointVec::Constant(0.2));
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages, INCLUDING the IK solve.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      for (int i = 0; i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mode.set_target(target);   // after on_enter, so it is not dropped at entry
+      }
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread. Re-entry's on_enter drops the
+    // warm-up's target, so keep publishing once this on_enter has run too.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      for (int i = 0; i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mode.set_target(target);
+      }
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+  // The pose branch really drove the loop: this test sets ONLY pose targets, so a
+  // reference that moved off the entry configuration can only have come from the
+  // IK. (last_ik().iters is not the check to make here -- once the solve has
+  // converged and the null-space objectives are exhausted DiffIkSolver returns on
+  // iteration 0 by design, which is exactly the cheap steady state it advertises.)
+  EXPECT_GT(mode.reference().norm(), 0.05);
+}
+
 // JointVelocityMode's twist path is the only genuinely new per-cycle cost this
 // plan introduces: a Jacobian plus two 6x6 LDLT decompositions (one undamped, to
 // read manipulability off det(J J^T) for free, one damped for the DLS solve) plus
