@@ -51,6 +51,7 @@ class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
   void             on_setpoint_joint_torque(const JointSetpoint&) override;
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
+  StreamStatus     on_query_stream() override;   // never gated -- reads are always open
 
  private:
   bool  admit(const Token&) const;   // caller holds m_

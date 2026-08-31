@@ -15,7 +15,7 @@ namespace {
 // it must never touch the Supervisor.
 struct RecordingSink : public CommandSink, public StreamSink {
   int goals=0, accepted=0, cancels=0, gains=0, queries=0;
-  int stream_opens=0, stream_closes=0, setpoints=0;
+  int stream_opens=0, stream_closes=0, setpoints=0, stream_queries=0;
   std::vector<HaltReason> halts;
   GoalResponse   on_trajectory_goal(const TrajectoryGoal&) override { ++goals; return GoalResponse::kAccept; }
   void           on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override { ++accepted; }
@@ -31,11 +31,29 @@ struct RecordingSink : public CommandSink, public StreamSink {
   void             on_setpoint_joint_torque(const JointSetpoint&) override { ++setpoints; }
   void             on_setpoint_pose(const PoseSetpoint&) override { ++setpoints; }
   void             on_setpoint_twist(const TwistSetpoint&) override { ++setpoints; }
+  StreamStatus     on_query_stream() override {
+    ++stream_queries; StreamStatus s; s.timeout_s = 7.0; return s;
+  }
 };
 TrajectoryGoal goal_with(const Token& t){ TrajectoryGoal g; g.token = t; return g; }
 }  // namespace
 
 // ---------- grant, token minting, admission ----------
+
+// A read that requires ownership is a read nobody can use for diagnosis -- so
+// on_query_stream passes through ungated, exactly as on_query_state does.
+TEST(Arbiter, QueryStreamIsNeverGated) {
+  RecordingSink sink; Arbiter arb{sink, sink, ArbitrationMode::kEnforced, 1234};
+  EXPECT_DOUBLE_EQ(arb.on_query_stream().timeout_s, 7.0);   // no owner, still readable
+  EXPECT_EQ(sink.stream_queries, 1);
+
+  // And it survives an e-stop. A status that stops working when the arm stops is
+  // useless for working out why the arm stopped.
+  arb.estop();
+  EXPECT_DOUBLE_EQ(arb.on_query_stream().timeout_s, 7.0);
+  EXPECT_EQ(sink.stream_queries, 2);
+  EXPECT_EQ(arb.status().rejected_count, 0u);               // a read is not a rejection
+}
 
 TEST(Arbiter, EnforcedRejectsCommandWithoutGrant) {
   RecordingSink sink; Arbiter arb{sink, sink, ArbitrationMode::kEnforced, 1234};

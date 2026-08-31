@@ -36,5 +36,9 @@ class StreamSink { public: virtual ~StreamSink() = default;
   virtual void             on_setpoint_joint_velocity(const JointSetpoint&) = 0;
   virtual void             on_setpoint_joint_torque(const JointSetpoint&) = 0;
   virtual void             on_setpoint_pose(const PoseSetpoint&) = 0;
-  virtual void             on_setpoint_twist(const TwistSetpoint&) = 0; };
+  virtual void             on_setpoint_twist(const TwistSetpoint&) = 0;
+  // Never gated -- reads are always open, exactly as CommandSink::on_query_state.
+  // Without it a backend can only report the session it THINKS it has: nothing tells
+  // it when the sampler tears one down on deadline expiry, or on_halt closes it.
+  virtual StreamStatus     on_query_stream() = 0; };
 }  // namespace kinova::interface

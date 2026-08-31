@@ -281,6 +281,14 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }
 
+// Every accessor below is an atomic load, so this needs no lock and is safe to call
+// from any thread -- which is the point: it is the only way a backend can tell an
+// expired session from a live one.
+StreamStatus Supervisor::on_query_stream() {
+  return {session_.is_open(), session_.kind(), session_.control_mode(),
+          session_.timeout_s(), session_.rejected_count()};
+}
+
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if (in_flight_.load())
     return {false, result_code::kStreamRejected, "a trajectory goal is in flight"};
