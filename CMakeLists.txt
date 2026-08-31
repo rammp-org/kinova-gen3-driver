@@ -85,7 +85,8 @@ set(KINOVA_LIB_SOURCES
     src/rt_executor.cpp
     src/interface/trajectory_executor.cpp
     src/interface/supervisor.cpp
-    src/interface/arbiter.cpp)
+    src/interface/arbiter.cpp
+    src/interface/streaming_session.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -188,6 +189,21 @@ else()
     target_compile_definitions(joint_position_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# TEMPORARY bring-up harness — delete this target with the app once validated.
+# stream_check drives the streaming setpoint tier on the arm: stream, then
+# deliberately STOP to exercise the mode's watchdog, resume, and close. The unit
+# tests cannot prove what the ARM does when a stream goes stale, because
+# SimTransport is a static echo. --dry-run is READ-ONLY.
+add_executable(stream_check apps/stream_check.cpp)
+target_link_libraries(stream_check PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(stream_check PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(stream_check PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(stream_check PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(stream_check PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # TEMPORARY bring-up harness — delete this target with the app once answered.
 # velocity_probe answers ONE question: does this arm honour ActuatorMode::kVelocity?
 # That path is mapped in KortexTransport but has never been driven by any
@@ -267,6 +283,7 @@ add_executable(unit_tests
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
     tests/joint_torque_mode_test.cpp
+    tests/command_watchdog_test.cpp
     tests/rt_safety_test.cpp
     tests/cartesian_test.cpp
     tests/cartesian_impedance_mode_test.cpp
@@ -278,7 +295,8 @@ add_executable(unit_tests
     tests/interface/trajectory_executor_test.cpp
     tests/interface/execution_integration_test.cpp
     tests/interface/supervisor_test.cpp
-    tests/interface/arbiter_test.cpp)
+    tests/interface/arbiter_test.cpp
+    tests/interface/streaming_session_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 

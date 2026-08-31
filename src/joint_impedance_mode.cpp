@@ -18,6 +18,7 @@ JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
   ik_.set_params(p.ik);
   gains_[0] = p;
   gains_[1] = p;
+  wd_.arm(p.cmd_timeout_s);
 }
 
 void JointImpedanceMode::seed_limits(JointImpedanceParams& p) const noexcept {
@@ -48,6 +49,7 @@ void JointImpedanceMode::set_target(const Pose& x_d) noexcept {
   ext_target_[next] = x_d;
   ext_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kPose, std::memory_order_release);
+  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
 }
 
 void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
@@ -55,6 +57,12 @@ void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
   ext_q_target_[next] = q_d;
   jt_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kJoint, std::memory_order_release);
+  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
+}
+
+// s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointImpedanceMode::set_command_timeout(double s) noexcept {
+  wd_.arm(s >= 0.0 ? s : params().cmd_timeout_s);
 }
 
 void JointImpedanceMode::on_enter(const JointFeedback& fb) {
@@ -66,15 +74,45 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
   source_.store(TargetSource::kEntryPose, std::memory_order_release);
   ramp_elapsed_ = 0.0;
   last_ik_ = IkResult{};
+  wd_.reset();
+  frozen_ = false;
 }
 
 void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
                                  JointCommand& out) {
   const JointImpedanceParams p = params();   // own a snapshot for the whole cycle
+
+  // Staleness: the stream stopped, so stop chasing it. Freeze the reference at
+  // the MEASURED configuration -- the spring error collapses to zero and the arm
+  // settles into gravity-comp hold rather than pulling toward a setpoint nobody
+  // is maintaining. Done BEFORE q_prev is captured so the freeze lands this
+  // cycle instead of being slewed in by the rate limiter below.
+  //
+  // The freeze LATCHES in RT-owned state and is released only by a fresh
+  // command. It deliberately does NOT touch source_: that field names which
+  // target buffer to read, every writer of it also writes the buffer it names,
+  // and steering it from here would name a buffer no setter had filled. Concretely
+  // -- stream poses only, go stale, then close the session: set_command_timeout
+  // disarms the watchdog, staleness stops being reported, and the next cycle
+  // would resolve a kJoint target out of ext_q_target_, which set_target(JointVec)
+  // never wrote. That is uninitialised storage flowing through the clamp (NaN
+  // survives std::clamp) into out.torque. Latching instead keeps the freeze in
+  // force until a real command arrives, which is also the honest reading of
+  // "frozen": disarming the watchdog is not a command and must not un-freeze.
+  const bool stale = wd_.tick(dt_s);
+  if (wd_.fresh()) frozen_ = false;   // only a fresh command releases the freeze
+  if (stale) {
+    frozen_ = true;
+    q_d_ = fb.q;
+    last_ik_ = IkResult{};
+  }
+
   const TargetSource src = source_.load(std::memory_order_acquire);
   const JointVec q_prev = q_d_;
 
-  if (src == TargetSource::kJoint) {
+  if (frozen_) {
+    // Frozen: q_d_ already holds fb.q. Resolving a target here would overwrite it.
+  } else if (src == TargetSource::kJoint) {
     // Direct joint reference: command it straight through, IK bypassed. The rate
     // limit below still ramps a teleported target in from q_prev, so a distant
     // joint command is not slammed at the arm.

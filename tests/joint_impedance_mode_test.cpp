@@ -328,3 +328,117 @@ TEST(JointImpedance, JointTargetSupersedesPoseTarget) {
   JointCommand c; m.compute(fb, 0.001, c);
   EXPECT_NEAR((m.reference() - q_cmd).norm(), 0.0, 1e-12);
 }
+
+// --- staleness watchdog ------------------------------------------------------
+
+TEST(JointImpedanceMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(JointVec::Constant(0.5));
+  JointCommand out;
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // fresh: reference advances
+  EXPECT_GT(m.reference()[0], 0.0);
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
+}
+
+TEST(JointImpedanceMode, ZeroTimeoutDisablesTheWatchdog) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  EXPECT_EQ(p.cmd_timeout_s, 0.0);                          // default preserves old behaviour
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(JointVec::Constant(0.5));
+  JointCommand out;
+  for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
+  EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
+}
+
+TEST(JointImpedanceMode, AStreamedPoseKeepsTheWatchdogFresh) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;                       // 50 ms deadline
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  // A pose the arm is NOT already at, so "did the reference move" discriminates.
+  const Pose away = dyn.fk(JointVec::Constant(0.2));
+  JointCommand out;
+  for (int i = 0; i < 200; ++i) {               // 200 ms, well past the deadline
+    if (i % 10 == 0) m.set_target(away);        // a pose setpoint every 10 ms
+    m.compute(fb, 0.001, out);
+  }
+  // Had the pose setter failed to bump the watchdog, the reference would have
+  // frozen at measured q (zero) after 50 ms. It kept tracking instead.
+  EXPECT_GT(std::abs(m.reference()[0]), 1e-3);
+}
+
+TEST(JointImpedanceMode, AStreamedPoseThatSTOPSDoesGoStale) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(dyn.fk(JointVec::Constant(0.2)));
+  JointCommand out;
+  for (int i = 0; i < 10; ++i)  m.compute(fb, 0.001, out);   // fresh: advances
+  ASSERT_GT(std::abs(m.reference()[0]), 0.0);
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);   // stream stops
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);              // frozen at measured q
+}
+
+// A freeze must LATCH. Disarming the watchdog is not a command, so it must not
+// un-freeze the reference. Before the freeze was latched this test failed hard:
+// the freeze steered source_ to the joint path, and once staleness stopped being
+// reported compute() resolved a joint target out of a buffer set_target(JointVec)
+// had never written -- uninitialised storage, straight through the clamp into
+// out.torque. fb.q is deliberately NOT the origin so a zeroed buffer is caught too.
+TEST(JointImpedanceMode, DisarmingAfterAFreezeDoesNotResurrectATarget) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setConstant(0.3); fb.qd.setZero();
+  m.on_enter(fb);
+  // POSE setpoints only: set_target(const JointVec&) is never called here, so the
+  // joint target buffer is never written by anyone.
+  m.set_target(dyn.fk(JointVec::Constant(0.6)));
+  JointCommand out;
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);   // stream stops -> freeze
+  ASSERT_NEAR(m.reference()[0], fb.q[0], 1e-9);
+
+  m.set_command_timeout(0.0);                                // session closes: disarm
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);              // still frozen at measured q
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_TRUE(std::isfinite(out.torque[i])) << "non-finite torque on joint " << i;
+}
+
+// A fresh command -- and only a fresh command -- releases the latch.
+TEST(JointImpedanceMode, AFreshCommandReleasesTheFreeze) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;
+  p.max_ref_speed.setConstant(1.0);
+  p.cmd_timeout_s = 0.05;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(dyn.fk(JointVec::Constant(0.2)));
+  JointCommand out;
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);   // freeze
+  ASSERT_NEAR(m.reference()[0], fb.q[0], 1e-9);
+  m.set_target(dyn.fk(JointVec::Constant(0.2)));             // stream resumes
+  for (int i = 0; i < 30; ++i) m.compute(fb, 0.001, out);
+  EXPECT_GT(std::abs(m.reference()[0]), 1e-6);               // tracking again
+}

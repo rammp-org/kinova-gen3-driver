@@ -128,6 +128,10 @@ JointTorqueMode(Dynamics& dyn, JointTorqueParams p = {});
 // Non-RT: call from a single supervisor thread. Lock-free publish (two-buffer +
 // atomic index); compute() reads once per cycle.
 void set_torque(const JointVec& tau_ff) noexcept;
+
+// Non-RT: re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores
+// this mode's own configured default (cmd_timeout_s) -- see Streaming below.
+void set_command_timeout(double s) noexcept;
 ```
 
 Law: `tau = scale·gravity(q) − damping·q̇ + tau_ff`, clamped per joint. Sets
@@ -290,9 +294,10 @@ precise analysis.
 
 ## Arbitration — `interface/arbiter.h`, `interface/ports.h`
 
-`Arbiter` decides **who may command the arm**. It implements `CommandSink` and
-decorates another `CommandSink` (the `Supervisor`), so it sits in the command
-path without any coupling to control code. See the
+`Arbiter` decides **who may command the arm**. It implements both `CommandSink`
+and `StreamSink` and decorates a downstream instance of each (in practice the
+same `Supervisor`), so it gates both the command and streaming tiers without
+any coupling to control code. See the
 [arbitration guide](../guide/arbitration.md) for the model.
 
 ```cpp
@@ -301,7 +306,8 @@ using Token = std::array<uint8_t, 16>;   // 128-bit capability token
 enum class ArbitrationMode { kEnforced, kDisabled };
 enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 
-Arbiter(CommandSink& downstream, ArbitrationMode mode, uint64_t seed = 0);
+Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
+        uint64_t seed = 0);
 ```
 
 `seed == 0` seeds the token RNG from `std::random_device`; a non-zero seed makes
@@ -326,6 +332,12 @@ The general "stop the arm now" primitive — used by ownership revocation and
 `/estop` alike. The caller declares **why**; the `Supervisor` decides **how**.
 In v1 every reason produces the same action: cancel and hold.
 
+`on_halt` **must be idempotent**: `estop()` delivers it twice — once immediately,
+before it contends for the arbiter's lock (so the arm stops without waiting on a
+mode switch), and once while holding that lock, which is what orders the queue
+flush after any command that had already been admitted. `Supervisor::on_halt`
+satisfies this by construction: it latches a flag and clears a deque.
+
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
@@ -343,3 +355,99 @@ Rejections return `GoalResponse::kRejectUnauthorized` (goals),
 `CancelResponse::kReject` (cancel), or `{accepted=false}` (gains), and increment
 `ArbitrationStatus::rejected_count`. `result_code::kNotAuthorized = -8` is the
 constant for backends that produce a result message.
+
+## Streaming — `interface/streaming_session.h`, `interface/ports.h`
+
+The reactive counterpart to `CommandSink`'s trajectory goals: a driving port
+for a client that publishes a setpoint every cycle instead of a plan to
+interpolate. See the [streaming guide](../guide/streaming.md) for the
+lifecycle model and the valid-pair table.
+
+```cpp
+enum class SetpointKind { kJointPosition, kEePose, kJointVelocity, kEeTwist, kJointTorque };
+
+struct StreamOpenRequest {
+  SetpointKind    kind         = SetpointKind::kJointPosition;
+  ControlModeKind control_mode = ControlModeKind::kPosition;
+  double          timeout_s    = 0.1;   // <= 0 is REJECTED at open: no deadline, no safe-stop
+  Token           token{};
+};
+struct StreamOpenResult   { bool accepted=false; int error_code=0; std::string message; };
+struct StreamCloseRequest { Token token{}; };
+
+// One struct, three meanings -- units are per-method: rad (position), rad/s
+// (velocity), N*m (feedforward torque).
+struct JointSetpoint { JointVec values = JointVec::Zero(); Token token{}; };
+struct PoseSetpoint  { Pose     pose{};                    Token token{}; };
+struct TwistSetpoint { Vector6  twist = Vector6::Zero();   Token token{}; };  // [linear; angular], base frame
+```
+
+Each setpoint struct is an **absolute** target, never a delta — resending one
+is idempotent, and the single-writer double-buffer under it means an
+intermediate setpoint that arrives between two RT cycles is correctly dropped
+rather than lost.
+
+### `StreamSink` (driving port)
+
+```cpp
+class StreamSink {
+ public:
+  virtual StreamOpenResult on_stream_open(const StreamOpenRequest&) = 0;
+  virtual void             on_stream_close(const StreamCloseRequest&) = 0;
+  virtual void             on_setpoint_joint_position(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_joint_velocity(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_joint_torque(const JointSetpoint&) = 0;
+  virtual void             on_setpoint_pose(const PoseSetpoint&) = 0;
+  virtual void             on_setpoint_twist(const TwistSetpoint&) = 0;
+};
+```
+
+`Supervisor` implements this (and `Arbiter` decorates it, gating on the same
+token as `CommandSink` — see [Arbitration](#arbitration-interfacearbiterh-interfaceportsh)).
+Only one session may be open at a time, and `on_stream_open` is refused while a
+trajectory goal is in flight, and vice versa for `on_trajectory_goal` — the two
+tiers never write the active mode's target concurrently.
+
+### `bool pair_supported(SetpointKind, ControlModeKind)`
+
+The single source of truth for which (setpoint kind, control mode) pairs this
+driver can execute, checked at `on_stream_open` so an unsupported pair is
+refused loudly rather than silently mis-driven:
+
+| Setpoint kind | Control mode | Supported? |
+|---|---|---|
+| `kJointPosition` | `kPosition` / `kImpedance` | yes |
+| `kEePose` | `kImpedance` | yes — resolved by `JointImpedanceMode`'s in-loop IK |
+| `kEePose` | `kPosition` | not yet — no position-mode IK path |
+| `kJointTorque` | `kTorque` | yes |
+| `kJointVelocity`, `kEeTwist` | any | not yet — no `JointVelocityMode` |
+
+The "not yet" rows are a follow-on plan, not a defect in this one.
+
+`on_stream_open` also refuses `timeout_s <= 0` unconditionally: the deadline
+that lets the driver detect and tear down a dead stream is not optional, since
+an unbounded stream has no safe-stop if the client disappears mid-session.
+
+### `CommandWatchdog` — `command_watchdog.h`
+
+Shared staleness **detection**, used by all three of `JointTorqueMode`,
+`JointPositionMode`, and `JointImpedanceMode`. It is a lock-free counter bumped
+by every non-RT setter and ticked once per RT cycle against an armed timeout —
+no clock call, no allocation, so it is safe on the RT path. What a mode *does*
+about staleness is deliberately not this class's job — each mode owns that
+response (torque ramps `tau_ff` to zero via `cmd_decay_s`; position and
+impedance freeze the reference at measured q). `JointTorqueParams`,
+`JointPositionParams`, and `JointImpedanceParams` each carry a `cmd_timeout_s`
+field (`<= 0` disables it, which is every mode's default except torque's
+`0.1`), and each mode exposes:
+
+```cpp
+// s >= 0 arms the watchdog with s; s < 0 restores this mode's own configured
+// default (params().cmd_timeout_s / p_.cmd_timeout_s).
+void set_command_timeout(double s) noexcept;
+```
+
+`Supervisor::on_stream_open` calls this with the session's `timeout_s` on
+whichever mode the stream targets; `close_stream()` calls it with a negative
+value to hand the mode back to its own configured default rather than
+disabling its watchdog outright.

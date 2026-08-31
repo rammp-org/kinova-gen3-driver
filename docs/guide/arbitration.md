@@ -8,7 +8,8 @@ to. Commands that do not carry the live token are refused.
 The same mechanism expresses the degenerate case — *nobody* may command — which
 is what an emergency stop is.
 
-This layer lives in `kinova::interface::Arbiter`, which decorates `CommandSink`.
+This layer lives in `kinova::interface::Arbiter`, which decorates both
+`CommandSink` and `StreamSink` — the same token gates the streaming tier too.
 It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 `Dynamics`. Every transport (ROS2, socket, ATOS) inherits it for free.
 
@@ -63,6 +64,12 @@ default `sampler_hz = 250`.
 until an explicit `estop_clear()`, which exits to *no owner* — never straight
 back to owned, so someone must deliberately re-grant. Clear works in any
 arbitration mode, so you cannot strand yourself.
+
+The latch is set *before* `estop()` takes the arbiter's lock, so a stop is never
+delayed by an in-progress mode switch, and the halt goes downstream immediately.
+It is then re-applied under the lock, which is what stops a command admitted a
+moment earlier from landing after the queue was flushed — so a `CommandSink` sees
+`on_halt(kEmergencyStop)` **twice** per e-stop and must be idempotent.
 
 !!! warning "This is a software e-stop"
     It depends on the driver process being alive and scheduled. It is **not** a

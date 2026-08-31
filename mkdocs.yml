@@ -23,6 +23,7 @@ nav:
   - Guide:
       - Control Modes: guide/control-modes.md
       - Arbitration: guide/arbitration.md
+      - Streaming: guide/streaming.md
   - Reference:
       - API: reference/api.md
   - Deep Dive:

@@ -11,6 +11,7 @@ JointTorqueMode::JointTorqueMode(Dynamics& dyn, JointTorqueParams p)
   tau_ff_buf_[1].setZero();
   g_.setZero();
   tau_.setZero();
+  wd_.arm(p_.cmd_timeout_s);
 }
 
 ActuatorModes JointTorqueMode::required_modes() const {
@@ -29,13 +30,18 @@ void JointTorqueMode::set_torque(const JointVec& tau_ff) noexcept {
   const int inactive = 1 - tau_ff_active_.load(std::memory_order_relaxed);
   tau_ff_buf_[inactive] = tau_ff;
   tau_ff_active_.store(inactive, std::memory_order_release);
-  write_count_.fetch_add(1, std::memory_order_release);
+  wd_.bump();
+}
+
+// s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointTorqueMode::set_command_timeout(double s) noexcept {
+  wd_.arm(s >= 0.0 ? s : p_.cmd_timeout_s);
 }
 
 void JointTorqueMode::on_enter(const JointFeedback&) {
   // Enter as gravity-comp hold: discard any prior command and reset the
-  // watchdog. Snapping last_seen_write_ to the current count means a command
-  // sent before entry is NOT treated as fresh.
+  // watchdog. CommandWatchdog::reset() snaps its last-seen count to the current
+  // one, so a command sent before entry is NOT treated as fresh.
   //
   // Benign race: set_torque() does buffer store -> release-store the index ->
   // fetch_add the counter (three separate steps). A non-RT set_torque() call
@@ -47,25 +53,23 @@ void JointTorqueMode::on_enter(const JointFeedback&) {
   // expected to race in practice), but it is weaker than "always discarded."
   tau_ff_target_.setZero();
   tau_ff_applied_.setZero();
-  stale_s_ = 0.0;
-  last_seen_write_ = write_count_.load(std::memory_order_acquire);
+  wd_.reset();
 }
 
 void JointTorqueMode::compute(const JointFeedback& fb, double dt_s,
                               JointCommand& out) {
   // --- read the published feedforward and advance the staleness watchdog ----
-  const uint64_t wc = write_count_.load(std::memory_order_acquire);
-  if (wc != last_seen_write_) {
+  // The counter GATES the buffer read: adopt only on the cycle the counter
+  // moves, never merely because the stream is not yet stale -- otherwise a
+  // command published before on_enter would be resurrected after it.
+  const bool stale = wd_.tick(dt_s);
+  if (wd_.fresh()) {
     const int active = tau_ff_active_.load(std::memory_order_acquire);
     tau_ff_target_ = tau_ff_buf_[active];  // fresh command this cycle
-    last_seen_write_ = wc;
-    stale_s_ = 0.0;
-  } else {
-    stale_s_ += dt_s;
   }
 
   // Resolve the applied feedforward: hold target until stale, then ramp to 0.
-  if (p_.cmd_timeout_s > 0.0 && stale_s_ >= p_.cmd_timeout_s) {
+  if (stale) {
     if (p_.cmd_decay_s > 0.0) {
       // Per-cycle decrement proportional to the held target magnitude; reaches
       // exactly zero after cmd_decay_s of staleness. Sign preserved.

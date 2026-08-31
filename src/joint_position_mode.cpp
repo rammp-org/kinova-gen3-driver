@@ -16,6 +16,7 @@ JointPositionMode::JointPositionMode(Dynamics& dyn, JointPositionParams p) {
   seed_limits(p);
   params_[0] = p;
   params_[1] = p;
+  wd_.arm(p.cmd_timeout_s);
 }
 
 void JointPositionMode::seed_limits(JointPositionParams& p) const noexcept {
@@ -52,6 +53,12 @@ void JointPositionMode::set_target(const JointVec& q_d) noexcept {
   ext_target_[next] = q_d;
   ext_active_.store(next, std::memory_order_release);
   has_ext_target_.store(true, std::memory_order_release);
+  wd_.bump();   // must be LAST: its release publishes everything above it
+}
+
+// s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointPositionMode::set_command_timeout(double s) noexcept {
+  wd_.arm(s >= 0.0 ? s : params().cmd_timeout_s);
 }
 
 void JointPositionMode::on_enter(const JointFeedback& fb) {
@@ -60,14 +67,26 @@ void JointPositionMode::on_enter(const JointFeedback& fb) {
   // Drop any target from a previous session. Re-entering the mode must not yank
   // the arm toward a configuration someone asked for minutes ago.
   has_ext_target_.store(false, std::memory_order_release);
+  wd_.reset();
 }
 
 void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
                                 JointCommand& out) {
   const JointPositionParams p = params();   // own a snapshot for the whole cycle
-  const JointVec target = has_ext_target_.load(std::memory_order_acquire)
-                              ? ext_target_[ext_active_.load(std::memory_order_acquire)]
-                              : entry_q_;
+
+  // Staleness: the stream stopped, so stop chasing it. Freeze where the arm
+  // actually IS -- both the reference and the target for this cycle. Parking at
+  // the last reference would keep the rate limiter slewing toward a destination
+  // nobody is asking for; leaving the target in place would slew straight back
+  // out of the freeze. Disarmed (cmd_timeout_s <= 0) this never fires.
+  const bool stale = wd_.tick(dt_s);
+  if (stale) q_ref_ = fb.q;
+
+  const JointVec target =
+      stale ? fb.q
+            : (has_ext_target_.load(std::memory_order_acquire)
+                   ? ext_target_[ext_active_.load(std::memory_order_acquire)]
+                   : entry_q_);
 
   for (int i = 0; i < kNumJoints; ++i) {
     const bool bounded =
