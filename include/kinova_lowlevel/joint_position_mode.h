@@ -45,6 +45,11 @@ struct JointPositionParams {
   // toward something. Expressed in TIME, not cycles: compute() runs at whatever
   // the loop rate is, so a cycle count would silently mean something different at
   // a different rate. <= 0 disables.
+  //
+  // This means what it says only because the IK seed PERSISTS across cycles (see
+  // ik_q_): a solve that re-seeded from the rate-limited reference every cycle
+  // could never converge on a pose further away than one solve's travel, and this
+  // threshold would then fire on perfectly reachable targets.
   double ik_fault_s = 0.1;
   DiffIkParams ik{};
 };
@@ -93,6 +98,14 @@ class JointPositionMode : public ControlMode,
   // nothing about the interface layer), so it freezes the reference immediately
   // at 1 kHz and lets the lifecycle teardown catch up.
   bool ik_faulted() const noexcept { return ik_faulted_.load(std::memory_order_acquire); }
+
+  // Re-arm the latch from a NON-RT thread. Called by the streaming teardown, so a
+  // client that reconnects is not stuck behind a fault from the session before it:
+  // on_enter is otherwise the only reset, and re-opening a session in the mode the
+  // executor already runs never re-enters the mode. Safe against the RT writer
+  // because compute() also re-arms on the transition into kPose, so the worst a
+  // racing cycle can do is re-set a flag the next pose session clears anyway.
+  void clear_ik_fault() noexcept { ik_faulted_.store(false, std::memory_order_release); }
 
   // Re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores this
   // mode's own configured default (params().cmd_timeout_s).
@@ -150,7 +163,16 @@ class JointPositionMode : public ControlMode,
   IkResult last_ik_{};
   double ik_bad_s_ = 0.0;                  // RT-owned: summed dt while !converged
   std::atomic<bool> ik_faulted_{false};    // RT writer, non-RT (sampler) reader
-  JointVec ik_q_ = JointVec::Zero();       // preallocated RT scratch for the solve
+  // PERSISTENT IK seed, refined in place and carried across cycles. Deliberately
+  // NOT re-seeded from q_ref_ each cycle: q_ref_ is walked toward the IK output by
+  // a separate rate limiter at max_ref_speed*dt, so re-seeding from it discards
+  // every solve's progress and `converged` could never become true for a pose more
+  // than one solve's travel away. Reset in on_enter and on the transition into
+  // kPose (see compute()).
+  JointVec ik_q_ = JointVec::Zero();
+  // Which source the LAST non-stale cycle used. RT-owned; exists only to detect
+  // the transition into kPose so the seed above is re-anchored exactly once.
+  TargetSource last_source_ = TargetSource::kEntry;
 };
 
 }  // namespace kinova

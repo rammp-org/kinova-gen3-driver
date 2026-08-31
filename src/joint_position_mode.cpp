@@ -82,6 +82,8 @@ void JointPositionMode::on_enter(const JointFeedback& fb) {
   // Drop any target from a previous session. Re-entering the mode must not yank
   // the arm toward a configuration someone asked for minutes ago.
   source_.store(TargetSource::kEntry, std::memory_order_release);
+  last_source_ = TargetSource::kEntry;
+  ik_q_ = fb.q;              // the persistent IK seed restarts from where the arm is
   ik_bad_s_ = 0.0;
   ik_faulted_.store(false, std::memory_order_release);
   last_ik_ = IkResult{};
@@ -122,11 +124,31 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
                                  // reset a stale result from a previous pose target
                                  // outlives the target itself and reads as an IK
                                  // that never ran having run.
+        last_source_ = TargetSource::kJoint;
         break;
       case TargetSource::kPose: {
-        // Warm-start from the current reference: the solve refines in place, and
-        // seeding from q_ref_ keeps the solution on the branch we are already on.
-        ik_q_ = q_ref_;
+        // PERSISTENT seed: the solve refines ik_q_ in place and it carries over to
+        // the next cycle. It must NOT be re-seeded from q_ref_ every cycle -- q_ref_
+        // advances at max_ref_speed*dt (0.0005 rad/cycle by default) while a single
+        // solve moves at most max_iters*max_joint_step (0.2 rad), so re-seeding
+        // throws away all IK progress and any pose beyond ~0.2 rad of joint travel
+        // is !converged forever, latching ik_faulted_ on a perfectly reachable
+        // target. (JointImpedanceMode can seed from its reference because THERE the
+        // reference IS the IK state; here a separate rate limiter walks q_ref_
+        // toward the IK output, so the two must not be the same variable.)
+        //
+        // Seeded on the transition INTO kPose so a stale solution from an earlier
+        // pose session cannot carry over; on_enter seeds it too. The fault state
+        // is re-armed on the same transition, and doing it HERE (RT side) rather
+        // than only in clear_ik_fault() is what makes a new pose session clean by
+        // construction: no non-RT clear can race an in-flight cycle into
+        // re-latching a fault that belongs to the session that just ended.
+        if (last_source_ != TargetSource::kPose) {
+          ik_q_ = q_ref_;
+          ik_bad_s_ = 0.0;
+          ik_faulted_.store(false, std::memory_order_release);
+        }
+        last_source_ = TargetSource::kPose;
         // Pushed here, not from set_params(): ik_'s internal params are a plain
         // (non-double-buffered) struct, so writing them from the non-RT thread
         // while this thread is inside solve() would be a torn read. Pushing from
@@ -155,6 +177,7 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
       default:
         target = entry_q_;
         last_ik_ = IkResult{};
+        last_source_ = TargetSource::kEntry;
         break;
     }
   }
