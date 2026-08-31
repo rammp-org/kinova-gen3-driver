@@ -52,8 +52,14 @@ struct TrajectoryGoal {
 struct TrajectoryFeedback { JointVec desired=JointVec::Zero(), actual=JointVec::Zero(), error=JointVec::Zero();
                             double fraction_complete = 0.0; };
 struct TrajectoryResult   { int error_code = 0; std::string error_string; JointVec final_error = JointVec::Zero(); };
+// ee_twist is J(q)*qd, so it is consistent WITH ee_pose by construction -- both come
+// from the same URDF model and the same feedback sample. It is LOCAL_WORLD_ALIGNED,
+// matching Dynamics::jacobian: a world-aligned frame at the tool, NOT the body frame.
+// Deliberately not read from the arm's own tool_twist: that would be a different frame
+// and a different model from the ee_pose beside it, and the two would silently disagree.
 struct ArmState { JointVec q=JointVec::Zero(), qd=JointVec::Zero(), tau=JointVec::Zero();
-                  Pose ee_pose; bool fault=false; double stamp_s=0.0; };
+                  Pose ee_pose; Vector6 ee_twist=Vector6::Zero();
+                  bool fault=false; double stamp_s=0.0; };
 struct GainsRequest { JointImpedanceGains gains{}; Token token{}; };
 struct GainsResult  { bool accepted=false; std::string message; };
 // Cancel had no struct to carry a token; it needs one, or any stranger can stop your motion.

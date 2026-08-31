@@ -44,6 +44,8 @@ void Supervisor::pump_loop() {
     if (snap_.load(fb)) {
       ArmState s; s.q=fb.q; s.qd=fb.qd; s.tau=fb.tau; s.fault=fb.fault; s.stamp_s=secs_since(t0);
       s.ee_pose = pump_dyn_.fk(fb.q);
+      pump_dyn_.jacobian(fb.q, pump_J_);
+      s.ee_twist = pump_J_ * fb.qd;
       state_snap_.store(s);
       stream_.publish_state(s);
     }

@@ -105,6 +105,8 @@ class Supervisor : public CommandSink, public StreamSink {
   bool       have_hold_q_   = false;                  // false until the first successful snapshot read
   std::chrono::steady_clock::time_point t0_{};        // time origin for session stamps; set in start()
 
+  kinova::Jacobian6 pump_J_;                          // preallocated; pump thread only
+
   std::mutex q_mtx_;  std::deque<Inbound> inbox_;     // backend -> sampler handoff
   bool       halt_pending_ = false;                  // guarded by q_mtx_
   HaltReason halt_reason_  = HaltReason::kOwnershipRevoked;   // guarded by q_mtx_
