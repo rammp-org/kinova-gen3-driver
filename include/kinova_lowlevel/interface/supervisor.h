@@ -54,6 +54,7 @@ class Supervisor : public CommandSink, public StreamSink {
   void             on_setpoint_joint_torque(const JointSetpoint&) override;
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
+  StreamStatus     on_query_stream() override;
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }

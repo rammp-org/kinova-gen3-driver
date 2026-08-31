@@ -107,7 +107,10 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
   if (!admit(r.token)) { ++rejected_; return {false, "not authorized"}; }
   return down_.on_set_gains(r);
 }
-ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
+ArmState     Arbiter::on_query_state()  { return down_.on_query_state(); }
+// Ungated for the same reason on_query_state is: a read that requires ownership is a
+// read nobody can use to work out WHY they were refused.
+StreamStatus Arbiter::on_query_stream() { return down_stream_.on_query_stream(); }
 void     Arbiter::on_halt(HaltReason r) { down_.on_halt(r); }
 
 StreamOpenResult Arbiter::on_stream_open(const StreamOpenRequest& r) {

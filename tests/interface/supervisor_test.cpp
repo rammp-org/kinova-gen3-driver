@@ -535,6 +535,42 @@ TEST(Supervisor, StreamingJointPositionDrivesTheMode) {
   EXPECT_GT(f.sim.last_command().position[0], 1e-3);   // the setpoint actually reached the arm
 }
 
+// The session already knows all of this; before on_query_stream it simply never
+// reached anyone holding a StreamSink&. A backend could only report "a session I
+// opened and have not closed", which goes stale the moment the sampler tears one
+// down on deadline expiry.
+TEST(Supervisor, QueryStreamReportsTheSession) {
+  SupFix f; f.sup.start(); f.run_rt();
+  EXPECT_FALSE(f.sup.on_query_stream().open);
+
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.25;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  const interface::StreamStatus open_st = f.sup.on_query_stream();
+  EXPECT_TRUE(open_st.open);
+  EXPECT_EQ(open_st.kind, interface::SetpointKind::kJointPosition);
+  EXPECT_EQ(open_st.control_mode, interface::ControlModeKind::kImpedance);
+  EXPECT_DOUBLE_EQ(open_st.timeout_s, 0.25);
+
+  // A setpoint of the WRONG kind is refused by the session and counted. This is the
+  // number a streaming client has no other way to see: on_setpoint_* returns void,
+  // and the Arbiter's own rejected_count only covers token failures.
+  interface::PoseSetpoint wrong;
+  f.sup.on_setpoint_pose(wrong);
+  EXPECT_EQ(f.sup.on_query_stream().rejected_count, 1u);
+
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  const interface::StreamStatus closed_st = f.sup.on_query_stream();
+  EXPECT_FALSE(closed_st.open);
+  EXPECT_EQ(closed_st.rejected_count, 1u);   // cumulative; close does not reset it
+
+  f.sup.stop(); f.teardown();
+}
+
 TEST(Supervisor, ClosingAStreamLatchesHoldAtMeasuredQ) {
   SupFix f; f.sup.start(); f.run_rt();
   interface::StreamOpenRequest r;
