@@ -47,19 +47,48 @@ into a mode that can't drive it:
 | joint position    | position     | yes |
 | joint position    | impedance    | yes |
 | EE pose           | impedance    | yes — resolved by `JointImpedanceMode`'s in-loop IK |
-| EE pose           | position     | **not yet** — position mode has no IK path |
+| EE pose           | position     | yes — resolved by `JointPositionMode`'s in-loop IK |
 | joint torque      | torque       | yes |
-| joint velocity    | any          | **not yet** — no `JointVelocityMode` |
-| EE twist          | any          | **not yet** — no `JointVelocityMode` |
+| joint velocity    | velocity     | yes — native `set_velocity_target`, pass-through-then-limit |
+| EE twist          | velocity     | yes — resolved by `JointVelocityMode`'s damped-least-squares twist map |
 
-The three "not yet" rows are refused loudly at `on_stream_open` — that is the
-table doing its job, not a bug or an oversight. Both are a separate follow-on
-plan: `JointVelocityMode` unlocks the velocity/twist rows, and a position-mode
-IK path unlocks EE-pose-into-position. Until then, requesting one of those
-pairs gets `StreamOpenResult{accepted=false, error_code=result_code::kStreamRejected}`
-with a message naming the unsupported pair.
+Every pair above is now backed by a real control path. An unsupported
+`(kind, control mode)` combination — e.g. joint velocity into impedance mode —
+is still refused loudly at `on_stream_open`, with
+`StreamOpenResult{accepted=false, error_code=result_code::kStreamRejected}` and
+a message naming the unsupported pair; `pair_supported` in
+[`interface/ports.h`](../reference/api.md#bool-pair_supportedsetpointkind-controlmodekind)
+is the single source of truth for exactly which combinations those are.
 
 `timeout_s <= 0` is also refused at open, independent of the pair — see below.
+
+## `JointVelocityMode` specifics
+
+Streaming into velocity mode inherits two things worth knowing before you rely
+on it:
+
+- **It is stiff and does not yield to contact.** `JointVelocityMode` commands
+  every actuator in `kVelocity` and lets the actuator's own servo close the
+  loop — there is no compliance term, and none is planned for this mode. Push
+  on the arm while it tracks a stream and it will not spring back or soften; it
+  keeps commanding the velocity you asked for. Want compliance, stream into an
+  impedance mode instead.
+- **A stale stream commands zero, not the last-known velocity.** Holding the
+  last velocity while the stream is silent would keep the arm travelling
+  toward nothing. So staleness (per the deadline mechanics
+  [above](#the-deadline-one-value-two-enforcement-levels)) zeros the commanded
+  velocity and **latches** — exactly like `JointImpedanceMode`'s freeze,
+  disarming the watchdog cannot resurrect a target nobody is maintaining.
+
+The EE-twist path additionally saturates by **scaling, not clamping**: when the
+damped-least-squares solve would ask a joint to exceed its velocity cap, every
+joint's commanded velocity is scaled down **uniformly** so the fastest joint
+just reaches its limit, then a hard per-joint clamp backstops the rare edge
+case (e.g. a zero entry in `max_qd`). A naive per-joint clamp would silently
+rotate the commanded EE twist the moment any one joint saturates — the exact
+thing a mode named "velocity" must not do to a twist target. Uniform scaling
+keeps the achieved twist pointing the same direction as the commanded one,
+just shorter.
 
 ## A setpoint is a command, not an increment
 

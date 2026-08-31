@@ -298,6 +298,75 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
   EXPECT_EQ(ring.dropped(), 0u);
 }
 
+// JointVelocityMode's twist path is the only genuinely new per-cycle cost this
+// plan introduces: a Jacobian plus two 6x6 LDLT decompositions (one undamped, to
+// read manipulability off det(J J^T) for free, one damped for the DLS solve) plus
+// a projector-free null-space posture term. The joint-target path (native
+// set_velocity_target) is pass-through and cheap by inspection; this is the path
+// that needed proving.
+//
+// Unlike the hold-entry-pose modes above, JointVelocityMode's default source is
+// Source::kNone: compute() returns EARLY, before ever touching solve_twist(),
+// until an external target is set. A target set before on_enter runs is also
+// dropped by design (on_enter resets source_ to kNone so a stale session can't
+// resume). So the twist target must be published from a non-RT thread AFTER
+// request_mode's on_enter has run, in BOTH the warm-up window (to fault in the
+// Jacobian/LDLT code and scratch) and the re-armed measured window (re-entry
+// drops the warm-up's target the same way).
+TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode mode(dyn);          // defaults: posture bias on, DLS damping on
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  Vector6 V = Vector6::Zero();
+  V[2] = 0.05;   // non-zero so the DLS solve runs every cycle, not a zero short-circuit
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages, INCLUDING the twist solve.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      mode.set_twist_target(V);   // after on_enter, so it isn't dropped at entry
+      std::this_thread::sleep_for(std::chrono::milliseconds(180));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread. Re-entry's on_enter drops the
+    // warm-up's target, so publish a fresh one once this on_enter has run too.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      mode.set_twist_target(V);
+      std::this_thread::sleep_for(std::chrono::milliseconds(480));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
 // Smoke test for the clock_nanosleep(ABSTIME) pacing path (the default benchmark
 // and the test above exercise kSleepSpin; this confirms the other strategy runs
 // the loop and produces samples without crashing).

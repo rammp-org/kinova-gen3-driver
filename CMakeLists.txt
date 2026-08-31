@@ -169,6 +169,21 @@ else()
     target_compile_definitions(benchmark_cartesian_impedance PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# benchmark_joint_velocity runs JointVelocityMode through the RtExecutor and
+# reports timing, with --kind {joint,twist} isolating the DLS + null-space cost
+# of the twist path from the pass-through native path. Verified with --sim
+# (SimTransport); no KORTEX dependency (JointVelocityMode never touches the
+# transport directly), so this target links the same way with or without KORTEX.
+add_executable(benchmark_joint_velocity apps/benchmark_joint_velocity.cpp)
+target_link_libraries(benchmark_joint_velocity PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(benchmark_joint_velocity PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(benchmark_joint_velocity PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(benchmark_joint_velocity PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(benchmark_joint_velocity PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # joint_position_check drives JointPositionMode through the RtExecutor. This is
 # the hardware validation harness for joint-space position control -- see
 # docs/integration/joint_position_hardware_check.md. --dry-run is READ-ONLY and

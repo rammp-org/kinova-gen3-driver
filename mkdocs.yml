@@ -29,6 +29,7 @@ nav:
   - Deep Dive:
       - Cartesian Impedance: deep-dive/impedance.md
       - Trajectory Interpolation: deep-dive/trajectory-interpolation.md
+      - Velocity-Mode Twist Map: deep-dive/velocity-mode.md
   - Operations:
       - Real-Time Tuning: rt-tuning.md
       - Integration Runbook: integration-runbook.md
