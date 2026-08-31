@@ -88,7 +88,6 @@ class JointPositionMode : public ControlMode,
   using JointTargetSink::set_target;   // keep the JointVec overload visible
   void set_params(const JointPositionParams& p) noexcept;
 
-  IkResult last_ik() const noexcept { return last_ik_; }
   // Set when IK has failed to converge for longer than ik_fault_s. Published for
   // the sampler thread: the mode cannot end a streaming session (modes know
   // nothing about the interface layer), so it freezes the reference immediately
@@ -105,8 +104,9 @@ class JointPositionMode : public ControlMode,
   JointPositionParams params() const noexcept;
 
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
-  // do not call this from another thread while the RT loop is running.
+  // do not call these from another thread while the RT loop is running.
   JointVec reference() const noexcept { return q_ref_; }
+  IkResult last_ik() const noexcept { return last_ik_; }
 
  private:
   // Fills any non-finite limit with the URDF value and clamps any finite speed

@@ -103,6 +103,17 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s,
   JointVec target;
   if (stale) {
     target = fb.q;
+    // No solve ran this cycle -- last_ik() means THIS cycle's solve, so a frozen
+    // cycle must read as "no IK ran," not carry forward a pose solve from before
+    // the freeze. ik_bad_s_ resets too: "sustained non-convergence" should not
+    // silently span a freeze gap once the stream resumes.
+    //
+    // ik_faulted_ is DELIBERATELY left alone. It is a latch cleared only by
+    // on_enter -- the sampler thread is supposed to observe a latched fault and
+    // tear the session down, and clearing it here would hide a genuine fault
+    // behind the freeze that is itself downstream of that same fault.
+    last_ik_ = IkResult{};
+    ik_bad_s_ = 0.0;
   } else {
     switch (source_.load(std::memory_order_acquire)) {
       case TargetSource::kJoint:

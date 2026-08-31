@@ -463,3 +463,54 @@ TEST(JointPositionModePose, OnEnterClearsAPreviousIkFault) {
   m.on_enter(fb);
   EXPECT_FALSE(m.ik_faulted());
 }
+
+// A frozen (stale) cycle runs no solve at all -- last_ik() must read that as "no
+// IK ran this cycle," not carry forward the result of the last solve before the
+// freeze. Otherwise a caller polling last_ik() during a freeze sees a stale
+// converged=true from before the stream stopped.
+TEST(JointPositionModePose, StaleWatchdogClearsLastIkFromAPreviousPoseSolve) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.cmd_timeout_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose target = dyn.fk(q0); target.p.x() += 0.05;
+  m.set_target(target);
+
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  ASSERT_GT(m.last_ik().iters, 0);            // a solve ran this cycle
+
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
+  EXPECT_EQ(m.last_ik().iters, 0);            // frozen: no solve ran this cycle
+}
+
+// The staleness reset must NOT reach ik_faulted_: it is a latch cleared only by
+// on_enter, and the sampler thread depends on it staying set until the lifecycle
+// teardown observes it. Going stale after a fault has already latched must not
+// quietly erase the fault behind the freeze.
+TEST(JointPositionModePose, StaleWatchdogDoesNotClearAnAlreadyLatchedIkFault) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.02;
+  p.cmd_timeout_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;  // never reachable
+  m.set_target(unreachable);
+
+  JointCommand out;
+  // 100 ms: the fault latches well before the 50 ms watchdog timeout (~cycle 20
+  // vs ~cycle 50), then the watchdog itself goes stale and freezes the reference
+  // for the remainder of the loop.
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+
+  EXPECT_TRUE(m.ik_faulted());   // the latch survives the staleness reset
+  EXPECT_EQ(m.last_ik().iters, 0);   // but last_ik() still reads "no solve this cycle"
+}
