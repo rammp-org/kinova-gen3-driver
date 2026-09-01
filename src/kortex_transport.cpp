@@ -102,13 +102,21 @@ struct KortexTransport::Impl {
       const auto& m = ic.gripper_feedback().motor(0);
       fb.gripper.present  = true;
       fb.gripper.position = float(m.position()) / kPctPerUnit;
+      // UNVERIFIED: /kPctPerUnit is inferred from the field name (symmetry with the
+      // command's percent-of-max-speed), not read off the SDK -- MotorFeedback's
+      // generated header carries no units for velocity. If m.velocity() is actually
+      // deg/s or mm/s this is wrong by an unknown factor and looks fine. Settled by
+      // one --csv capture of an open-close cycle (spec's Open questions).
       fb.gripper.velocity = float(m.velocity()) / kPctPerUnit;
       fb.gripper.current  = float(m.current_motor());
       // MotorFeedback has no force field; effort is derived, normalized, and NOT Newtons.
       const float e = std::fabs(fb.gripper.current) / kGripperMaxCurrentA;
       fb.gripper.effort = e > 1.0f ? 1.0f : e;
     } else {
-      fb.gripper.present = false;
+      // Zero the rest too: fb is a caller-owned, reused JointFeedback, and leaving
+      // position/velocity/effort/current at whatever it held before would let a
+      // gripper that just disappeared look like one still reporting its last state.
+      fb.gripper = GripperFeedback{};
     }
   }
 
