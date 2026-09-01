@@ -56,6 +56,11 @@ class GripperController : public Transport {
   std::atomic<int> active_{0};
   // Separate from buf_[].active so release() can stop stamping without destroying the
   // target -- the last commanded position stays readable for diagnostics.
+  // ORDERING: set_target's writer publishes buf_ -> active_ (release) -> stamping_
+  // (release), last. The reader in stamp() MUST load stamping_ before active_ -- that
+  // is what ties the index it reads from active_ to the same write generation as the
+  // buffer contents. Reading active_ first can pair a fresh index with a stale/default
+  // buffer entry if the writer completes between the two loads. Do not reverse this.
   std::atomic<bool> stamping_{false};
 };
 

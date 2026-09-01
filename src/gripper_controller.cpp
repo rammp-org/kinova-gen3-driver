@@ -29,13 +29,17 @@ void GripperController::release() noexcept {
 
 JointCommand GripperController::stamp(const JointCommand& c) const noexcept {
   JointCommand out = c;
-  // acquire on active_ pairs with the release in set_target: once the new index is
-  // observed, the buffer write that preceded it is guaranteed visible, so there is no
-  // first-cycle stale read. Read unconditionally -- release() only gates `active`
-  // below, it does not stop the last-commanded position/speed/force from being
-  // readable in the outgoing frame (that's the point: ceasing to command holds).
+  // MUST read stamping_ first: set_target's writer sequences buf_ write -> active_
+  // release-store -> stamping_ release-store (last). Reading stamping_ before active_
+  // means that once stamping_ observes true, everything the writer sequenced before
+  // its release-store -- active_'s new value and the buffer contents behind it -- is
+  // guaranteed visible from the SAME generation of the write. Reading active_ first
+  // would let the writer complete in between the two loads, pairing a fresh active_
+  // with a stale/default buf_ entry (or vice versa) -- a torn read across generations,
+  // not just a stale one.
+  const bool active = stamping_.load(std::memory_order_acquire);
   out.gripper = buf_[active_.load(std::memory_order_acquire)];
-  out.gripper.active = stamping_.load(std::memory_order_acquire);
+  out.gripper.active = active;
   return out;
 }
 
