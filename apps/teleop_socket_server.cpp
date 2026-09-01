@@ -13,7 +13,7 @@
 //
 //   * rx thread:       receive POSE_TARGET / SET_GAINS / CONTROL, apply via the
 //                      mode's non-RT setters (single writer, as required). Also
-//                      forwards POSE_TARGET.gripper (0–1) via a GripperInjector
+//                      forwards POSE_TARGET.gripper (0–1) via a GripperController
 //                      decorator, stamping it into each JointCommand.
 //   * feedback thread: read the latest JointFeedback snapshot, compute EE pose
 //                      via its own Dynamics, and stream FEEDBACK back to the
@@ -47,6 +47,7 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/pose_target_sink.h"
 #include "kinova_lowlevel/rt_executor.h"
@@ -70,50 +71,6 @@ int64_t ns_now() {
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return int64_t(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
 }
-
-// Transport decorator: carries the latest gripper target (set by the rx thread)
-// and stamps it into each JointCommand on its way to the wrapped transport. Keeps
-// gripper control orthogonal to any ControlMode. The atomics make the rx-thread
-// write / RT-thread read race-free; the JointCommand copy is POD-sized (no alloc).
-class GripperInjector : public Transport {
- public:
-  explicit GripperInjector(Transport& inner) : inner_(inner) {}
-
-  // Called by the rx thread when a POSE_TARGET arrives.
-  void set_gripper(float g) {
-    if (g < 0.0f) g = 0.0f;
-    if (g > 1.0f) g = 1.0f;
-    gripper_.store(g, std::memory_order_relaxed);
-    active_.store(true, std::memory_order_release);  // publish gripper_ before active_
-  }
-
-  void connect() override { inner_.connect(); }
-  void set_servoing_low_level() override { inner_.set_servoing_low_level(); }
-  void set_actuator_modes(const ActuatorModes& m) override {
-    inner_.set_actuator_modes(m);
-  }
-  void exchange(const JointCommand& c, JointFeedback& fb) override {
-    inner_.exchange(stamp(c), fb);
-  }
-  void send(const JointCommand& c) override { inner_.send(stamp(c)); }
-  void receive(JointFeedback& fb) override { inner_.receive(fb); }
-  void safe_shutdown() override { inner_.safe_shutdown(); }
-  void clear_faults() override { inner_.clear_faults(); }
-
- private:
-  JointCommand stamp(const JointCommand& c) {
-    JointCommand out = c;
-    // acquire on active_ pairs with the release in set_gripper: once active_ reads
-    // true, the gripper_ value stored before it is guaranteed visible (no first-cycle
-    // stale read). Single rx-thread writer / single RT-thread reader.
-    out.gripper.active   = active_.load(std::memory_order_acquire);
-    out.gripper.position = gripper_.load(std::memory_order_relaxed);
-    return out;
-  }
-  Transport& inner_;
-  std::atomic<float> gripper_{0.0f};
-  std::atomic<bool> active_{false};
-};
 
 // Parse either a single scalar (applied to every joint) or exactly kNumJoints
 // comma-separated values. Returns false on anything malformed — a silently
@@ -258,7 +215,7 @@ int main(int argc, char** argv) {
   }
 
   Seqlock<JointFeedback> snapshot;
-  GripperInjector injector(*base_transport);
+  GripperController injector(*base_transport);
   FeedbackTap transport(injector, snapshot);
 
   std::signal(SIGINT, on_sigint);
@@ -339,7 +296,9 @@ int main(int argc, char** argv) {
           tp::PoseTargetPacket pkt;
           std::memcpy(&pkt, buf, sizeof(pkt));
           sink->set_target(pose_from_packet(pkt));
-          injector.set_gripper(pkt.gripper);
+          GripperCommand g;
+          g.position = pkt.gripper;
+          injector.set_target(g);
           break;
         }
         case tp::MsgType::kSetGains: {
