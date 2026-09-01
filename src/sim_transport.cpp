@@ -44,6 +44,11 @@ void SimTransport::step_gripper(const GripperCommand& g) {
       std::fabs(state_.gripper.position - gripper_block_) < kSettledEps) {
     state_.gripper.position = gripper_block_;
   }
+  // NOTE: this is a per-cycle DELTA (position - before), not the same quantity
+  // KortexTransport reports. KortexTransport fills GripperFeedback::velocity from
+  // MotorFeedback::velocity, a (presumed) fraction-of-max-speed -- a rate, independent
+  // of cycle time. Stage 2's stall detection must not be tuned against this sim number
+  // as if it were that rate.
   state_.gripper.velocity = state_.gripper.position - before;
 
   // Loaded only when an object is what stopped us -- i.e. we are held at the block

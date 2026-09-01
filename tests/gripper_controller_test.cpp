@@ -89,8 +89,43 @@ TEST(GripperController, ReleaseStopsStampingAndDoesNotOpenTheGripper) {
   gc.release();
   gc.exchange(c, fb);
   EXPECT_FALSE(sim.last_command().gripper.active);   // no longer commanded
-  // and specifically NOT commanded open:
-  EXPECT_NE(sim.last_command().gripper.position, 0.0f);
+
+  // and specifically NOT commanded open: with nothing stamping, SimTransport's
+  // step_gripper leaves position untouched, so the feedback holds at its pre-release
+  // value across further cycles instead of drifting toward 0 (open).
+  const float held = fb.gripper.position;
+  for (int i = 0; i < 5; ++i) {
+    gc.exchange(c, fb);
+    EXPECT_NEAR(fb.gripper.position, held, 1e-6f);
+  }
+}
+
+TEST(GripperController, SetTargetAfterReleaseResumesStamping) {
+  // release() stops stamping, but it is not a one-way latch: a subsequent
+  // set_target() must resume it, or a caller that opens/closes after an e-stop
+  // clears would silently stay limp.
+  JointFeedback init;
+  SimTransport sim(init);
+  GripperController gc(sim);
+  gc.connect();
+  GripperCommand g;
+  g.position = 0.6f;
+  gc.set_target(g);
+  JointCommand c;
+  JointFeedback fb;
+  gc.exchange(c, fb);
+  ASSERT_TRUE(sim.last_command().gripper.active);
+
+  gc.release();
+  gc.exchange(c, fb);
+  ASSERT_FALSE(sim.last_command().gripper.active);
+
+  GripperCommand g2;
+  g2.position = 0.1f;
+  gc.set_target(g2);
+  gc.exchange(c, fb);
+  EXPECT_TRUE(sim.last_command().gripper.active);
+  EXPECT_NEAR(sim.last_command().gripper.position, 0.1f, 1e-6f);
 }
 
 TEST(GripperController, PassesFeedbackThroughUntouched) {
