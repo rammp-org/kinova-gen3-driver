@@ -140,7 +140,7 @@ experiment.
 provenance rather than a magic number. Until measured it is set from the gripper's rated
 stall current and marked as such.
 
-### 4. A topic for streaming, an action for grasping
+### 4. A topic for streaming. ~~An action for grasping.~~ (CUT)
 
 **Topic** — a setpoint, fire-and-forget, no completion. This is all a policy running at
 100 Hz needs, and it mirrors the streaming tier.
@@ -153,14 +153,23 @@ driver, instead of in every caller.
 **Why not action-only.** A 100 Hz streaming client cannot use an action. The arm already
 learned this, which is why its streaming tier exists alongside its action tier.
 
-**Stall detection** runs in the Supervisor's existing sampler loop, non-RT, at 250 Hz. A
-grasp is *stalled* when position has moved less than `stall_pos_eps` over
-`stall_hold_s` **and** normalized effort exceeds `stall_effort_min`. Both conditions are
-required: position alone cannot distinguish "holding an object" from "already at the
-target", and effort alone spikes transiently on acceleration.
+**CUT, 2026-09-01.** The `Grasp` action and its stall detection are dropped from scope.
+The action's whole justification was writing stall detection once in the driver rather
+than in every caller; without it, `Grasp` is `MoveTo` plus a completion callback, which
+the topic already provides. The gripper tier is therefore **topic-only**, and decision 4
+reduces to its first half.
 
-The three thresholds are **tune-on-hardware parameters**, not settled numbers. Starting
-values and the reasoning behind them are in the Open questions section.
+The effort-threshold scheme originally specified here would not have worked anyway, and
+the hardware run is what showed it: a sustained grasp reports effort of about **0.05**,
+down in the noise, while the *transient* squeeze hits 1.0. A detector keyed on "effort
+exceeds a floor" would have fired during the close and gone quiet exactly when the object
+was held.
+
+**If a grasp primitive is wanted later, the measurement points at a much simpler one.**
+Position alone separates the cases cleanly: commanded fully closed, the gripper settled at
+**0.8333** on an object and **0.9912** on empty air. "Stopped short of the commanded
+target" needs no effort threshold, no tuned floor, and no second condition. Whoever picks
+this up should start there rather than from what this section originally proposed.
 
 ### 5. On halt, the gripper holds
 
@@ -326,11 +335,8 @@ assumptions above.
 
 Named here rather than buried as constants, because all three need the arm to settle:
 
-- **`stall_pos_eps` / `stall_hold_s` / `stall_effort_min`.** Starting values 0.005 (of full
-  travel), 0.15 s, 0.25. The hold window must exceed the gripper's own settling time or a
-  fast close self-triggers; the effort floor must sit above the free-space closing current
-  or every close reports a grasp. Both bounds are measurable in one bench session with
-  `--csv` logging and nothing in the hand.
+- ~~**`stall_pos_eps` / `stall_hold_s` / `stall_effort_min`.**~~ MOOT — stall detection is
+  cut (decision 4). Nothing tunes these because nothing reads them.
 - ~~**`effort_max_current_a`.**~~ MEASURED — see above. 1.0 A. Re-measure if grasps clamp again.
 - **Whether commanded and measured force are actually the same scale.** "Directly
   comparable — commanded 0.50, measured 0.47" (see decision 3) holds only if
@@ -372,7 +378,8 @@ Sketched so `kinova_arm_ros2` can plan against it; that repo writes its own spec
    and useful on its own: it fixes the `present` mis-mapping and unblocks `/joint_states`
    velocity immediately.
 2. **The interface tier** — `GripperSink`, `Supervisor` implementation, `Arbiter`
-   decoration, the grasp lifecycle and stall detection.
+   decoration. Smaller than originally scoped: the grasp lifecycle and stall detection
+   are cut (decision 4), so this is the command path, the state path, and the halt hook.
 3. **The ROS2 surface** — downstream, its own spec.
 
 ## Reference
