@@ -17,6 +17,13 @@ struct GripperCommand {
   bool  active   = false;
 };
 
+// Normalizer for GripperFeedback::effort/current. MotorFeedback carries NO force field --
+// only current_motor -- so effort is |current| / this, a fraction of maximum rather than a
+// force in Newtons. PROVENANCE: the 2F-85's rated stall current, pending measurement on
+// the arm. Everything downstream is a fraction of it, so it is the one gripper number
+// worth measuring early; see the spec's Open questions.
+inline constexpr float kGripperMaxCurrentA = 0.8f;
+
 // What it reports back. NOTE the asymmetry with the command: MotorFeedback carries
 // no force field, so `effort` is DERIVED from motor current and is a fraction of
 // maximum, never Newtons. Publishing a number labelled in force units that is wrong

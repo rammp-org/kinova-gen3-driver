@@ -53,7 +53,9 @@ void SimTransport::step_gripper(const GripperCommand& g) {
       gripper_block_ >= 0.0f && g.position > gripper_block_ &&
       std::fabs(state_.gripper.position - gripper_block_) < kSettledEps;
   state_.gripper.effort  = blocked_by_object ? g.force : 0.0f;
-  state_.gripper.current = state_.gripper.effort;   // sim: 1 A of "max" for a clean ratio
+  // Use the real normalizer so current/kGripperMaxCurrentA round-trips to the same
+  // effort on sim and hardware -- see GripperFeedback::current's documented units.
+  state_.gripper.current = state_.gripper.effort * kGripperMaxCurrentA;
 }
 
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {

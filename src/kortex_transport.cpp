@@ -29,13 +29,6 @@ constexpr int kUdpPort = 10001;
 // speaks 0..1. This is the only place that conversion happens.
 constexpr float kPctPerUnit = 100.0f;
 
-// Normalizer for GripperFeedback::effort. MotorFeedback carries NO force field -- only
-// current_motor -- so effort is |current| / this, a fraction of maximum rather than a
-// force in Newtons. PROVENANCE: the 2F-85's rated stall current, pending measurement on
-// the arm. Everything downstream is a fraction of it, so it is the one gripper number
-// worth measuring early; see the spec's Open questions.
-constexpr float kGripperMaxCurrentA = 0.8f;
-
 inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
 // Map our ActuatorMode -> KORTEX ActuatorConfig control mode.
