@@ -252,22 +252,6 @@ else()
     target_compile_definitions(joint_torque_check PRIVATE KINOVA_NO_KORTEX)
 endif()
 
-# TEMPORARY bring-up harness — delete this target with the app once validated.
-# gripper_check validates the gripper core plumbing on the arm. Three things the
-# unit tests cannot settle, because SimTransport's gripper is a model we wrote:
-# whether the newly-transmitted speed/force still open and close correctly, what
-# the stall current actually is (kGripperMaxCurrentA is a datasheet number), and
-# what units and sign MotorFeedback::velocity carries. --dry-run is READ-ONLY.
-add_executable(gripper_check apps/gripper_check.cpp)
-target_link_libraries(gripper_check PRIVATE kinova_lowlevel Eigen3::Eigen)
-target_include_directories(gripper_check PRIVATE include)
-if(KINOVA_ENABLE_KORTEX)
-    target_include_directories(gripper_check PRIVATE ${KORTEX_INCLUDE_DIRS})
-    target_compile_definitions(gripper_check PRIVATE _OS_UNIX)
-else()
-    target_compile_definitions(gripper_check PRIVATE KINOVA_NO_KORTEX)
-endif()
-
 # trajectory_run drives a joint-space trajectory on the arm through the non-RT
 # TrajectoryExecutor + JointPositionMode + RtExecutor -- the first on-robot
 # exercise of the interface execution core. --dry-run is READ-ONLY. The
