@@ -121,3 +121,24 @@ TEST(GripperController, StampsSendTheSameWayAsExchange) {
   EXPECT_TRUE(sim.last_command().gripper.active);
   EXPECT_NEAR(sim.last_command().gripper.position, 0.42f, 1e-6f);
 }
+
+TEST(GripperController, SetTargetClampsOutOfRangeFieldsToZeroOne) {
+  // Unvalidated data can arrive here straight off a socket. GripperCommand's
+  // documented range is [0, 1] for all three fields; set_target is where that
+  // contract is enforced, once, for every caller.
+  JointFeedback init;
+  SimTransport sim(init);
+  GripperController gc(sim);
+  gc.connect();
+  GripperCommand g;
+  g.position = 1.7f;
+  g.speed    = -0.2f;
+  g.force    = 5.0f;
+  gc.set_target(g);
+  JointCommand c;
+  JointFeedback fb;
+  gc.exchange(c, fb);
+  EXPECT_NEAR(sim.last_command().gripper.position, 1.0f, 1e-6f);
+  EXPECT_NEAR(sim.last_command().gripper.speed, 0.0f, 1e-6f);
+  EXPECT_NEAR(sim.last_command().gripper.force, 1.0f, 1e-6f);
+}

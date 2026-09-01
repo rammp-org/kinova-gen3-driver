@@ -25,6 +25,9 @@ class GripperController : public Transport {
 
   // Non-RT. Latest wins; every call carries all three fields, because speed and force
   // are deliberately NOT sticky -- see the statelessness decision in the spec.
+  // position/speed/force are each clamped to [0, 1] here, so this is the one place
+  // GripperCommand's documented range is enforced for every caller (including
+  // unvalidated data straight off a socket).
   void set_target(const GripperCommand& c) noexcept;
 
   // Non-RT, the halt path. Stops stamping. The 2F-85 is effectively self-locking, so
