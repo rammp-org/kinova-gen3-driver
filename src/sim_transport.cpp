@@ -36,6 +36,14 @@ void SimTransport::step_gripper(const GripperCommand& g) {
 
   const float before = state_.gripper.position;
   state_.gripper.position += (target - before) * gripper_lag_;
+  // An object is a hard stop, not an asymptote: once we're within kSettledEps of the
+  // block that IS the effective target, snap onto it exactly rather than let the
+  // effort gate below depend on a float residual that -ffp-contract=fast (FMA fusion)
+  // can shift across build flags/toolchains/architectures.
+  if (gripper_block_ >= 0.0f && target == gripper_block_ &&
+      std::fabs(state_.gripper.position - gripper_block_) < kSettledEps) {
+    state_.gripper.position = gripper_block_;
+  }
   state_.gripper.velocity = state_.gripper.position - before;
 
   // Loaded only when an object is what stopped us -- i.e. we are held at the block

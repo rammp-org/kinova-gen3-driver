@@ -140,6 +140,24 @@ TEST(SimTransport, ABlockedGripperStallsShortOfTheTargetAndLoadsUp) {
   EXPECT_NEAR(fb.gripper.effort, 0.8f, 1e-5f);        // loaded to the commanded cap
 }
 
+TEST(SimTransport, AnObjectPresentButUncommandedTargetDoesNotLoadEffort) {
+  // An object exists further along, but the commanded target never reaches it --
+  // the fingers should settle on the commanded target, untouched, with zero effort.
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  t.set_gripper_lag(0.5f);
+  t.set_gripper_blocked_at(0.4f);    // an object exists, but...
+  JointCommand c;
+  c.gripper.position = 0.2f;         // ...we never ask to close past it
+  c.gripper.active   = true;
+  c.gripper.force    = 0.8f;
+  JointFeedback fb;
+  for (int i = 0; i < 20; ++i) t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper.position, 0.2f, 1e-5f);      // reached the commanded target
+  EXPECT_NEAR(fb.gripper.effort, 0.0f, 1e-6f);        // never touched the object
+}
+
 TEST(SimTransport, ReportsTheGripperAsPresent) {
   JointFeedback init;
   SimTransport t(init);
