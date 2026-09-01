@@ -106,8 +106,8 @@ class GripperInjector : public Transport {
     // acquire on active_ pairs with the release in set_gripper: once active_ reads
     // true, the gripper_ value stored before it is guaranteed visible (no first-cycle
     // stale read). Single rx-thread writer / single RT-thread reader.
-    out.gripper_active = active_.load(std::memory_order_acquire);
-    out.gripper = gripper_.load(std::memory_order_relaxed);
+    out.gripper.active   = active_.load(std::memory_order_acquire);
+    out.gripper.position = gripper_.load(std::memory_order_relaxed);
     return out;
   }
   Transport& inner_;
@@ -445,7 +445,7 @@ int main(int argc, char** argv) {
         pkt.ee_quat_wxyz[1] = ee.R.x();
         pkt.ee_quat_wxyz[2] = ee.R.y();
         pkt.ee_quat_wxyz[3] = ee.R.z();
-        pkt.gripper_state = fb.gripper;  // actual measured position from snapshot
+        pkt.gripper_state = fb.gripper.position;  // actual measured position from snapshot
         pkt.fault = fb.fault ? 1 : 0;
         pkt.frame_id = fb.frame_id;
         pkt.last_control_seq = last_control_seq.load(std::memory_order_acquire);

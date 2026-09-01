@@ -24,7 +24,7 @@ void SimTransport::safe_shutdown() {}
 
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   last_cmd_ = cmd;
-  if (cmd.gripper_active) state_.gripper = cmd.gripper;
+  if (cmd.gripper.active) state_.gripper.position = cmd.gripper.position;
   if (latency_us_ > 0) {
     const int64_t deadline = ns_now() + int64_t(latency_us_) * 1000LL;
     while (ns_now() < deadline) { /* busy-wait, off-RT friendly */ }
@@ -36,7 +36,7 @@ void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
 
 void SimTransport::send(const JointCommand& cmd) {
   last_cmd_ = cmd;
-  if (cmd.gripper_active) state_.gripper = cmd.gripper;
+  if (cmd.gripper.active) state_.gripper.position = cmd.gripper.position;
   ++frame_;
   state_.frame_id = frame_;
 }

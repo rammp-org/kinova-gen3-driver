@@ -38,24 +38,24 @@ TEST(SimTransport, EchoesGripperWhenActive) {
   SimTransport t(init);
   t.connect();
   JointCommand c;
-  c.gripper = 0.42f;
-  c.gripper_active = true;
+  c.gripper.position = 0.42f;
+  c.gripper.active   = true;
   JointFeedback fb;
   t.exchange(c, fb);
-  EXPECT_NEAR(fb.gripper, 0.42f, 1e-6f);
+  EXPECT_NEAR(fb.gripper.position, 0.42f, 1e-6f);
 }
 
 TEST(SimTransport, LeavesGripperUntouchedWhenInactive) {
   JointFeedback init;
-  init.gripper = 0.7f;       // pre-existing measured position
+  init.gripper.position = 0.7f;   // pre-existing measured position
   SimTransport t(init);
   t.connect();
   JointCommand c;
-  c.gripper = 0.1f;
-  c.gripper_active = false;  // no gripper intent
+  c.gripper.position = 0.1f;
+  c.gripper.active   = false;     // no gripper intent
   JointFeedback fb;
   t.exchange(c, fb);
-  EXPECT_NEAR(fb.gripper, 0.7f, 1e-6f);  // unchanged
+  EXPECT_NEAR(fb.gripper.position, 0.7f, 1e-6f);   // unchanged
 }
 
 TEST(SimTransport, SendEchoesGripperToReceive) {
@@ -63,10 +63,31 @@ TEST(SimTransport, SendEchoesGripperToReceive) {
   SimTransport t(init);
   t.connect();
   JointCommand c;
-  c.gripper = 0.33f;
-  c.gripper_active = true;
+  c.gripper.position = 0.33f;
+  c.gripper.active   = true;
   t.send(c);
   JointFeedback fb;
   t.receive(fb);
-  EXPECT_NEAR(fb.gripper, 0.33f, 1e-6f);
+  EXPECT_NEAR(fb.gripper.position, 0.33f, 1e-6f);
+}
+
+TEST(GripperTypes, CommandDefaultsMatchTodaysHardcodedConstants) {
+  // speed 1.0 and force 0.5 ARE the old kGripperVelocityPct=100 / kGripperForcePct=50.
+  // A caller that sets only position must produce what the driver sent before this change.
+  GripperCommand c;
+  EXPECT_FLOAT_EQ(c.position, 0.0f);
+  EXPECT_FLOAT_EQ(c.speed,    1.0f);
+  EXPECT_FLOAT_EQ(c.force,    0.5f);
+  EXPECT_FALSE(c.active);
+}
+
+TEST(GripperTypes, FeedbackDefaultsToAbsentRatherThanOpen) {
+  // present=false is the whole point: position 0 with no gripper attached must not
+  // be indistinguishable from an attached, fully-open gripper.
+  GripperFeedback f;
+  EXPECT_FALSE(f.present);
+  EXPECT_FLOAT_EQ(f.position, 0.0f);
+  EXPECT_FLOAT_EQ(f.velocity, 0.0f);
+  EXPECT_FLOAT_EQ(f.effort,   0.0f);
+  EXPECT_FLOAT_EQ(f.current,  0.0f);
 }

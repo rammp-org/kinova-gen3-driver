@@ -99,7 +99,7 @@ struct KortexTransport::Impl {
     // zero motors): leave fb.gripper at its default 0.
     const auto& ic = fb_.interconnect();
     if (ic.gripper_feedback().motor_size() > 0) {
-      fb.gripper = float(ic.gripper_feedback().motor(0).position()) / 100.0f;
+      fb.gripper.position = float(ic.gripper_feedback().motor(0).position()) / 100.0f;
     }
   }
 
@@ -138,7 +138,7 @@ struct KortexTransport::Impl {
     // Gripper rides inside the same cyclic command, in the interconnect's
     // gripper_command motor message. Position is percent (0..100); we map the
     // server's 0..1 target. Only emitted when the teleop path has set a target.
-    if (cmd.gripper_active) {
+    if (cmd.gripper.active) {
       // NOTE: the interconnect/gripper submessages are allocated lazily on the
       // first commanded cycle — a one-time heap alloc on the RT path. This is a
       // deliberate tradeoff (decided in final review): it keeps the gripper
@@ -150,7 +150,7 @@ struct KortexTransport::Impl {
       auto* gripper = cmd_.mutable_interconnect()->mutable_gripper_command();
       if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
       auto* m = gripper->mutable_motor_cmd(0);
-      float pos = cmd.gripper;
+      float pos = cmd.gripper.position;
       if (pos < 0.0f) pos = 0.0f;
       if (pos > 1.0f) pos = 1.0f;
       m->set_position(pos * 100.0f);
