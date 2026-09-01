@@ -17,7 +17,15 @@ constexpr float kSettledEps = 1e-6f;
 }  // namespace
 
 SimTransport::SimTransport(const JointFeedback& initial, int latency_us)
-    : state_(initial), latency_us_(latency_us) {}
+    : state_(initial), latency_us_(latency_us) {
+  // The simulated robot always has a gripper, so say so from the start rather
+  // than only once step_gripper() has run. receive() copies state_ without
+  // stepping, so without this a caller that reads feedback BEFORE issuing any
+  // command sees present=false -- indistinguishable from a real arm with no
+  // interconnect gripper attached, which is exactly the mis-mapping `present`
+  // was added to kill.
+  state_.gripper.present = true;
+}
 
 void SimTransport::connect() {}
 void SimTransport::set_servoing_low_level() {}
@@ -29,7 +37,7 @@ void SimTransport::safe_shutdown() {}
 // command latch, and a divergence here would make send-driven tests lie.
 void SimTransport::step_gripper(const GripperCommand& g) {
   state_.gripper.present = true;
-  if (!g.active) { state_.gripper.velocity = 0.0f; return; }
+  if (!g.active) return;
 
   float target = g.position;
   if (gripper_block_ >= 0.0f && target > gripper_block_) target = gripper_block_;
@@ -44,13 +52,6 @@ void SimTransport::step_gripper(const GripperCommand& g) {
       std::fabs(state_.gripper.position - gripper_block_) < kSettledEps) {
     state_.gripper.position = gripper_block_;
   }
-  // NOTE: this is a per-cycle DELTA (position - before), not the same quantity
-  // KortexTransport reports. KortexTransport fills GripperFeedback::velocity from
-  // MotorFeedback::velocity, a (presumed) fraction-of-max-speed -- a rate, independent
-  // of cycle time. Stage 2's stall detection must not be tuned against this sim number
-  // as if it were that rate.
-  state_.gripper.velocity = state_.gripper.position - before;
-
   // Loaded only when an object is what stopped us -- i.e. we are held at the block
   // while the caller is still asking for more. Reaching a freely-commanded target is
   // not a grasp and must not report effort, or every close looks like a grasp.

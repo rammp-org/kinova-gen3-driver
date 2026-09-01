@@ -290,6 +290,38 @@ The tests that matter:
 - **Grasp cancel** mid-close settles the goal and leaves the gripper where it is.
 - **Arbitration**: a gripper command with a stale token is refused and counted.
 
+## Measured on the arm (2026-09-01)
+
+`gripper_check` ran an open → close → open cycle at `force = 1.0`, `speed = 0.5`, both on
+empty air and closing on a compliant object. Three results, two of which overturn
+assumptions above.
+
+- **`kGripperMaxCurrentA` is 1.0 A, not the datasheet's 0.8.** Peak grip current measured
+  1.00 A. At 0.8 the two highest samples computed 1.20 and 1.25 and were **clamped to
+  exactly 1.0000** — effort was silently saturating during an ordinary grasp. Updated.
+- **A grasp spikes then settles.** Current climbs to the peak as the fingers close on the
+  object, then drops to roughly **0.05 A** and holds there. A sustained grasp reports a
+  *small* effort, not a large one. Any stall detection that keys off "high effort means
+  holding something" is wrong; it must key off position-stopped plus the transient.
+  Closing on **empty air** is different again: the gripper reaches its commanded position
+  and stops driving entirely, reporting **zero** current.
+- **`MotorFeedback::velocity` is not a measurement, so `GripperFeedback` no longer
+  carries a velocity field at all — it was REMOVED rather than documented.** It is the commanded speed echoed
+  back while the gripper considers itself moving, and 0 otherwise — and it is unsigned.
+  While the fingers were being physically stopped, the position increments shrank while
+  this field held exactly the commanded 0.5000. Across runs, `|velocity| / |dpos/dt|` was
+  0.625 on air versus 1.060 on the object at the same commanded speed; a real measurement
+  would give one constant.
+
+  A field carrying no information the caller does not already have is worse than no
+  field: it looks like a measurement, so eventually someone publishes it as one. The
+  struct now documents its own absence so nobody helpfully adds it back.
+
+  **This retires the plan to fill in `/joint_states` velocity from it.** Publishing a
+  setpoint echo into a measurement field is the mistake decision 3 refuses to make for
+  force. `kinova_arm_ros2`'s description spec should keep gripper velocity as NaN, or
+  publish the derivative of position and say so. Flagged there as well.
+
 ## Open questions — tune on hardware
 
 Named here rather than buried as constants, because all three need the arm to settle:
@@ -299,8 +331,7 @@ Named here rather than buried as constants, because all three need the arm to se
   fast close self-triggers; the effort floor must sit above the free-space closing current
   or every close reports a grasp. Both bounds are measurable in one bench session with
   `--csv` logging and nothing in the hand.
-- **`effort_max_current_a`.** Set from the rated stall current until measured. Everything
-  downstream is a fraction of it, so it is the one number worth measuring early.
+- ~~**`effort_max_current_a`.**~~ MEASURED — see above. 1.0 A. Re-measure if grasps clamp again.
 - **Whether commanded and measured force are actually the same scale.** "Directly
   comparable — commanded 0.50, measured 0.47" (see decision 3) holds only if
   `effort_max_current_a` equals the motor current the hardware produces at
@@ -309,7 +340,8 @@ Named here rather than buried as constants, because all three need the arm to se
   spec by construction, but hardware may not. Same bench session as
   `effort_max_current_a` above: command a range of `force` values against a fixed
   stall and log the resulting current to see whether the two scales actually match.
-- **The units and sign of `MotorFeedback::velocity`.** Presumed percent-of-max and signed
+- ~~**The units and sign of `MotorFeedback::velocity`.**~~ ANSWERED — see above. Unsigned,
+  and an echo of the command rather than a measurement. The field is gone. Original note: Presumed percent-of-max and signed
   by direction, by symmetry with the command field — but unlike the rest of this spec, that
   is inference from the field name, not something read off the SDK, which carries no units
   in the generated header. One `--csv` capture of an open-close cycle settles it. If it

@@ -106,8 +106,6 @@ struct KortexTransport::Impl {
       // command's percent-of-max-speed), not read off the SDK -- MotorFeedback's
       // generated header carries no units for velocity. If m.velocity() is actually
       // deg/s or mm/s this is wrong by an unknown factor and looks fine. Settled by
-      // one --csv capture of an open-close cycle (spec's Open questions).
-      fb.gripper.velocity = float(m.velocity()) / kPctPerUnit;
       fb.gripper.current  = float(m.current_motor());
       // MotorFeedback has no force field; effort is derived, normalized, and NOT Newtons.
       const float e = std::fabs(fb.gripper.current) / kGripperMaxCurrentA;
