@@ -12,6 +12,7 @@
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/interface/value_types.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/supervisor.h"
@@ -365,6 +366,81 @@ TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
   // converged and the null-space objectives are exhausted DiffIkSolver returns on
   // iteration 0 by design, which is exactly the cheap steady state it advertises.)
   EXPECT_GT(mode.reference().norm(), 0.05);
+}
+
+// The spec's RT-safety section: "rt_safety_test gains a case that runs a mode with
+// the gripper decorator in the chain and a live command, asserting zero major page
+// faults and zero dropped samples." GripperController sits between SimTransport and
+// FeedbackTap in the chain (the shape SupervisorInLoopNoMajorFaultsSteadyState below
+// uses for FeedbackTap itself), and a non-RT writer thread calls gc.set_target()
+// throughout BOTH the warm-up and measured windows so the double-buffer write +
+// release-store stamp path gets its first-touch faults during warm-up and stays
+// LIVE -- not just present -- during the measured window.
+TEST(RtSafety, GripperControllerInLoopNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport sim(init);
+  GripperController gc(sim);
+  Seqlock<JointFeedback> snap;
+  FeedbackTap tap(gc, snap);
+  Dynamics dyn(URDF_PATH);
+  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
+  SampleRing ring(8192);
+  RtExecutor ex(tap, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::atomic<bool> stop_writer{false};
+  std::thread writer([&] {
+    bool toggle = false;
+    while (!stop_writer.load(std::memory_order_acquire)) {
+      GripperCommand g;
+      g.position = toggle ? 0.8f : 0.2f;
+      g.speed = 1.0f;
+      g.force = 0.5f;
+      gc.set_target(g);
+      toggle = !toggle;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages (executor, mode, and the
+    // gripper stamp path via the writer thread above) before measuring.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread while the writer keeps calling
+    // set_target() at ~200 Hz.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  stop_writer.store(true, std::memory_order_release);
+  writer.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
 }
 
 // JointVelocityMode's twist path is the only genuinely new per-cycle cost this
