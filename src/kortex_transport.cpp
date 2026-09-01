@@ -153,8 +153,9 @@ struct KortexTransport::Impl {
       a->set_command_id(frame_id_);
     }
     // Gripper rides inside the same cyclic command, in the interconnect's
-    // gripper_command motor message. Position is percent (0..100); we map the
-    // server's 0..1 target. Only emitted when the teleop path has set a target.
+    // gripper_command motor message. Position, velocity (speed) and force all convert
+    // the same way, 0..1 -> percent (0..100). The source is a library GripperController
+    // (any caller stamping through it), not a specific app or path.
     if (cmd.gripper.active) {
       // NOTE: the interconnect/gripper submessages are allocated lazily on the first
       // commanded cycle -- a one-time heap alloc on the RT path. Deliberate: it keeps
@@ -162,6 +163,16 @@ struct KortexTransport::Impl {
       // limp at startup rather than being actuated by a seeded default. Pre-seeding in
       // set_servoing_low_level() would make this alloc-free but would actuate from
       // cycle 1; still to be validated on hardware.
+      //
+      // RETRANSMISSION, NOT CESSATION: once allocated here, this submessage stays in
+      // cmd_ and is re-sent whole, every cycle, by Refresh(cmd_, 0) -- including every
+      // cycle where cmd.gripper.active is false, because this block simply does not run
+      // then and nothing clears the submessage. So after release() (see
+      // GripperController), the gripper keeps receiving "go to position P at speed S,
+      // force cap F" at 1 kHz indefinitely; it is not going quiet. The grip holds, but
+      // by continuous re-command against the last target, not by the arm ceasing to
+      // command it -- a duty-cycle/thermal consideration on a gripper stalled against
+      // an object. See GripperController::release()'s comment.
       auto* gripper = cmd_.mutable_interconnect()->mutable_gripper_command();
       if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
       auto* m = gripper->mutable_motor_cmd(0);

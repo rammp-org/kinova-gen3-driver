@@ -30,13 +30,19 @@ class GripperController : public Transport {
   // unvalidated data straight off a socket).
   void set_target(const GripperCommand& c) noexcept;
 
-  // Non-RT, the halt path. Stops stamping. The 2F-85 is effectively self-locking, so
-  // ceasing to command it holds the grip -- which is the point: e-stop means stop
-  // moving, and opening would itself be a motion.
+  // Non-RT, the halt path. Stops STAMPING -- this decorator's own output goes to
+  // cmd.gripper.active = false starting next cycle. It does NOT mean the gripper goes
+  // quiet: on KortexTransport, the last commanded position/speed/force submessage stays
+  // latched in the persistent cyclic command and is retransmitted every cycle regardless
+  // of `active` (see the RETRANSMISSION, NOT CESSATION note in kortex_transport.cpp).
+  // The grip holds either way -- the 2F-85 is effectively self-locking -- but the
+  // mechanism is continuous re-command against the last target, not the motor going
+  // idle. E-stop means stop moving, and opening would itself be a motion.
   void release() noexcept;
 
   // RT-thread-owned view of what is currently being stamped. NOT synchronized: for
-  // tests and post-stop inspection only.
+  // tests and post-stop inspection only -- this is NOT the stamp path (see stamp() and
+  // its ordering note below); it does not gate on stamping_ the way stamp() must.
   GripperCommand target() const noexcept { return buf_[active_.load(std::memory_order_acquire)]; }
 
   void connect() override { inner_.connect(); }
