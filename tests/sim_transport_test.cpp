@@ -91,3 +91,61 @@ TEST(GripperTypes, FeedbackDefaultsToAbsentRatherThanOpen) {
   EXPECT_FLOAT_EQ(f.effort,   0.0f);
   EXPECT_FLOAT_EQ(f.current,  0.0f);
 }
+
+TEST(SimTransport, GripperApproachesTheTargetRatherThanTeleporting) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  t.set_gripper_lag(0.25f);          // closes 25% of the remaining gap per cycle
+  JointCommand c;
+  c.gripper.position = 1.0f;
+  c.gripper.active   = true;
+  JointFeedback fb;
+  t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper.position, 0.25f, 1e-5f);
+  t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper.position, 0.4375f, 1e-5f);   // 0.25 + 0.75*0.25
+  EXPECT_GT(fb.gripper.velocity, 0.0f);               // moving, and closing
+}
+
+TEST(SimTransport, GripperVelocityIsZeroWhenSettled) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  t.set_gripper_lag(1.0f);           // reach the target immediately
+  JointCommand c;
+  c.gripper.position = 0.6f;
+  c.gripper.active   = true;
+  JointFeedback fb;
+  t.exchange(c, fb);                 // moves 0 -> 0.6
+  t.exchange(c, fb);                 // already there
+  EXPECT_NEAR(fb.gripper.position, 0.6f, 1e-6f);
+  EXPECT_NEAR(fb.gripper.velocity, 0.0f, 1e-6f);
+}
+
+TEST(SimTransport, ABlockedGripperStallsShortOfTheTargetAndLoadsUp) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  t.set_gripper_lag(0.5f);
+  t.set_gripper_blocked_at(0.4f);    // an object stops the fingers here
+  JointCommand c;
+  c.gripper.position = 1.0f;         // ask for fully closed
+  c.gripper.active   = true;
+  c.gripper.force    = 0.8f;
+  JointFeedback fb;
+  for (int i = 0; i < 20; ++i) t.exchange(c, fb);
+  EXPECT_NEAR(fb.gripper.position, 0.4f, 1e-5f);      // stopped by the object
+  EXPECT_NEAR(fb.gripper.velocity, 0.0f, 1e-5f);      // not moving
+  EXPECT_NEAR(fb.gripper.effort, 0.8f, 1e-5f);        // loaded to the commanded cap
+}
+
+TEST(SimTransport, ReportsTheGripperAsPresent) {
+  JointFeedback init;
+  SimTransport t(init);
+  t.connect();
+  JointCommand c;
+  JointFeedback fb;
+  t.exchange(c, fb);
+  EXPECT_TRUE(fb.gripper.present);   // the sim always has one
+}
