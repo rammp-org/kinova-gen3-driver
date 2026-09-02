@@ -8,6 +8,7 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -297,6 +298,144 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
   EXPECT_EQ(ring.dropped(), 0u);
 }
 
+// The POSE path is a different animal from the joint path measured above: it runs
+// up to max_iters (4) Gauss-Newton iterations inside compute(), each an fk plus a
+// Jacobian plus a 6x6 LDLT. The joint-target test never enters this branch, so
+// without this case the pose path shipped unmeasured. A LIVE pose target is
+// published throughout, exactly as a streaming client would -- a stale target
+// freezes the reference and the solve would never run.
+TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode mode(dyn);
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  // Reachable and a real distance away, so the solve does actual work every cycle
+  // instead of converging on iteration 0 and returning early.
+  const Pose target = dyn.fk(JointVec::Constant(0.2));
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages, INCLUDING the IK solve.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      for (int i = 0; i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mode.set_target(target);   // after on_enter, so it is not dropped at entry
+      }
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread. Re-entry's on_enter drops the
+    // warm-up's target, so keep publishing once this on_enter has run too.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      for (int i = 0; i < 50; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mode.set_target(target);
+      }
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+  // The pose branch really drove the loop: this test sets ONLY pose targets, so a
+  // reference that moved off the entry configuration can only have come from the
+  // IK. (last_ik().iters is not the check to make here -- once the solve has
+  // converged and the null-space objectives are exhausted DiffIkSolver returns on
+  // iteration 0 by design, which is exactly the cheap steady state it advertises.)
+  EXPECT_GT(mode.reference().norm(), 0.05);
+}
+
+// JointVelocityMode's twist path is the only genuinely new per-cycle cost this
+// plan introduces: a Jacobian plus two 6x6 LDLT decompositions (one undamped, to
+// read manipulability off det(J J^T) for free, one damped for the DLS solve) plus
+// a projector-free null-space posture term. The joint-target path (native
+// set_velocity_target) is pass-through and cheap by inspection; this is the path
+// that needed proving.
+//
+// Unlike the hold-entry-pose modes above, JointVelocityMode's default source is
+// Source::kNone: compute() returns EARLY, before ever touching solve_twist(),
+// until an external target is set. A target set before on_enter runs is also
+// dropped by design (on_enter resets source_ to kNone so a stale session can't
+// resume). So the twist target must be published from a non-RT thread AFTER
+// request_mode's on_enter has run, in BOTH the warm-up window (to fault in the
+// Jacobian/LDLT code and scratch) and the re-armed measured window (re-entry
+// drops the warm-up's target the same way).
+TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
+  JointFeedback init; init.q.setZero();
+  SimTransport t(init);
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode mode(dyn);          // defaults: posture bias on, DLS damping on
+  SampleRing ring(8192);
+  RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
+
+  Vector6 V = Vector6::Zero();
+  V[2] = 0.05;   // non-zero so the DLS solve runs every cycle, not a zero short-circuit
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> majflt_delta{~0ull};
+  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+
+  std::thread loop([&] {
+    // Warm-up window: fault in all code/scratch pages, INCLUDING the twist solve.
+    ex.request_mode(&mode);
+    std::atomic<bool> warm_stop{false};
+    std::thread warm_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      mode.set_twist_target(V);   // after on_enter, so it isn't dropped at entry
+      std::this_thread::sleep_for(std::chrono::milliseconds(180));
+      warm_stop.store(true);
+    });
+    ex.run(warm_stop);
+    warm_watch.join();
+
+    ResourceUsage u0 = read_usage();
+    // Re-arm the mode (the warm-up run consumed the request) and measure the
+    // steady-state window on this same loop thread. Re-entry's on_enter drops the
+    // warm-up's target, so publish a fresh one once this on_enter has run too.
+    ex.request_mode(&mode);
+    std::atomic<bool> measure_stop{false};
+    std::thread measure_watch([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+      mode.set_twist_target(V);
+      std::this_thread::sleep_for(std::chrono::milliseconds(480));
+      measure_stop.store(true);
+    });
+    ex.run(measure_stop);
+    measure_watch.join();
+
+    ResourceUsage u1 = read_usage();
+    majflt_delta.store(u1.majflt - u0.majflt);
+    stop.store(true);
+  });
+
+  loop.join();
+  drain.join();
+  EXPECT_EQ(majflt_delta.load(), 0u);
+  EXPECT_EQ(ring.dropped(), 0u);
+}
+
 // Smoke test for the clock_nanosleep(ABSTIME) pacing path (the default benchmark
 // and the test above exercise kSleepSpin; this confirms the other strategy runs
 // the loop and produces samples without crashing).
@@ -357,9 +496,10 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   JointTorqueMode tau(dyn);
+  JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
+  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
@@ -440,9 +580,10 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   JointPositionMode pos(dyn);
   JointImpedanceMode imp(dyn);
   JointTorqueMode tau(dyn);
+  JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, ex, snap, pump_dyn, be, be);
+  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};

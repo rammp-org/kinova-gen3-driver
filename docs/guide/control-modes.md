@@ -6,7 +6,7 @@ joint feedback and a `dt`, and it fills in a joint command. Swapping the control
 law never touches the transport or the RT machinery — modes are how you give the
 arm a new behavior.
 
-This page explains the three shipped modes conceptually. For exact signatures see
+This page explains the shipped modes conceptually. For exact signatures see
 the [API Reference](../reference/api.md); for the impedance math and RT-safety
 design see the [Deep Dive](../deep-dive/impedance.md).
 
@@ -28,12 +28,15 @@ outlive its time as the active mode.
 
 Every shipped mode also echoes the measured joint position back in the command
 (*position passthrough*), so the robot's own low-level safety can fall back to a
-position hold if it ever flags a following-error fault while in torque mode.
+position hold if it ever flags a following-error fault while in torque mode. This
+holds for every mode, including the ones that do not command position — the field
+is never left holding a previous mode's setpoint, and it is never written as zero
+(zero is not "unset", it is "all joints at 0 rad").
 
-The two impedance modes additionally implement `PoseTargetSink` (a single
-`set_target(Pose)` method), so anything that drives the arm from a stream of
-Cartesian targets — the teleop server, for one — works against either without
-knowing which is live.
+Three modes implement `PoseTargetSink` (a single `set_target(Pose)` method) —
+both impedance modes and `JointPositionMode` — so anything that drives the arm
+from a stream of Cartesian targets — the teleop server, for one — works against
+any of them without knowing which is live.
 
 Everything is **SI units / radians**. Degrees and N·m conversions happen only at
 the transport boundary.
@@ -181,13 +184,33 @@ configuration, then runs an independent spring-damper on every joint.
 ## Joint-Space Position — `JointPositionMode`
 
 Commands every actuator in `kPosition` and lets the actuator's own servo close
-the loop. Runs **no dynamics at all** — no gravity term, no mass matrix, no IK —
-which makes it the cheapest control path in the driver (`compute p50 = 128 ns`
-in sim, against a 1 ms budget).
+the loop.
 
-Driven through `JointTargetSink::set_target(const JointVec&)`, the joint-space
-counterpart of `PoseTargetSink`: a caller that already knows the configuration it
-wants does not have to invent a Cartesian pose and pay for an IK solve.
+With a **joint** target it runs no dynamics at all — no gravity term, no mass
+matrix, no IK — which makes it the cheapest control path in the driver
+(`compute p50 = 128 ns` in sim, against a 1 ms budget). Driven through
+`JointTargetSink::set_target(const JointVec&)`: a caller that already knows the
+configuration it wants does not have to invent a Cartesian pose and pay for an
+IK solve.
+
+With a **pose** target (`PoseTargetSink::set_target(const Pose&)`) it runs the
+same in-loop `DiffIkSolver` `JointImpedanceMode` uses, up to `ik.max_iters` (4)
+Gauss-Newton iterations per cycle, and the solution then feeds the *same*
+reference pipeline below — so the pose path inherits the whole safety envelope
+unchanged. That costs `compute p50 ≈ 5.2 µs` in sim, ~0.5% of the 1 ms budget,
+against 128 ns for the joint path.
+
+The IK seed **persists across cycles**: it is refined in place and re-anchored
+only on entry and on the transition into a pose target. It is deliberately not
+re-seeded from the rate-limited reference each cycle, which would throw every
+solve's progress away and make convergence unreachable for any pose more than
+one solve's travel (`max_iters · ik.max_joint_step` = 0.2 rad) away.
+
+Sustained non-convergence — longer than `ik_fault_s` — is a **fault**: the mode
+freezes the reference at the measured configuration at 1 kHz and publishes
+`ik_faulted()`, which the supervisor's sampler observes to tear down any open
+streaming session. See
+[Streaming → When the pose path cannot solve](streaming.md#when-the-pose-path-cannot-solve).
 
 **There is no compliance.** The arm will not yield to contact — it will push
 through until the actuator faults. Use it to move to known configurations and to
@@ -202,6 +225,7 @@ position, continuous-joint wrapping, then a position-limit clamp.
 | `max_ref_speed` | 0.5 rad/s | Deliberately below the URDF limits (1.40 / 1.22). Finite requests are clamped **down** to the URDF value, non-finite ones seeded from it — no config can outrun the hardware rating. |
 | `max_following_error` | 0.35 rad | How far the reference may lead the measured position. Bounds the snap when a blocked arm comes free. `<= 0` disables. |
 | `q_lower` / `q_upper` | URDF limits | Software position limits. A tighter caller-supplied value survives; non-finite entries are seeded from the model. |
+| `ik_fault_s` | 0.1 s | How long the pose path may miss the IK tolerance before it latches a fault and freezes. `<= 0` disables. Only a pose target can trip it. |
 
 > These defaults are **untuned**. The mode passed its first hardware run on
 > 2026-08-11 — joints moved correctly and the arm returned home — but nothing was
@@ -211,6 +235,61 @@ position, continuous-joint wrapping, then a position-limit clamp.
 
 Hardware validation procedure:
 [`../integration/joint_position_hardware_check.md`](../integration/joint_position_hardware_check.md).
+
+## Joint Velocity — `JointVelocityMode`
+
+Commands every actuator in `kVelocity` and lets the actuator's own servo close
+the loop. This is the mode for jogging: a policy, a jog panel, or a spacemouse
+that wants to say "move *this way, this fast*" rather than "be *here*".
+
+**Stiff by contract.** It does not yield to contact and makes no attempt to. A
+compliant velocity law is a different promise and belongs in a different mode —
+shipping compliance from something named "velocity" is exactly the silent
+semantic difference this driver refuses. If a human is in the loop, use an
+impedance mode.
+
+Two target shapes, latest setter wins:
+
+- **`set_velocity_target(qd)`** — native joint velocity, `rad/s`. Passed through
+  unchanged, then limited. The cheap path: no solve at all.
+- **`set_twist_target(V)`** — an EE twist `[linear; angular]` in the **base**
+  frame, `m/s` and `rad/s`. Mapped to joint velocity by a single damped
+  least-squares 6×7 solve, plus a null-space posture bias toward `q_rest` so the
+  redundant DOF is decided rather than left to drift. The
+  [deep dive](../deep-dive/velocity-mode.md) derives it.
+
+**What bounds the command.** `limit()` runs on every cycle whatever the target
+shape: first a **uniform scale** so the fastest joint just reaches its `max_qd`
+cap, then a hard per-joint clamp as a backstop. Scaling rather than clamping is
+what keeps the achieved EE twist pointing the same direction as the commanded
+one — a bare per-joint clamp would silently *rotate* the twist the moment one
+joint saturated. The DLS damping is a separate concern: it keeps the *solve*
+well-conditioned near a singularity, but `limit()` is what bounds the number
+that reaches the actuator. Near a singularity what you observe is the tool
+**slowing down**, not veering.
+
+**A stale stream commands zero, and latches.** Holding the last velocity while
+the stream is silent would keep the arm travelling toward nothing. Disarming the
+watchdog cannot un-freeze it; only a fresh target can.
+
+**No entry ramp.** Unlike the torque and impedance modes, the posture bias lands
+as a step on the first setpoint of a session — see
+[Streaming → the first twist setpoint](streaming.md#the-first-twist-setpoint-can-swing-the-elbow)
+before opening a twist stream with the arm far from `q_rest`.
+
+| Knob | Default | Effect |
+|---|---|---|
+| `max_qd` | URDF velocity limits | Per-joint cap. Non-finite entries are seeded from the URDF, finite ones clamped **down** to it — no config can outrun the hardware rating. |
+| `dls_damping` | 1e-3 | Baseline Levenberg–Marquardt damping for the twist solve. |
+| `w_threshold` | 0.0033 | Manipulability `sqrt(det(J Jᵀ))` below which damping ramps up. One tenth of the measured nominal `0.0325`. **Re-derive it if the URDF or EE frame changes** — `w` is unit-mixed and scale-dependent. |
+| `dls_damping_max` | 0.10 | Damping at a true singularity. Reach for this when the *solve* is ill-conditioned, not when the tool feels sluggish. |
+| `posture_gain` | 0.15 | Null-space bias toward `q_rest`, `1/s`. Matches `DiffIkParams`. `0` disables it and hands you the redundant DOF. |
+| `q_rest` | elbow-up placeholder | **Tune on hardware.** The posture the redundant DOF settles into. |
+| `cmd_timeout_s` | 0.0 (disabled) | Staleness deadline; the streaming tier arms it from the session's `timeout_s`. |
+
+> These defaults are **untuned** — no hardware characterisation has been done for
+> this mode. `benchmark_joint_velocity --kind twist` measures the per-cycle cost
+> in sim; nothing has been measured on the arm.
 
 ## Choosing a mode
 
@@ -224,13 +303,17 @@ Hardware validation procedure:
 | Teleop that keeps drifting into awkward elbow poses | Joint-space impedance |
 | Every joint constrained, posture fully predictable | Joint-space impedance |
 | To move to a known joint configuration, rigidly | Joint-space position |
+| To servo the tool to a Cartesian pose, rigidly | Joint-space position + `set_target(Pose)` |
 | A target for another layer to test against | Joint-space position |
-| The cheapest possible control path | Joint-space position |
+| The cheapest possible control path | Joint-space position with a *joint* target |
+| To jog the tool at a commanded EE speed | Joint velocity + `set_twist_target` |
+| To drive joint rates directly (a policy, a jog panel) | Joint velocity + `set_velocity_target` |
 
 ## Adding your own mode
 
-Velocity control, admittance control, and other laws slot in the same way — no
-transport, executor, or RT changes:
+Admittance control, force control, and other laws slot in the same way — no
+transport, executor, or RT changes. `JointVelocityMode` was added exactly this
+way and is the most recent worked example:
 
 1. Implement `ControlMode` in a new `*_mode.h` / `.cpp`. Capture entry state in
    `on_enter`; keep `compute()` allocation-free (preallocate all scratch as

@@ -354,3 +354,226 @@ TEST(JointPositionMode, ZeroTimeoutDisablesTheWatchdog) {
   for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
   EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
 }
+
+// --- Cartesian pose target via in-loop IK ------------------------------------
+
+TEST(JointPositionModePose, APoseTargetDrivesTheReferenceTowardIt) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose target = dyn.fk(q0);
+  target.p.x() += 0.05;                 // 5 cm along base x
+  m.set_target(target);
+
+  JointCommand out;
+  for (int i = 0; i < 500; ++i) { m.compute(fb, 0.001, out); fb.q = out.position; }
+
+  const Pose reached = dyn.fk(out.position);
+  EXPECT_LT((reached.p - target.p).norm(), (dyn.fk(q0).p - target.p).norm());
+  // "Got closer" alone is satisfied by 100 cycles of progress followed by a
+  // latched fault freezing the rest, so assert the fault did NOT latch too.
+  EXPECT_FALSE(m.ik_faulted());
+}
+
+TEST(JointPositionModePose, AJointTargetStillBypassesIkEntirely) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  JointFeedback fb; fb.q = JointVec::Zero();
+  m.on_enter(fb);
+  const JointVec q_d = JointVec::Constant(0.1);
+  m.set_target(q_d);                    // JointTargetSink overload
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  // iters stays 0: a joint target must not pay for a solve it does not use.
+  EXPECT_EQ(m.last_ik().iters, 0);
+}
+
+TEST(JointPositionModePose, TheLatestSetterWins) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose pose = dyn.fk(q0); pose.p.x() += 0.05;
+  m.set_target(pose);
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  ASSERT_GT(m.last_ik().iters, 0);
+
+  m.set_target(q0);                     // joint target supersedes the pose
+  m.compute(fb, 0.001, out);
+  EXPECT_EQ(m.last_ik().iters, 0);
+}
+
+TEST(JointPositionModePose, SustainedNonConvergenceRaisesIkFaulted) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0);
+  unreachable.p.x() += 5.0;             // metres away: never reachable
+  m.set_target(unreachable);
+
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  EXPECT_FALSE(m.ik_faulted());         // one bad solve is NOT a fault
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+  EXPECT_TRUE(m.ik_faulted());          // sustained non-convergence IS
+}
+
+TEST(JointPositionModePose, AConvergedSolveClearsTheFaultAccumulator) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  m.set_target(unreachable);
+  JointCommand out;
+  for (int i = 0; i < 20; ++i) m.compute(fb, 0.001, out);   // under the threshold
+  ASSERT_FALSE(m.ik_faulted());
+
+  // The seed PERSISTS, so chasing a target 5 m away leaves it at full stretch and
+  // it takes ~18 cycles of max_joint_step travel to walk back -- non-convergence
+  // the whole way, and rightly counted. 20 + 18 fits inside the 50-cycle budget;
+  // the earlier 40 did not, and that is a property of the seed being persistent,
+  // not of the accumulator failing to reset. The long recovery window is what
+  // gives this test its teeth: if a converged solve did NOT clear ik_bad_s_, 220
+  // accumulated cycles would blow past ik_fault_s four times over.
+  m.set_target(dyn.fk(q0));             // reachable
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);
+  EXPECT_FALSE(m.ik_faulted());
+  EXPECT_TRUE(m.last_ik().converged);   // and it really did converge, not just not-fault
+}
+
+TEST(JointPositionModePose, OnEnterClearsAPreviousIkFault) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  m.set_target(unreachable);
+  JointCommand out;
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+  ASSERT_TRUE(m.ik_faulted());
+
+  m.on_enter(fb);
+  EXPECT_FALSE(m.ik_faulted());
+}
+
+// A frozen (stale) cycle runs no solve at all -- last_ik() must read that as "no
+// IK ran this cycle," not carry forward the result of the last solve before the
+// freeze. Otherwise a caller polling last_ik() during a freeze sees a stale
+// converged=true from before the stream stopped.
+TEST(JointPositionModePose, StaleWatchdogClearsLastIkFromAPreviousPoseSolve) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.cmd_timeout_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose target = dyn.fk(q0); target.p.x() += 0.05;
+  m.set_target(target);
+
+  JointCommand out;
+  m.compute(fb, 0.001, out);
+  ASSERT_GT(m.last_ik().iters, 0);            // a solve ran this cycle
+
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
+  EXPECT_EQ(m.last_ik().iters, 0);            // frozen: no solve ran this cycle
+}
+
+// The staleness reset must NOT reach ik_faulted_: it is a latch cleared only by
+// on_enter, and the sampler thread depends on it staying set until the lifecycle
+// teardown observes it. Going stale after a fault has already latched must not
+// quietly erase the fault behind the freeze.
+TEST(JointPositionModePose, StaleWatchdogDoesNotClearAnAlreadyLatchedIkFault) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.ik_fault_s = 0.02;
+  p.cmd_timeout_s = 0.05;
+  JointPositionMode m(dyn, p);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb; fb.q = q0;
+  m.on_enter(fb);
+
+  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;  // never reachable
+  m.set_target(unreachable);
+
+  JointCommand out;
+  // 100 ms: the fault latches well before the 50 ms watchdog timeout (~cycle 20
+  // vs ~cycle 50), then the watchdog itself goes stale and freezes the reference
+  // for the remainder of the loop.
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
+
+  EXPECT_TRUE(m.ik_faulted());   // the latch survives the staleness reset
+  EXPECT_EQ(m.last_ik().iters, 0);   // but last_ik() still reads "no solve this cycle"
+}
+
+// The pose path's seed must ACCUMULATE across cycles. Re-seeding the solve from
+// q_ref_ every cycle throws IK progress away: q_ref_ advances at
+// max_ref_speed*dt (0.0005 rad/cycle by default) while a single solve can move
+// at most max_iters*max_joint_step (0.2 rad), so any pose needing more than that
+// much joint travel is !converged on EVERY cycle and ik_fault_s latches a
+// permanent freeze on a perfectly reachable target.
+TEST(JointPositionModePose, AReachableButDistantPoseDoesNotFault) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);                       // defaults: ik_fault_s = 0.1
+  const JointVec q0 = (JointVec() << 0.0,0.26,3.14,-2.27,0.0,0.96,1.57).finished();
+  JointFeedback fb; fb.q = q0; m.on_enter(fb);
+  Pose target = dyn.fk(q0); target.p.x() += 0.25;  // reachable, ordinary magnitude
+  m.set_target(target);
+  JointCommand out;
+  for (int i = 0; i < 3000; ++i) { m.compute(fb, 0.001, out); fb.q = out.position; }
+  EXPECT_FALSE(m.ik_faulted());
+  EXPECT_LT((dyn.fk(out.position).p - target.p).norm(), 1e-3);
+}
+
+
+// The persistent seed must be RE-ANCHORED when the source transitions back into
+// kPose, or a solution left over from an earlier pose session silently becomes the
+// warm start for the next one -- and the first solve of a session then reports the
+// old configuration's error instead of the arm's.
+TEST(JointPositionModePose, ReanchorsTheSeedOnTheTransitionBackIntoPose) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode m(dyn);
+  const JointVec q0 = (JointVec() << 0.0,0.26,3.14,-2.27,0.0,0.96,1.57).finished();
+  JointFeedback fb; fb.q = q0; m.on_enter(fb);
+  JointCommand out;
+
+  // Session 1: chase something far away so the seed ends up nowhere near q0.
+  Pose far_away = dyn.fk(q0); far_away.p.x() += 5.0;
+  m.set_target(far_away);
+  for (int i = 0; i < 40; ++i) m.compute(fb, 0.001, out);
+  ASSERT_FALSE(m.last_ik().converged);
+
+  // A joint target ends the pose session.
+  m.set_target(q0);
+  m.compute(fb, 0.001, out);
+
+  // Session 2, on a pose the arm is already AT: with the seed re-anchored to the
+  // reference this converges on the very first solve. Carrying the stale seed over
+  // would leave a metres-large pos_err on that same first solve.
+  m.set_target(dyn.fk(m.reference()));
+  m.compute(fb, 0.001, out);
+  EXPECT_TRUE(m.last_ik().converged);
+  EXPECT_LT(m.last_ik().pos_err, 1e-4);
+}
+
+

@@ -211,6 +211,16 @@ cd build && ./benchmark_cartesian_impedance --sim \
   --urdf ../models/gen3_7dof_2f85.urdf --rate 1000 --duration 5
 ```
 
+**Joint velocity** has `benchmark_joint_velocity`, which takes `--kind
+joint|twist`: `joint` drives the native pass-through path, `twist` drives the
+damped-least-squares EE-twist solve, so the difference between the two runs *is*
+the twist map's per-cycle cost.
+
+```sh
+cd build && ./benchmark_joint_velocity --sim \
+  --urdf ../models/gen3_7dof_2f85.urdf --rate 1000 --duration 5 --kind twist
+```
+
 What the output means:
 
 - **Live console (~1 Hz):** loop rate; `cycle` percentiles (p50/p99/p99.9/max);

@@ -7,6 +7,7 @@
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/sim_transport.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -85,9 +86,10 @@ struct SupFix {
   JointPositionMode pos{dyn};
   JointImpedanceMode imp{dyn};
   JointTorqueMode tau{dyn};
+  JointVelocityMode vel{dyn};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
   FakeBackend be;
-  interface::Supervisor sup{pos, imp, tau, exec, snap, pump_dyn, be, be};
+  interface::Supervisor sup{pos, imp, tau, vel, exec, snap, pump_dyn, be, be};
   std::atomic<bool> stop{false};
   std::thread rt;
 
@@ -875,4 +877,156 @@ TEST(StreamingHandoff, NoSetpointReachesTheModeAfterHalt) {
   f.sup.stop(); f.teardown();
   // An e-stopped arm must not be restartable by a client that has not noticed.
   EXPECT_NEAR(f.sim.last_command().position[0], 0.0, 1e-6);
+}
+
+TEST(Supervisor, StreamingJointVelocityDrivesTheVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp; sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Freeze qd_cmd_ before reading it -- mirrors StreamingJointTorqueDrivesTheTorque-
+  // Mode's "freeze last_cmd_ before reading it". close_stream()'s explicit
+  // set_velocity_target(Zero()) is velocity mode's safe-stop (Plan 2 decision):
+  // called before the RT thread is joined, it would land within a cycle or two
+  // and zero exactly the value this test exists to observe.
+  f.teardown();
+  const JointVec cmd = f.vel.commanded();
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop();
+
+  EXPECT_GT(cmd.cwiseAbs().maxCoeff(), 0.0);
+}
+
+TEST(Supervisor, StreamingATwistDrivesTheVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEeTwist;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::TwistSetpoint sp; sp.twist = Vector6::Zero(); sp.twist[0] = 0.02;
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_twist(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop(); f.teardown();
+
+  EXPECT_GT(f.vel.last_manipulability(), 0.0);   // the DLS solve actually ran
+}
+
+TEST(Supervisor, StreamingAPoseIntoPositionModeIsAccepted) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEePose;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  // The FK of a real configuration, so the target is reachable BY CONSTRUCTION.
+  // The fixture starts at q = 0, which is the arm straight up and fully extended:
+  // fk(0) + 2 cm along x is a quarter of a millimetre OUTSIDE the workspace, and
+  // the pose path correctly refuses to pretend it is tracking that.
+  interface::PoseSetpoint sp; sp.pose = f.pump_dyn.fk(JointVec::Constant(0.1));
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_pose(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // The session must still be up: nothing here should have tripped the IK-fault
+  // teardown, and a client streaming a reachable pose is entitled to keep it.
+  EXPECT_TRUE(f.sup.stream_is_open());
+  EXPECT_FALSE(f.pos.ik_faulted());
+
+  // Freeze last_ik_ before reading it -- mirrors StreamingJointTorqueDrivesThe-
+  // TorqueMode's "freeze last_cmd_ before reading it". close_stream()'s
+  // pre-existing hold-at-measured-q latch calls pos_.set_target(JointVec), which
+  // switches the target source away from kPose; JointPositionMode::compute()
+  // explicitly resets last_ik_ on that branch ("last_ik() means THIS cycle's
+  // solve"), so reading it after a close would see the reset, not the IK that
+  // actually ran while streaming.
+  f.teardown();
+  const IkResult ik = f.pos.last_ik();
+  const JointVec ref = f.pos.reference();
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  f.sup.stop();
+
+  // converged, not iters > 0: a default-constructed IkResult has converged=false,
+  // so this still proves a solve RAN, and it additionally proves the solve reached
+  // the pose. iters is no longer the right probe -- once the persistent seed has
+  // settled, DiffIkSolver returns on iteration 0 by design.
+  EXPECT_TRUE(ik.converged);
+  // Only pose setpoints were ever sent, so a reference off the entry configuration
+  // can only have come from the IK.
+  EXPECT_GT(ref.norm(), 0.05);
+}
+
+TEST(Supervisor, RefusesAJointPositionSetpointInVelocityMode) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 1.0;
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+  f.sup.stop(); f.teardown();
+}
+
+// Spec Component 3: "The sampler observes it on its next tick and tears the
+// session down with a distinct reason." Without this the mode freezes at measured
+// q, the session stays OPEN, the client's own setpoints keep refreshing the
+// deadline, and the client streams poses believing it is tracking.
+TEST(Supervisor, ASustainedIkFaultTearsDownThePoseSession) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEePose;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;                      // far longer than this test runs
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::PoseSetpoint sp; sp.pose = f.pump_dyn.fk(f.init.q);
+  sp.pose.p.x() += 5.0;                   // metres away: never reachable
+  for (int i = 0; i < 60 && f.sup.stream_is_open(); ++i) {
+    f.sup.on_setpoint_pose(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_FALSE(f.sup.stream_is_open());
+  // A DISTINCT cause: the deadline never lapsed here, and a client must be able to
+  // tell "you went quiet" from "the pose you asked for is not solvable".
+  EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kIkFault);
+
+  // The teardown re-arms the latch, so reconnecting works. Without that, on_enter
+  // is the only reset and re-opening in the SAME mode kind never re-enters the
+  // mode -- every later pose session would close on its first sampler tick.
+  EXPECT_FALSE(f.pos.ik_faulted());
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  EXPECT_TRUE(f.sup.stream_is_open());
+  f.sup.stop(); f.teardown();
+}
+
+TEST(Supervisor, AGracefulCloseAndADeadlineLapseReportDifferentCauses) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::StreamOpenRequest r; r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::StreamCloseRequest c;
+  f.sup.on_stream_close(c);
+  EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kClientRequest);
+
+  r.timeout_s = 0.05;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  EXPECT_FALSE(f.sup.stream_is_open());
+  EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
+  f.sup.stop(); f.teardown();
 }

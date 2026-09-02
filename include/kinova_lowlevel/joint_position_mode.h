@@ -4,8 +4,10 @@
 #include <limits>
 #include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
+#include "kinova_lowlevel/diff_ik.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/joint_target_sink.h"
+#include "kinova_lowlevel/pose_target_sink.h"
 namespace kinova {
 
 struct JointPositionParams {
@@ -37,12 +39,27 @@ struct JointPositionParams {
   // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
   // and preserves the behaviour every existing caller relies on.
   double cmd_timeout_s = 0.0;
+
+  // Sustained IK non-convergence threshold [s]. A single non-converged solve is
+  // NOT a fault -- a momentarily unreachable pose is normal while a client servos
+  // toward something. Expressed in TIME, not cycles: compute() runs at whatever
+  // the loop rate is, so a cycle count would silently mean something different at
+  // a different rate. <= 0 disables.
+  //
+  // This means what it says only because the IK seed PERSISTS across cycles (see
+  // ik_q_): a solve that re-seeded from the rate-limited reference every cycle
+  // could never converge on a pose further away than one solve's travel, and this
+  // threshold would then fire on perfectly reachable targets.
+  double ik_fault_s = 0.1;
+  DiffIkParams ik{};
 };
 
 // Joint-space position control. Commands every actuator in kPosition and lets
-// the actuator's own servo close the loop, so this mode runs no dynamics at all
-// — no gravity term, no mass matrix, no IK. It is the cheapest control path in
-// the driver and the one with the least to go wrong in software.
+// the actuator's own servo close the loop.
+//
+// With a JOINT target this still runs no dynamics at all -- no gravity term, no
+// mass matrix, no IK -- and remains the cheapest control path in the driver. Only
+// a live POSE target pulls in the in-loop IK solve.
 //
 // What it does own is the REFERENCE:
 //   q_ref <- rate_limit(q_ref -> target)   bounded by max_ref_speed·dt
@@ -57,7 +74,9 @@ struct JointPositionParams {
 //
 // Live setters publish via a single-writer (non-RT) double-buffer; compute()
 // (RT thread) reads one snapshot per cycle.
-class JointPositionMode : public ControlMode, public JointTargetSink {
+class JointPositionMode : public ControlMode,
+                          public JointTargetSink,
+                          public PoseTargetSink {
  public:
   JointPositionMode(Dynamics& dyn, JointPositionParams p = {});
   ActuatorModes required_modes() const override;
@@ -67,7 +86,26 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
 
   // Non-RT setters (call from one supervisor thread).
   void set_target(const JointVec& q_d) noexcept override;
+  // Cartesian target: resolved to a joint reference by in-loop IK, which then
+  // feeds the SAME rate_limit -> leash -> wrap -> clamp pipeline a joint target
+  // does, so the whole safety envelope comes along unchanged (PoseTargetSink).
+  void set_target(const Pose& x_d) noexcept override;
+  using JointTargetSink::set_target;   // keep the JointVec overload visible
   void set_params(const JointPositionParams& p) noexcept;
+
+  // Set when IK has failed to converge for longer than ik_fault_s. Published for
+  // the sampler thread: the mode cannot end a streaming session (modes know
+  // nothing about the interface layer), so it freezes the reference immediately
+  // at 1 kHz and lets the lifecycle teardown catch up.
+  bool ik_faulted() const noexcept { return ik_faulted_.load(std::memory_order_acquire); }
+
+  // Re-arm the latch from a NON-RT thread. Called by the streaming teardown, so a
+  // client that reconnects is not stuck behind a fault from the session before it:
+  // on_enter is otherwise the only reset, and re-opening a session in the mode the
+  // executor already runs never re-enters the mode. Safe against the RT writer
+  // because compute() also re-arms on the transition into kPose, so the worst a
+  // racing cycle can do is re-set a flag the next pose session clears anyway.
+  void clear_ik_fault() noexcept { ik_faulted_.store(false, std::memory_order_release); }
 
   // Re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores this
   // mode's own configured default (params().cmd_timeout_s).
@@ -79,8 +117,9 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   JointPositionParams params() const noexcept;
 
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
-  // do not call this from another thread while the RT loop is running.
+  // do not call these from another thread while the RT loop is running.
   JointVec reference() const noexcept { return q_ref_; }
+  IkResult last_ik() const noexcept { return last_ik_; }
 
  private:
   // Fills any non-finite limit with the URDF value and clamps any finite speed
@@ -102,18 +141,38 @@ class JointPositionMode : public ControlMode, public JointTargetSink {
   JointPositionParams params_[2];
   std::atomic<int> params_active_{0};
 
-  // Target source: the entry configuration (written once by on_enter on the RT
-  // thread) or an external target published by set_target.
+  // Target source, selected by the most recent setter (single-writer, non-RT).
+  // Named kEntry rather than kEntryPose because what is captured at entry is a
+  // joint CONFIGURATION, not a pose.
+  enum class TargetSource : int { kEntry, kPose, kJoint };
   JointVec entry_q_ = JointVec::Zero();
   JointVec ext_target_[2];
   std::atomic<int> ext_active_{0};
-  std::atomic<bool> has_ext_target_{false};
+  Pose pose_target_[2];
+  std::atomic<int> pose_active_{0};
+  std::atomic<TargetSource> source_{TargetSource::kEntry};
 
   // Staleness detection for the streamed target. The RESPONSE -- freezing the
   // reference at measured q -- is this mode's contract and lives in compute().
   CommandWatchdog wd_;
 
   JointVec q_ref_ = JointVec::Zero();   // integrated reference configuration
+
+  Dynamics& dyn_;
+  DiffIkSolver ik_;
+  IkResult last_ik_{};
+  double ik_bad_s_ = 0.0;                  // RT-owned: summed dt while !converged
+  std::atomic<bool> ik_faulted_{false};    // RT writer, non-RT (sampler) reader
+  // PERSISTENT IK seed, refined in place and carried across cycles. Deliberately
+  // NOT re-seeded from q_ref_ each cycle: q_ref_ is walked toward the IK output by
+  // a separate rate limiter at max_ref_speed*dt, so re-seeding from it discards
+  // every solve's progress and `converged` could never become true for a pose more
+  // than one solve's travel away. Reset in on_enter and on the transition into
+  // kPose (see compute()).
+  JointVec ik_q_ = JointVec::Zero();
+  // Which source the LAST non-stale cycle used. RT-owned; exists only to detect
+  // the transition into kPose so the seed above is re-anchored exactly once.
+  TargetSource last_source_ = TargetSource::kEntry;
 };
 
 }  // namespace kinova

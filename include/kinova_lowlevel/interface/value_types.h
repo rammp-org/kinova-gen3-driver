@@ -13,6 +13,11 @@ using Token  = std::array<uint8_t, 16>;          // 128-bit capability token; PO
 enum class ArbitrationMode { kEnforced, kDisabled };
 // The caller declares WHY the arm must stop; the supervisor decides HOW.
 enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
+// Why the last streaming session ended. A client that was streaming happily and
+// suddenly has its setpoints refused needs to tell "you went quiet" apart from
+// "the driver could not solve for the pose you asked for" -- the second is a
+// tracking failure and re-opening the same session will just reproduce it.
+enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
 
 // What a streaming client sends. The METHOD on StreamSink disambiguates which
 // struct applies -- there is deliberately no tag field on the setpoint itself,

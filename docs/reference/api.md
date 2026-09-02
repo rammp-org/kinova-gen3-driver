@@ -169,6 +169,96 @@ until `set_target` is called. `Vector6` gain layout is `[x y z | rx ry rz]`. See
 the [guide](../guide/control-modes.md#cartesian-impedance-cartesianimpedancemode)
 and the [Deep Dive](../deep-dive/impedance.md).
 
+### `JointPositionMode` — `joint_position_mode.h`
+
+```cpp
+struct JointPositionParams {
+  JointVec max_ref_speed = JointVec::Constant(0.5);   // rad/s, seeded/clamped to URDF
+  double max_following_error = 0.35;                  // rad; <= 0 disables the leash
+  JointVec q_lower = JointVec::Constant(-std::numeric_limits<double>::infinity());
+  JointVec q_upper = JointVec::Constant( std::numeric_limits<double>::infinity());
+                                                       // ^ seeded from URDF if non-finite
+  double cmd_timeout_s = 0.0;                          // staleness watchdog; 0 disables
+  double ik_fault_s    = 0.1;                          // sustained IK non-convergence, in TIME
+  DiffIkParams ik{};
+};
+JointPositionMode(Dynamics& dyn, JointPositionParams p = {});
+
+// Non-RT setters — call from a single supervisor thread. Lock-free publish; the
+// RT loop reads a consistent snapshot once per cycle. No allocation.
+void set_target(const JointVec& q_d) noexcept;   // JointTargetSink
+void set_target(const Pose& x_d) noexcept;       // PoseTargetSink — resolved by in-loop IK
+void set_command_timeout(double s) noexcept;
+
+bool ik_faulted() const noexcept;   // latched once ik_fault_s of non-convergence elapses
+IkResult last_ik() const noexcept;  // RT-owned, not synchronized
+```
+
+Runs no dynamics for a joint target — no gravity term, no mass matrix, no
+IK — the cheapest control path in the driver. Implements both
+`JointTargetSink` and `PoseTargetSink` (`joint_target_sink.h`,
+`pose_target_sink.h`): a `Pose` target is resolved to a joint reference by the
+same in-loop `DiffIkSolver` `JointImpedanceMode` uses, and the result feeds the
+**same** `rate_limit → leash → wrap → clamp` reference pipeline a native joint
+target does, so the pose path inherits the whole safety envelope unchanged.
+`ik_faulted()` is published for the sampler thread to observe: the mode itself
+freezes the reference immediately at 1 kHz on sustained non-convergence,
+independent of anything upstream noticing, and `Supervisor`'s sampler loop then
+closes any open streaming session with
+`StreamCloseCause::kIkFault` (see
+[the streaming guide](../guide/streaming.md#when-the-pose-path-cannot-solve)).
+The latch is re-armed by `close_stream()` and on the transition into a pose
+target, so a client that reconnects is not stuck behind the previous session's
+fault. The IK seed is **persistent** across cycles — it is not re-seeded from
+the rate-limited reference, or `converged` could never become true for a pose
+more than one solve's travel away. See the
+[guide](../guide/control-modes.md#joint-space-position-jointpositionmode).
+
+### `JointVelocityMode` — `joint_velocity_mode.h`
+
+```cpp
+struct JointVelocityParams {
+  JointVec max_qd = JointVec::Constant(std::numeric_limits<double>::infinity());
+                                    // rad/s, seeded/clamped to URDF
+  double dls_damping     = 1e-3;   // baseline LM damping for the twist solve
+  double w_threshold      = 0.0033; // manipulability below which damping rises
+  double dls_damping_max = 0.10;
+  double posture_gain = 0.15;      // 1/s; null-space posture bias, 0 disables it
+  JointVec q_rest = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  double cmd_timeout_s = 0.0;      // staleness watchdog; 0 disables
+};
+JointVelocityMode(Dynamics& dyn, JointVelocityParams p = {});
+
+// Non-RT setters — call from a single supervisor thread. Lock-free publish; the
+// RT loop reads a consistent snapshot once per cycle. Latest setter wins: a
+// twist target supersedes a joint-velocity target and vice-versa.
+void set_velocity_target(const JointVec& qd_d) noexcept;
+void set_twist_target(const Vector6& V) noexcept;
+void set_command_timeout(double s) noexcept;
+
+JointVec commanded() const noexcept;          // RT-owned, not synchronized
+double last_manipulability() const noexcept;  // sqrt(det(J Jᵀ)) at the last twist solve
+```
+
+Commands every actuator in `kVelocity` and lets the actuator's own servo close
+the loop. **Stiff by contract** — this mode does not yield to contact and makes
+no attempt to; a compliant velocity law is a different promise and belongs in a
+different mode. Two target shapes: `set_velocity_target` is native
+(pass-through, then uniformly-scaled-then-clamped to `max_qd`);
+`set_twist_target` maps an EE twist `[linear; angular]` (base frame) by damped
+least squares (`qd = Jᵀ(JJᵀ + λ²I)⁻¹V`) plus a projector-free null-space
+posture bias toward `q_rest`. `λ` rises as manipulability
+`w = sqrt(det(JJᵀ))` falls below `w_threshold`, which keeps the **solve**
+well-conditioned near a singularity. What bounds the **command** is `limit()`:
+a uniform scale so the fastest joint just reaches its cap, plus a hard per-joint
+clamp, applied unconditionally. Since `w_threshold` sits at a tenth of the
+nominal `w`, `limit()` is in practice the primary bound across the whole
+near-singular band — reach for `dls_damping_max` when the solve is
+ill-conditioned, not when the tool is merely sluggish. Staleness
+commands **zero** velocity and **latches**, exactly like `JointImpedanceMode`'s
+freeze. See the [Deep Dive](../deep-dive/velocity-mode.md) for the full
+derivation and the [guide](../guide/streaming.md#jointvelocitymode-specifics).
+
 ---
 
 ## `RtExecutor` — `rt_executor.h`
@@ -418,20 +508,37 @@ refused loudly rather than silently mis-driven:
 |---|---|---|
 | `kJointPosition` | `kPosition` / `kImpedance` | yes |
 | `kEePose` | `kImpedance` | yes — resolved by `JointImpedanceMode`'s in-loop IK |
-| `kEePose` | `kPosition` | not yet — no position-mode IK path |
+| `kEePose` | `kPosition` | yes — resolved by `JointPositionMode`'s in-loop IK |
 | `kJointTorque` | `kTorque` | yes |
-| `kJointVelocity`, `kEeTwist` | any | not yet — no `JointVelocityMode` |
+| `kJointVelocity` | `kVelocity` | yes — native `JointVelocityMode::set_velocity_target` |
+| `kEeTwist` | `kVelocity` | yes — resolved by `JointVelocityMode`'s damped-least-squares twist map |
 
-The "not yet" rows are a follow-on plan, not a defect in this one.
+Every other `(kind, control mode)` combination is refused loudly at
+`on_stream_open` rather than silently mis-driven — this table is the single
+source of truth for exactly which combinations exist.
 
 `on_stream_open` also refuses `timeout_s <= 0` unconditionally: the deadline
 that lets the driver detect and tear down a dead stream is not optional, since
 an unbounded stream has no safe-stop if the client disappears mid-session.
 
+### Why the last session ended — `StreamCloseCause`
+
+```cpp
+enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
+StreamCloseCause Supervisor::stream_close_cause() const;   // the LAST close
+```
+
+Every path through `Supervisor::close_stream()` records one of these. The
+distinction that matters operationally is `kDeadlineExpired` versus `kIkFault`:
+the first says the client went quiet and re-opening is the right response, the
+second says the driver could not solve for the poses being streamed, and
+re-opening the same session will just reproduce it. See
+[the streaming guide](../guide/streaming.md#when-the-pose-path-cannot-solve).
+
 ### `CommandWatchdog` — `command_watchdog.h`
 
-Shared staleness **detection**, used by all three of `JointTorqueMode`,
-`JointPositionMode`, and `JointImpedanceMode`. It is a lock-free counter bumped
+Shared staleness **detection**, used by all four of `JointTorqueMode`,
+`JointPositionMode`, `JointImpedanceMode`, and `JointVelocityMode`. It is a lock-free counter bumped
 by every non-RT setter and ticked once per RT cycle against an armed timeout —
 no clock call, no allocation, so it is safe on the RT path. What a mode *does*
 about staleness is deliberately not this class's job — each mode owns that
