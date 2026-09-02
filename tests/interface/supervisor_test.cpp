@@ -1058,3 +1058,23 @@ TEST(SupervisorDepsTest, AcceptsAFullyPopulatedSetOfDependencies) {
   f.teardown();
   SUCCEED();                         // constructed, ran and tore down
 }
+
+TEST(GripperValueTypes, SetpointCarriesTheCommandAndItsOwnAuthority) {
+  // Every command carries its own token, exactly as JointSetpoint does -- the
+  // gripper rides the arm's token, so the Arbiter can gate it with the same check.
+  interface::GripperSetpoint s;
+  EXPECT_FLOAT_EQ(s.command.position, 0.0f);
+  EXPECT_FLOAT_EQ(s.command.speed,    1.0f);   // GripperCommand's defaults survive
+  EXPECT_FLOAT_EQ(s.command.force,    0.5f);
+  EXPECT_FALSE(s.command.active);
+  EXPECT_EQ(s.token, interface::Token{});
+}
+
+TEST(GripperValueTypes, StateDefaultsToAbsent) {
+  interface::GripperState g;
+  EXPECT_FALSE(g.present);
+  EXPECT_FLOAT_EQ(g.position, 0.0f);
+  EXPECT_FLOAT_EQ(g.effort,   0.0f);
+  EXPECT_FLOAT_EQ(g.current,  0.0f);
+  EXPECT_DOUBLE_EQ(g.stamp_s, 0.0);
+}
