@@ -2,10 +2,10 @@
 #include <cstring>
 namespace kinova::interface {
 
-Arbiter::Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
-                 uint64_t seed)
-  : down_(downstream), down_stream_(downstream_stream), mode_(mode),
-    rng_(seed ? seed : std::random_device{}()) {}
+Arbiter::Arbiter(CommandSink& downstream, StreamSink& downstream_stream,
+                 GripperSink& downstream_gripper, ArbitrationMode mode, uint64_t seed)
+  : down_(downstream), down_stream_(downstream_stream), down_grip_(downstream_gripper),
+    mode_(mode), rng_(seed ? seed : std::random_device{}()) {}
 
 Token Arbiter::mint() {
   Token t{}; const uint64_t a = rng_(), b = rng_();
@@ -145,4 +145,14 @@ void Arbiter::on_setpoint_twist(const TwistSetpoint& s) {
   if (!admit(s.token)) { ++rejected_; return; }
   down_stream_.on_setpoint_twist(s);
 }
+
+void Arbiter::on_gripper_setpoint(const GripperSetpoint& s) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(s.token)) { ++rejected_; return; }
+  down_grip_.on_gripper_setpoint(s);
+}
+
+// Never gated: observing the arm is not commanding it, and a monitor must not need a
+// token. Same posture as on_query_state.
+GripperState Arbiter::on_query_gripper() { return down_grip_.on_query_gripper(); }
 }  // namespace kinova::interface

@@ -22,11 +22,11 @@ namespace kinova::interface {
 // does NOT wait for it is estop(): a delegated call may block for hundreds of
 // milliseconds (the streaming tier's mode settle), so the e-stop latch and its halt
 // both run outside m_ -- see estopped_ below.
-class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
+class Arbiter : public CommandSink, public StreamSink, public GripperSink, public ArbitrationSink {
  public:
   // seed == 0 -> seed the token RNG from std::random_device.
-  Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
-          uint64_t seed = 0);
+  Arbiter(CommandSink& downstream, StreamSink& downstream_stream,
+          GripperSink& downstream_gripper, ArbitrationMode mode, uint64_t seed = 0);
 
   // ArbitrationSink
   GrantResult       grant(const std::string& owner_id) override;
@@ -52,12 +52,17 @@ class Arbiter : public CommandSink, public StreamSink, public ArbitrationSink {
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
 
+  // GripperSink
+  void         on_gripper_setpoint(const GripperSetpoint&) override;
+  GripperState on_query_gripper() override;   // never gated -- reads are always open
+
  private:
   bool  admit(const Token&) const;   // caller holds m_
   Token mint();                      // caller holds m_
 
   CommandSink&    down_;
   StreamSink&     down_stream_;
+  GripperSink&    down_grip_;
   ArbitrationMode mode_;
   mutable std::mutex m_;
   std::mt19937_64 rng_;
