@@ -259,7 +259,11 @@ int main(int argc, char** argv) {
   SampleRing ring(8192);
   RtExecutor ex(tap, ring, {rate_hz, pacing, {rt_priority, cpu, true, true}});
   ConsoleBackend backend;
-  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, backend, backend);
+  interface::SupervisorDeps deps;
+  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
+  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
+  deps.stream = &backend; deps.action = &backend;
+  Supervisor sup(deps);
 
   sup.start();
   std::atomic<bool> stop{false};

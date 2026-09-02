@@ -89,7 +89,8 @@ struct SupFix {
   JointVelocityMode vel{dyn};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
   FakeBackend be;
-  interface::Supervisor sup{pos, imp, tau, vel, exec, snap, pump_dyn, be, be};
+  interface::SupervisorDeps deps{&pos, &imp, &tau, &vel, &exec, &snap, &pump_dyn, &be, &be};
+  interface::Supervisor sup{deps};
   std::atomic<bool> stop{false};
   std::thread rt;
 
@@ -1029,4 +1030,31 @@ TEST(Supervisor, AGracefulCloseAndADeadlineLapseReportDifferentCauses) {
   EXPECT_FALSE(f.sup.stream_is_open());
   EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
   f.sup.stop(); f.teardown();
+}
+
+TEST(SupervisorDepsTest, ThrowsNamingTheMissingDependency) {
+  // Fail loud at construction rather than dereferencing null on the sampler thread
+  // three seconds later. The message must name the field, because with ten
+  // dependencies "something was null" is not an actionable error.
+  Dynamics dyn{URDF_PATH};
+  JointPositionMode pos{dyn};
+  interface::SupervisorDeps d;
+  d.pos = &pos;                      // everything else deliberately left null
+  try {
+    interface::Supervisor sup{d};
+    FAIL() << "expected a throw for the missing dependencies";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("imp"), std::string::npos)
+        << "the message must name a missing field, got: " << e.what();
+  }
+}
+
+TEST(SupervisorDepsTest, AcceptsAFullyPopulatedSetOfDependencies) {
+  SupFix f;                          // the fixture builds a complete deps set
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  f.sup.stop();
+  f.teardown();
+  SUCCEED();                         // constructed, ran and tore down
 }

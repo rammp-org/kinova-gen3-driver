@@ -13,11 +13,22 @@ static const char* halt_reason_string(HaltReason r) {
   return "halted";
 }
 
-Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
-                       RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
-                       StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg)
-  : pos_(pos), imp_(imp), tau_(tau), vel_(vel), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
-    stream_(stream), action_(action), cfg_(cfg) {}
+namespace {
+// Named so the throw says which field, not merely that something was null.
+template <typename T>
+T& require(T* p, const char* field) {
+  if (!p) throw std::invalid_argument(std::string("SupervisorDeps::") + field +
+                                      " is required and was null");
+  return *p;
+}
+}  // namespace
+
+Supervisor::Supervisor(const SupervisorDeps& d)
+    : pos_(require(d.pos, "pos")), imp_(require(d.imp, "imp")),
+      tau_(require(d.tau, "tau")), vel_(require(d.vel, "vel")),
+      exec_(require(d.exec, "exec")), snap_(require(d.snap, "snap")),
+      pump_dyn_(require(d.pump_dyn, "pump_dyn")), stream_(require(d.stream, "stream")),
+      action_(require(d.action, "action")), cfg_(d.cfg) {}
 Supervisor::~Supervisor(){ stop(); }
 
 void Supervisor::start() {

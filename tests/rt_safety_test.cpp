@@ -575,7 +575,11 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
+  interface::SupervisorDeps deps;
+  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
+  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
+  deps.stream = &be; deps.action = &be;
+  Supervisor sup(deps);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
@@ -659,7 +663,11 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   JointVelocityMode vel(dyn);
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
-  Supervisor sup(pos, imp, tau, vel, ex, snap, pump_dyn, be, be);
+  interface::SupervisorDeps deps;
+  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
+  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
+  deps.stream = &be; deps.action = &be;
+  Supervisor sup(deps);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};

@@ -4,6 +4,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -30,11 +31,45 @@ inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
 
 struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; double mode_settle_s = 0.25; };
 
+// Everything the Supervisor needs, in one named place.
+//
+// POINTERS here, references everywhere else -- which is this library's existing rule, not
+// an exception to it. Every stored dependency in include/kinova_lowlevel/ is a reference;
+// the one raw pointer is RtExecutor's requested_ mode, and it is a pointer because a mode
+// may be absent or swapped. A reference means "always there"; a pointer means "may be
+// absent."
+//
+// The pointers exist ONLY at this construction boundary, so fields can be named and
+// defaulted -- a struct of references would force positional initialisation and would
+// still fail to compile at every site when a member is added, which is the breakage being
+// replaced. require() converts each one to a reference immediately, so what the Supervisor
+// STORES matches every other unit and the pointer-ness never leaks past the constructor.
+//
+// The cost is a null check, paid once in a constructor that throws naming the field. This
+// repo fails loud at startup rather than degrading at 1 kHz.
+//
+// Assign by name at the call site:
+//     SupervisorDeps d;
+//     d.pos = &pos; d.imp = &imp; ... d.stream = &backend; d.action = &router;
+//     Supervisor sup{d};
+// which is legible in a way that ten positional arguments -- two of which were the same
+// object passed as different port types -- was not.
+struct SupervisorDeps {
+  JointPositionMode*      pos      = nullptr;
+  JointImpedanceMode*     imp      = nullptr;
+  JointTorqueMode*        tau      = nullptr;
+  JointVelocityMode*      vel      = nullptr;
+  RtExecutor*             exec     = nullptr;
+  Seqlock<JointFeedback>* snap     = nullptr;
+  Dynamics*               pump_dyn = nullptr;
+  StreamPort*             stream   = nullptr;
+  ActionServerPort*       action   = nullptr;
+  SupervisorConfig        cfg{};
+};
+
 class Supervisor : public CommandSink, public StreamSink {
  public:
-  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
-             RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
-             StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg = {});
+  explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
   void start();   // request initial (position) mode; spawn sampler + pump threads
   void stop();    // signal + join both threads
