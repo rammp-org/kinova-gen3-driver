@@ -22,6 +22,10 @@ class SimTransport : public Transport {
   void set_gripper_lag(float per_cycle_fraction) { gripper_lag_ = per_cycle_fraction; }
   // Simulate an object: the fingers cannot close past this position, and effort rises
   // to the commanded force cap once they are stopped by it. Negative disables.
+  // THIS IS A MODEL, not measured hardware behaviour: the arm was measured to settle
+  // to a low holding current (effort ~0.05) on a sustained grasp, not the commanded
+  // cap (see GripperFeedback::effort). Do not calibrate a holding-detector against
+  // this sim's effort value.
   void set_gripper_blocked_at(float position) { gripper_block_ = position; }
  private:
   void step_gripper(const GripperCommand&);

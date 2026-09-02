@@ -259,7 +259,7 @@ class GripperSink {
  public:
   virtual ~GripperSink() = default;
   virtual void         on_gripper_setpoint(const GripperSetpoint&) = 0;
-  virtual GripperState on_query_gripper() const                    = 0;
+  virtual GripperState on_query_gripper()                          = 0;
 };
 ```
 
@@ -354,14 +354,14 @@ Named here rather than buried as constants, because all three need the arm to se
 - ~~**`stall_pos_eps` / `stall_hold_s` / `stall_effort_min`.**~~ MOOT — stall detection is
   cut (decision 4). Nothing tunes these because nothing reads them.
 - ~~**`effort_max_current_a`.**~~ MEASURED — see above. 1.0 A. Re-measure if grasps clamp again.
-- **Whether commanded and measured force are actually the same scale.** "Directly
-  comparable — commanded 0.50, measured 0.47" (see decision 3) holds only if
-  `effort_max_current_a` equals the motor current the hardware produces at
-  `force = 100%`. Those are two independently-guessed maxima today — `SimTransport`
-  hard-codes the identity (`effort = force` when blocked), so sim will agree with this
-  spec by construction, but hardware may not. Same bench session as
-  `effort_max_current_a` above: command a range of `force` values against a fixed
-  stall and log the resulting current to see whether the two scales actually match.
+- ~~**Whether commanded and measured force are actually the same scale.**~~ ANSWERED,
+  and NO — see "Measured on the arm" above. A sustained grasp settles to ~0.05 A
+  (effort ~0.05) regardless of the commanded force cap, not the "directly comparable"
+  figure decision 3 guessed. `SimTransport` still hard-codes `effort = force` once
+  blocked — a useful lag/stall model, deliberately not changed to match — so its
+  effort value must not be read as a prediction of the hardware number; see the
+  warnings on `GripperFeedback::effort`, `SimTransport::set_gripper_blocked_at`, and
+  `step_gripper()`.
 - ~~**The units and sign of `MotorFeedback::velocity`.**~~ ANSWERED — see above. Unsigned,
   and an echo of the command rather than a measurement. The field is gone. Original note: Presumed percent-of-max and signed
   by direction, by symmetry with the command field — but unlike the rest of this spec, that

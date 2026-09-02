@@ -55,6 +55,9 @@ void SimTransport::step_gripper(const GripperCommand& g) {
   // Loaded only when an object is what stopped us -- i.e. we are held at the block
   // while the caller is still asking for more. Reaching a freely-commanded target is
   // not a grasp and must not report effort, or every close looks like a grasp.
+  // THIS IS A MODEL, not measured hardware behaviour: on the real arm a sustained
+  // grasp settles to a low holding current (effort ~0.05), not the commanded force
+  // cap reported here. Do not calibrate a holding-detector against this sim.
   const bool blocked_by_object =
       gripper_block_ >= 0.0f && g.position > gripper_block_ &&
       std::fabs(state_.gripper.position - gripper_block_) < kSettledEps;

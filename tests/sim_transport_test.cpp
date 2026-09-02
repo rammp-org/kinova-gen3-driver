@@ -135,7 +135,9 @@ TEST(SimTransport, ABlockedGripperStallsShortOfTheTargetAndLoadsUp) {
   JointFeedback fb;
   for (int i = 0; i < 20; ++i) t.exchange(c, fb);
   EXPECT_NEAR(fb.gripper.position, 0.4f, 1e-5f);      // stopped by the object
-  EXPECT_NEAR(fb.gripper.effort, 0.8f, 1e-5f);        // loaded to the commanded cap
+  EXPECT_NEAR(fb.gripper.effort, 0.8f, 1e-5f);        // sim's model: loaded to the commanded cap
+                                                       // (hardware settles to ~0.05 instead, see
+                                                       // GripperFeedback::effort)
 }
 
 TEST(SimTransport, AnObjectPresentButUncommandedTargetDoesNotLoadEffort) {
