@@ -315,13 +315,23 @@ void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
 
 GripperState Supervisor::on_query_gripper() {
   GripperState g;
-  if (!grip_) return g;          // present stays false
+  // present stays false. This is "no controller wired" (a robot built without a
+  // gripper), not "no gripper attached" (present's other, hardware-detected meaning
+  // from KortexTransport/SimTransport) -- the two are conflated here deliberately:
+  // both cases mean there is nothing to report, and a caller has no use for telling
+  // "unwired" apart from "unattached".
+  if (!grip_) return g;
   JointFeedback fb;
   if (!snap_.load(fb)) return g; // a torn read reports absent rather than garbage
   g.position = fb.gripper.position;
   g.effort   = fb.gripper.effort;
   g.current  = fb.gripper.current;
   g.present  = fb.gripper.present;
+  // NOTE the asymmetry with ArmState::stamp_s: that one is SAMPLE time, set once
+  // inside the pump when fb was captured. This is QUERY time, computed here, on
+  // whatever fb the last pump cycle happened to leave in snap_ -- same field name,
+  // different meaning on two adjacent structs. Also: if called before start(), t0_
+  // is still default-constructed, so this returns time-since-boot, not 0.
   g.stamp_s  = secs_since(t0_);
   return g;
 }

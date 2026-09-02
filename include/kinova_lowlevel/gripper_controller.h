@@ -43,6 +43,9 @@ class GripperController : public Transport {
   // RT-thread-owned view of what is currently being stamped. NOT synchronized: for
   // tests and post-stop inspection only -- this is NOT the stamp path (see stamp() and
   // its ordering note below); it does not gate on stamping_ the way stamp() must.
+  // NOTE: the returned `.active` is the CALLER'S value from the last set_target(), not
+  // the actual stamped `active` -- that comes from the separate `stamping_` flag (see
+  // release()), so target().active is typically false even while stamping is live.
   GripperCommand target() const noexcept { return buf_[active_.load(std::memory_order_acquire)]; }
 
   void connect() override { inner_.connect(); }

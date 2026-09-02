@@ -32,7 +32,7 @@ struct RecordingSink : public CommandSink, public StreamSink, public GripperSink
   void             on_setpoint_pose(const PoseSetpoint&) override { ++setpoints; }
   void             on_setpoint_twist(const TwistSetpoint&) override { ++setpoints; }
 
-  int gripper_setpoints = 0, gripper_queries = 0;
+  int gripper_setpoints = 0;
   GripperSetpoint last_gripper{};
   GripperState    gripper_state{};
   void on_gripper_setpoint(const GripperSetpoint& s) override {
