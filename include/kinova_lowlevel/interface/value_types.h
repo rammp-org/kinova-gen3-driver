@@ -42,6 +42,16 @@ struct TwistSetpoint { Vector6  twist = Vector6::Zero();   Token token{}; };  //
 
 // The gripper's command, carrying its own authority like every other setpoint. The
 // gripper rides the ARM's token (spec decision 1): one physical machine, one holder.
+//
+// `command.active` has NO EFFECT here. Supervisor::on_gripper_setpoint always calls
+// GripperController::set_target, which arms stamping unconditionally -- stamp()
+// overwrites the outgoing `active` from GripperController's own internal `stamping_`
+// flag regardless of what this struct carries. `active` is a wire-level flag owned
+// by GripperController: sending a GripperSetpoint always arms stamping, and
+// GripperController::release() -- the halt path -- is the ONLY way to disarm it.
+// A caller setting `command.active = false` expecting "stop commanding the gripper"
+// gets the gripper commanded anyway; it is a documented no-op, not a second release
+// path (see GripperController::release()).
 struct GripperSetpoint { kinova::GripperCommand command{}; Token token{}; };
 
 // What the gripper reports. Mirrors GripperFeedback plus a stamp.

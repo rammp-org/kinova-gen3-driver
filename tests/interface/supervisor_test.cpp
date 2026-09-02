@@ -92,7 +92,8 @@ struct SupFix {
   FakeBackend be;
   // Positional: grip is the 10th field (after action, before cfg). SupFix is a
   // fixture member built before the constructor body runs, and C++17 has no
-  // designated initialisers, so grip must be passed here rather than assigned later.
+  // designated initialisers, so passing grip here is simplest -- a static helper
+  // could build it field-by-field instead, but that's more machinery than this needs.
   interface::SupervisorDeps deps{&pos, &imp, &tau, &vel, &exec, &snap, &pump_dyn, &be, &be, &gc};
   interface::Supervisor sup{deps};
   std::atomic<bool> stop{false};
@@ -1116,7 +1117,6 @@ TEST(Supervisor, GripperSetpointReachesTheController) {
   interface::GripperSetpoint s;
   s.command.position = 0.7f;
   s.command.force    = 0.3f;
-  s.command.active   = true;
   f.sup.on_gripper_setpoint(s);
   std::this_thread::sleep_for(std::chrono::milliseconds(40));
   f.sup.stop(); f.teardown();
@@ -1144,7 +1144,6 @@ TEST(Supervisor, HaltStopsCommandingTheGripperWithoutOpeningIt) {
   SupFix f; f.sup.start(); f.run_rt();
   interface::GripperSetpoint s;
   s.command.position = 0.8f;
-  s.command.active   = true;
   f.sup.on_gripper_setpoint(s);
   std::this_thread::sleep_for(std::chrono::milliseconds(40));
   ASSERT_TRUE(f.sim.last_command().gripper.active);
@@ -1162,7 +1161,6 @@ TEST(Supervisor, AbsentGripperMakesCommandsHarmlessNoOps) {
   SupFixNoGripper f; f.sup.start(); f.run_rt();
   interface::GripperSetpoint s;
   s.command.position = 0.9f;
-  s.command.active   = true;
   f.sup.on_gripper_setpoint(s);            // must not crash
   std::this_thread::sleep_for(std::chrono::milliseconds(40));
   const interface::GripperState g = f.sup.on_query_gripper();
