@@ -300,6 +300,16 @@ ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); re
 
 void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
   if (!grip_) return;            // no gripper on this robot: a no-op, not an error
+  // Matches the six arm-setpoint siblings: GripperController::set_target is
+  // documented as belonging to ONE non-RT thread (its double-buffer write is not
+  // itself thread-safe against a second concurrent writer), and nothing upstream
+  // of Supervisor guarantees that today -- an Arbiter happens to serialise via its
+  // own mutex, but two of the three in-tree wirings have no Arbiter, and a
+  // multi-threaded ROS2 executor could call in from two callback threads at once.
+  // stream_mtx_ is reused rather than adding a second lock; on_halt's grip_->release()
+  // is a single relaxed-enough atomic store with no lock of its own (see supervisor.h),
+  // so this does not change its relationship to on_halt or introduce any new nesting.
+  std::lock_guard<std::mutex> l(stream_mtx_);
   grip_->set_target(s.command);
 }
 
