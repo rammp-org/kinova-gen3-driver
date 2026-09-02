@@ -341,10 +341,11 @@ TEST(Arbiter, QueryGripperIsNeverGated) {
 }
 
 TEST(Arbiter, GripperSetpointIsRefusedWhileEstopped) {
-  RecordingSink sink; Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
-  const auto g = arb.grant("owner");
-  arb.estop();
-  GripperSetpoint s; s.token = g.token;
+  RecordingSink sink; Arbiter arb{sink, sink, sink, ArbitrationMode::kDisabled, 1234};
+  GripperSetpoint s;                        // no token needed in kDisabled
   arb.on_gripper_setpoint(s);
-  EXPECT_EQ(sink.gripper_setpoints, 0);
+  EXPECT_EQ(sink.gripper_setpoints, 1);     // delivered: kDisabled bypasses ownership
+  arb.estop();
+  arb.on_gripper_setpoint(s);
+  EXPECT_EQ(sink.gripper_setpoints, 1);     // refused: the latch is what kDisabled does NOT bypass
 }
