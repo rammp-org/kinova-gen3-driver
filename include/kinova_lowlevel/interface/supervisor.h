@@ -8,6 +8,7 @@
 #include <thread>
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_target_sink.h"
@@ -64,10 +65,14 @@ struct SupervisorDeps {
   Dynamics*               pump_dyn = nullptr;
   StreamPort*             stream   = nullptr;
   ActionServerPort*       action   = nullptr;
+  // OPTIONAL. Null means this robot has no gripper, which is a real configuration --
+  // GripperFeedback::present exists for exactly that. Gripper commands become no-ops
+  // and on_query_gripper reports present=false. Not validated by require().
+  GripperController*      grip     = nullptr;
   SupervisorConfig        cfg{};
 };
 
-class Supervisor : public CommandSink, public StreamSink {
+class Supervisor : public CommandSink, public StreamSink, public GripperSink {
  public:
   explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
@@ -90,6 +95,10 @@ class Supervisor : public CommandSink, public StreamSink {
   void             on_setpoint_joint_torque(const JointSetpoint&) override;
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
+
+  // GripperSink (called on the backend thread):
+  void             on_gripper_setpoint(const GripperSetpoint&) override;
+  GripperState     on_query_gripper() override;
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
@@ -116,7 +125,10 @@ class Supervisor : public CommandSink, public StreamSink {
   JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  JointVelocityMode& vel_;
   RtExecutor& exec_;
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
-  StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
+  StreamPort& stream_;  ActionServerPort& action_;
+  // Pointer, not a reference -- legitimately absent on a robot with no gripper.
+  GripperController* grip_ = nullptr;
+  SupervisorConfig cfg_;
 
   std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch
   // Which mode the EXECUTOR is running. ATOMIC because it is written by the

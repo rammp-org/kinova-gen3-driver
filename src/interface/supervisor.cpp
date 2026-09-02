@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/interface/supervisor.h"
 #include <chrono>
+#include <string>
 namespace kinova::interface {
 using clock = std::chrono::steady_clock;
 static double secs_since(clock::time_point t0){ return std::chrono::duration<double>(clock::now()-t0).count(); }
@@ -28,7 +29,7 @@ Supervisor::Supervisor(const SupervisorDeps& d)
       tau_(require(d.tau, "tau")), vel_(require(d.vel, "vel")),
       exec_(require(d.exec, "exec")), snap_(require(d.snap, "snap")),
       pump_dyn_(require(d.pump_dyn, "pump_dyn")), stream_(require(d.stream, "stream")),
-      action_(require(d.action, "action")), cfg_(d.cfg) {}
+      action_(require(d.action, "action")), grip_(d.grip), cfg_(d.cfg) {}
 Supervisor::~Supervisor(){ stop(); }
 
 void Supervisor::start() {
@@ -251,6 +252,11 @@ CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c){
 // settle-exactly-once true by construction rather than by careful reasoning.
 void Supervisor::on_halt(HaltReason r) {
   close_stream(StreamCloseCause::kHalted);   // stop admitting setpoints BEFORE the hold is latched
+  // Spec decision 5: stop stamping, do NOT command open. Opening is a motion, and
+  // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
+  // grip. Deliberately not a "safe" open -- anything held stays held rather than
+  // being dropped from wherever the arm happened to be.
+  if (grip_) grip_->release();
   std::lock_guard<std::mutex> l(q_mtx_);
   inbox_.clear();                 // a halt must never sit behind queued trajectories
   halt_reason_ = r;
@@ -291,6 +297,24 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
 }
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }
+
+void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
+  if (!grip_) return;            // no gripper on this robot: a no-op, not an error
+  grip_->set_target(s.command);
+}
+
+GripperState Supervisor::on_query_gripper() {
+  GripperState g;
+  if (!grip_) return g;          // present stays false
+  JointFeedback fb;
+  if (!snap_.load(fb)) return g; // a torn read reports absent rather than garbage
+  g.position = fb.gripper.position;
+  g.effort   = fb.gripper.effort;
+  g.current  = fb.gripper.current;
+  g.present  = fb.gripper.present;
+  g.stamp_s  = secs_since(t0_);
+  return g;
+}
 
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if (in_flight_.load())
