@@ -258,16 +258,32 @@ Peer to `CommandSink` and `StreamSink` in `interface/ports.h`.
 class GripperSink {
  public:
   virtual ~GripperSink() = default;
-  virtual void         on_gripper_command(const GripperCommand&) = 0;
-  virtual GraspResponse on_grasp_goal(const GraspGoal&)          = 0;
-  virtual void         on_grasp_cancel(const CancelRequest&)     = 0;
-  virtual GripperState on_query_gripper() const                  = 0;
+  virtual void         on_gripper_setpoint(const GripperSetpoint&) = 0;
+  virtual GripperState on_query_gripper() const                    = 0;
 };
 ```
 
-`Supervisor` implements it, writes through `GripperController`, and runs the grasp
-lifecycle in its sampler. `Arbiter` decorates it with the same token check it already
-applies to the other two sinks.
+Two methods, not four: the `Grasp` action and its cancel are cut (decision 4).
+
+`GripperSetpoint` carries the command **and a token**, matching `JointSetpoint` and the
+other streaming setpoints — every command carries its own authority. `GripperState`
+mirrors `GripperFeedback` plus a stamp: position, effort, current, present. **No velocity**;
+core does not have one to report.
+
+```cpp
+struct GripperSetpoint { GripperCommand command; Token token{}; };
+struct GripperState { float position, effort, current; bool present; double stamp_s; };
+```
+
+`Supervisor` implements it and writes through `GripperController`; `Arbiter` decorates it
+with the same token check it already applies to the other two sinks. Serving
+`on_query_gripper` needs no new plumbing — the gripper arrives in the same `JointFeedback`
+the pump already snapshots for `ArmState`.
+
+**The `Supervisor` constructor widens again**, to take a `GripperController&`. That is the
+third widening this quarter and it breaks `kinova_arm_ros2`'s `bringup_node.cpp` for the
+third time. Worth a moment's thought before doing it a fourth: a `SupervisorDeps` struct
+would make these additive, at the cost of one mechanical migration now.
 
 ## RT-safety
 
@@ -361,9 +377,9 @@ Sketched so `kinova_arm_ros2` can plan against it; that repo writes its own spec
 
 - `GripperCommand.msg` — `position`, `speed 1.0`, `force 0.5`, `token`. ROS 2 `.msg`
   supports field defaults, so the three-field-or-one-field ergonomics survive the IDL.
-- `GripperState.msg` — position, velocity, effort, current, present, stamp.
-- `Grasp.action` — goal (target position, speed, force), result (outcome enum, final
-  position and effort), feedback (current position and effort).
+- `GripperState.msg` — position, effort, current, present, stamp. **No velocity** — see the
+  measurements above.
+- ~~`Grasp.action`~~ — cut with stall detection (decision 4).
 - **`/joint_states` gets position and velocity**, both now honest. **Effort stays NaN**:
   `sensor_msgs/JointState.effort` is documented as N·m or N, and putting a 0..1 fraction
   there is precisely the mis-labelling decision 3 rejects. The normalized effort lives on
