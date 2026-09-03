@@ -41,6 +41,11 @@ any of them without knowing which is live.
 Everything is **SI units / radians**. Degrees and N·m conversions happen only at
 the transport boundary.
 
+The gripper is deliberately **not** one of these modes — it's a field on the
+outgoing frame, stamped by a `Transport` decorator, so it works alongside
+whichever mode below is active rather than competing with it. See the
+[Gripper guide](gripper.md).
+
 ## Gravity Compensation — `JointTorqueMode`
 
 Cancels the arm's own weight so it becomes weightless and back-drivable — push it

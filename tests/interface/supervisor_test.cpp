@@ -81,6 +81,40 @@ struct SupFix {
   Dynamics dyn{URDF_PATH}, pump_dyn{URDF_PATH};
   JointFeedback init;
   SimTransport sim;
+  GripperController gc{sim};
+  Seqlock<JointFeedback> snap;
+  FeedbackTap tap{gc, snap};
+  SampleRing ring{1u << 12};
+  JointPositionMode pos{dyn};
+  JointImpedanceMode imp{dyn};
+  JointTorqueMode tau{dyn};
+  JointVelocityMode vel{dyn};
+  RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
+  FakeBackend be;
+  // Positional: grip is the 10th field (after action, before cfg). SupFix is a
+  // fixture member built before the constructor body runs, and C++17 has no
+  // designated initialisers, so passing grip here is simplest -- a static helper
+  // could build it field-by-field instead, but that's more machinery than this needs.
+  interface::SupervisorDeps deps{&pos, &imp, &tau, &vel, &exec, &snap, &pump_dyn, &be, &be, &gc};
+  interface::Supervisor sup{deps};
+  std::atomic<bool> stop{false};
+  std::thread rt;
+
+  explicit SupFix(double q0 = 0.0, double qd0 = 0.0)
+      : init(make_feedback(q0, qd0)), sim(init) {}
+
+  void run_rt() { rt = std::thread([&]{ exec.run(stop); }); }
+  void teardown() { stop = true; if (rt.joinable()) rt.join(); }
+};
+
+// Identical to SupFix, but deps.grip stays null and the transport chain has no
+// GripperController -- a robot with no gripper is a real, legal configuration.
+// Copied rather than parameterised: this is a plain struct in an anonymous
+// namespace, and the duplication is more legible than a template here.
+struct SupFixNoGripper {
+  Dynamics dyn{URDF_PATH}, pump_dyn{URDF_PATH};
+  JointFeedback init;
+  SimTransport sim;
   Seqlock<JointFeedback> snap;
   FeedbackTap tap{sim, snap};
   SampleRing ring{1u << 12};
@@ -90,11 +124,12 @@ struct SupFix {
   JointVelocityMode vel{dyn};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
   FakeBackend be;
-  interface::Supervisor sup{pos, imp, tau, vel, exec, snap, pump_dyn, be, be};
+  interface::SupervisorDeps deps{&pos, &imp, &tau, &vel, &exec, &snap, &pump_dyn, &be, &be};
+  interface::Supervisor sup{deps};
   std::atomic<bool> stop{false};
   std::thread rt;
 
-  explicit SupFix(double q0 = 0.0, double qd0 = 0.0)
+  explicit SupFixNoGripper(double q0 = 0.0, double qd0 = 0.0)
       : init(make_feedback(q0, qd0)), sim(init) {}
 
   void run_rt() { rt = std::thread([&]{ exec.run(stop); }); }
@@ -371,7 +406,7 @@ TEST(Supervisor, HaltLatchesTheTargetAtMeasuredQ) {
 
 TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
   SupFix f;
-  interface::Arbiter arb{f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
+  interface::Arbiter arb{f.sup, f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
   f.sup.start(); f.run_rt();
   const interface::Token t = arb.grant("planner").token;
 
@@ -400,7 +435,7 @@ TEST(ArbitrationIntegration, RevokeMidMotionHaltsAndSettlesExactlyOnce) {
 
 TEST(ArbitrationIntegration, ANewOwnerCanSwitchControlModeAfterAHalt) {
   SupFix f;
-  interface::Arbiter arb{f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
+  interface::Arbiter arb{f.sup, f.sup, f.sup, interface::ArbitrationMode::kEnforced, 99};
   f.sup.start(); f.run_rt();
 
   const interface::Token a = arb.grant("planner").token;
@@ -465,7 +500,7 @@ struct SlowAcceptSink : interface::CommandSink {
 TEST(ArbitrationIntegration, AGoalAdmittedJustBeforeAnEstopNeverReachesTheArm) {
   SupFix f;
   SlowAcceptSink slow{f.sup, std::chrono::milliseconds(150)};
-  interface::Arbiter arb{slow, f.sup, interface::ArbitrationMode::kDisabled, 7};
+  interface::Arbiter arb{slow, f.sup, f.sup, interface::ArbitrationMode::kDisabled, 7};
   f.sup.start(); f.run_rt();
 
   interface::TrajectoryGoal g; g.trajectory = ramp7(0.0, 0.3, 0.5);
@@ -1067,6 +1102,109 @@ TEST(Supervisor, AGracefulCloseAndADeadlineLapseReportDifferentCauses) {
   EXPECT_FALSE(f.sup.stream_is_open());
   EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
   f.sup.stop(); f.teardown();
+}
+
+TEST(SupervisorDepsTest, ThrowsNamingTheMissingDependency) {
+  // Fail loud at construction rather than dereferencing null on the sampler thread
+  // three seconds later. The message must name the field, because with ten
+  // dependencies "something was null" is not an actionable error.
+  Dynamics dyn{URDF_PATH};
+  JointPositionMode pos{dyn};
+  interface::SupervisorDeps d;
+  d.pos = &pos;                      // everything else deliberately left null
+  try {
+    interface::Supervisor sup{d};
+    FAIL() << "expected a throw for the missing dependencies";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("imp"), std::string::npos)
+        << "the message must name a missing field, got: " << e.what();
+  }
+}
+
+TEST(SupervisorDepsTest, AcceptsAFullyPopulatedSetOfDependencies) {
+  SupFix f;                          // the fixture builds a complete deps set
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  f.sup.stop();
+  f.teardown();
+  SUCCEED();                         // constructed, ran and tore down
+}
+
+TEST(GripperValueTypes, SetpointCarriesTheCommandAndItsOwnAuthority) {
+  // Every command carries its own token, exactly as JointSetpoint does -- the
+  // gripper rides the arm's token, so the Arbiter can gate it with the same check.
+  interface::GripperSetpoint s;
+  EXPECT_FLOAT_EQ(s.command.position, 0.0f);
+  EXPECT_FLOAT_EQ(s.command.speed,    1.0f);   // GripperCommand's defaults survive
+  EXPECT_FLOAT_EQ(s.command.force,    0.5f);
+  EXPECT_FALSE(s.command.active);
+  EXPECT_EQ(s.token, interface::Token{});
+}
+
+TEST(GripperValueTypes, StateDefaultsToAbsent) {
+  interface::GripperState g;
+  EXPECT_FALSE(g.present);
+  EXPECT_FLOAT_EQ(g.position, 0.0f);
+  EXPECT_FLOAT_EQ(g.effort,   0.0f);
+  EXPECT_FLOAT_EQ(g.current,  0.0f);
+  EXPECT_DOUBLE_EQ(g.stamp_s, 0.0);
+}
+
+TEST(Supervisor, GripperSetpointReachesTheController) {
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::GripperSetpoint s;
+  s.command.position = 0.7f;
+  s.command.force    = 0.3f;
+  f.sup.on_gripper_setpoint(s);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  f.sup.stop(); f.teardown();
+
+  EXPECT_TRUE(f.sim.last_command().gripper.active);
+  EXPECT_NEAR(f.sim.last_command().gripper.position, 0.7f, 1e-6f);
+  EXPECT_NEAR(f.sim.last_command().gripper.force,    0.3f, 1e-6f);
+}
+
+TEST(Supervisor, QueryGripperReportsWhatTheArmSent) {
+  SupFix f; f.sup.start(); f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::GripperState g = f.sup.on_query_gripper();
+  f.sup.stop(); f.teardown();
+
+  // SimTransport always reports a gripper; the state comes from the same feedback
+  // snapshot the pump already reads for ArmState, so no new plumbing was needed.
+  EXPECT_TRUE(g.present);
+  EXPECT_GT(g.stamp_s, 0.0);
+}
+
+TEST(Supervisor, HaltStopsCommandingTheGripperWithoutOpeningIt) {
+  // Spec decision 5: e-stop means stop moving, and opening is itself a motion. The
+  // 2F-85 self-locks, so ceasing to command IS holding.
+  SupFix f; f.sup.start(); f.run_rt();
+  interface::GripperSetpoint s;
+  s.command.position = 0.8f;
+  f.sup.on_gripper_setpoint(s);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  ASSERT_TRUE(f.sim.last_command().gripper.active);
+
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  f.sup.stop(); f.teardown();
+
+  EXPECT_FALSE(f.sim.last_command().gripper.active);        // no longer commanded
+  EXPECT_NE(f.sim.last_command().gripper.position, 0.0f);   // and NOT commanded open
+}
+
+TEST(Supervisor, AbsentGripperMakesCommandsHarmlessNoOps) {
+  // A robot may genuinely have no gripper. A null dependency is legal, not an error.
+  SupFixNoGripper f; f.sup.start(); f.run_rt();
+  interface::GripperSetpoint s;
+  s.command.position = 0.9f;
+  f.sup.on_gripper_setpoint(s);            // must not crash
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  const interface::GripperState g = f.sup.on_query_gripper();
+  f.sup.stop(); f.teardown();
+  EXPECT_FALSE(g.present);
 }
 
 // ee_twist must come from the SAME model and the SAME feedback sample as ee_pose, or a

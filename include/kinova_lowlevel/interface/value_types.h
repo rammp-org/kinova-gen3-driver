@@ -4,6 +4,7 @@
 #include <string>
 #include "kinova_lowlevel/joint_types.h"
 #include "kinova_lowlevel/cartesian_types.h"
+#include "kinova_lowlevel/gripper_types.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"  // Trajectory, Preemption, ControlModeKind
 namespace kinova::interface {
 
@@ -38,6 +39,36 @@ struct StreamCloseRequest { Token token{}; };
 struct JointSetpoint { JointVec values = JointVec::Zero(); Token token{}; };
 struct PoseSetpoint  { Pose     pose{};                    Token token{}; };
 struct TwistSetpoint { Vector6  twist = Vector6::Zero();   Token token{}; };  // [linear; angular], base frame
+
+// The gripper's command, carrying its own authority like every other setpoint. The
+// gripper rides the ARM's token (spec decision 1): one physical machine, one holder.
+//
+// `command.active` has NO EFFECT here. Supervisor::on_gripper_setpoint always calls
+// GripperController::set_target, which arms stamping unconditionally -- stamp()
+// overwrites the outgoing `active` from GripperController's own internal `stamping_`
+// flag regardless of what this struct carries. `active` is a wire-level flag owned
+// by GripperController: sending a GripperSetpoint always arms stamping, and
+// GripperController::release() -- the halt path -- is the ONLY way to disarm it.
+// A caller setting `command.active = false` expecting "stop commanding the gripper"
+// gets the gripper commanded anyway; it is a documented no-op, not a second release
+// path (see GripperController::release()).
+struct GripperSetpoint { kinova::GripperCommand command{}; Token token{}; };
+
+// What the gripper reports. Mirrors GripperFeedback plus a stamp.
+//
+// There is deliberately NO velocity. MotorFeedback has one, but it was measured on the
+// arm to be the commanded speed echoed back rather than a measurement, so core removed
+// the field; see gripper_types.h. `effort` is a 0..1 fraction of maximum derived from
+// motor current, never Newtons -- and note a SUSTAINED grasp reports a SMALL effort
+// (~0.05), because the gripper spikes on contact and then settles to a low holding
+// current.
+struct GripperState {
+  float  position = 0.0f;
+  float  effort   = 0.0f;
+  float  current  = 0.0f;   // amps
+  bool   present  = false;
+  double stamp_s  = 0.0;
+};
 
 struct JointImpedanceGains { JointVec kq = JointVec::Zero(); double zeta = 0.5;
                              JointVec torque_limit = JointVec::Zero(); };

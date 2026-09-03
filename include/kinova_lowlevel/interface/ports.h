@@ -41,4 +41,13 @@ class StreamSink { public: virtual ~StreamSink() = default;
   // Without it a backend can only report the session it THINKS it has: nothing tells
   // it when the sampler tears one down on deadline expiry, or on_halt closes it.
   virtual StreamStatus     on_query_stream() = 0; };
+
+// Driving port for the gripper. Two methods, not four: the Grasp action and its cancel
+// were cut with stall detection (spec decision 4), so this tier is topic-only. Separate
+// from CommandSink and StreamSink for the same reason those are separate from each
+// other -- a backend implements only the concerns it supports, and a robot with no
+// gripper implements none of this.
+class GripperSink { public: virtual ~GripperSink() = default;
+  virtual void         on_gripper_setpoint(const GripperSetpoint&) = 0;
+  virtual GripperState on_query_gripper() = 0; };
 }  // namespace kinova::interface

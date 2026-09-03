@@ -4,9 +4,11 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_target_sink.h"
@@ -30,11 +32,49 @@ inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
 
 struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; double mode_settle_s = 0.25; };
 
-class Supervisor : public CommandSink, public StreamSink {
+// Everything the Supervisor needs, in one named place.
+//
+// POINTERS here, references everywhere else -- which is this library's existing rule, not
+// an exception to it. Every stored dependency in include/kinova_lowlevel/ is a reference;
+// the one raw pointer is RtExecutor's requested_ mode, and it is a pointer because a mode
+// may be absent or swapped. A reference means "always there"; a pointer means "may be
+// absent."
+//
+// The pointers exist ONLY at this construction boundary, so fields can be named and
+// defaulted -- a struct of references would force positional initialisation and would
+// still fail to compile at every site when a member is added, which is the breakage being
+// replaced. require() converts each one to a reference immediately, so what the Supervisor
+// STORES matches every other unit and the pointer-ness never leaks past the constructor.
+//
+// The cost is a null check, paid once in a constructor that throws naming the field. This
+// repo fails loud at startup rather than degrading at 1 kHz.
+//
+// Assign by name at the call site:
+//     SupervisorDeps d;
+//     d.pos = &pos; d.imp = &imp; ... d.stream = &backend; d.action = &router;
+//     Supervisor sup{d};
+// which is legible in a way that ten positional arguments -- two of which were the same
+// object passed as different port types -- was not.
+struct SupervisorDeps {
+  JointPositionMode*      pos      = nullptr;
+  JointImpedanceMode*     imp      = nullptr;
+  JointTorqueMode*        tau      = nullptr;
+  JointVelocityMode*      vel      = nullptr;
+  RtExecutor*             exec     = nullptr;
+  Seqlock<JointFeedback>* snap     = nullptr;
+  Dynamics*               pump_dyn = nullptr;
+  StreamPort*             stream   = nullptr;
+  ActionServerPort*       action   = nullptr;
+  // OPTIONAL. Null means this robot has no gripper, which is a real configuration --
+  // GripperFeedback::present exists for exactly that. Gripper commands become no-ops
+  // and on_query_gripper reports present=false. Not validated by require().
+  GripperController*      grip     = nullptr;
+  SupervisorConfig        cfg{};
+};
+
+class Supervisor : public CommandSink, public StreamSink, public GripperSink {
  public:
-  Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
-             RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
-             StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg = {});
+  explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
   void start();   // request initial (position) mode; spawn sampler + pump threads
   void stop();    // signal + join both threads
@@ -56,6 +96,10 @@ class Supervisor : public CommandSink, public StreamSink {
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
   StreamStatus     on_query_stream() override;
+
+  // GripperSink (called on the backend thread):
+  void             on_gripper_setpoint(const GripperSetpoint&) override;
+  GripperState     on_query_gripper() override;
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
@@ -82,7 +126,10 @@ class Supervisor : public CommandSink, public StreamSink {
   JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  JointVelocityMode& vel_;
   RtExecutor& exec_;
   Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
-  StreamPort& stream_;  ActionServerPort& action_;  SupervisorConfig cfg_;
+  StreamPort& stream_;  ActionServerPort& action_;
+  // Pointer, not a reference -- legitimately absent on a robot with no gripper.
+  GripperController* grip_ = nullptr;
+  SupervisorConfig cfg_;
 
   std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch
   // Which mode the EXECUTOR is running. ATOMIC because it is written by the

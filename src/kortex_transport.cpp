@@ -25,11 +25,11 @@ namespace {
 constexpr int kTcpPort = 10000;
 constexpr int kUdpPort = 10001;
 
-// Gripper motor-command defaults (KORTEX units are percent, 0..100). Position is
-// commanded per-cycle from JointCommand.gripper; velocity/force are fixed safe
-// defaults — full speed, moderate force. Tune force down if it over-grips.
-constexpr float kGripperVelocityPct = 100.0f;
-constexpr float kGripperForcePct    = 50.0f;
+// KORTEX speaks percent (0..100) for gripper position, velocity and force; the driver
+// speaks 0..1. This is the only place that conversion happens.
+constexpr float kPctPerUnit = 100.0f;
+
+inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
 // Map our ActuatorMode -> KORTEX ActuatorConfig control mode.
 k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
@@ -94,12 +94,23 @@ struct KortexTransport::Impl {
       }
     }
     fb.fault = fault;
-    // Measured gripper position from the interconnect feedback (percent -> 0..1).
-    // Guard the no-gripper case (a robot without an interconnect gripper reports
-    // zero motors): leave fb.gripper at its default 0.
+    // Gripper feedback from the interconnect. A robot with no interconnect gripper
+    // reports zero motors -- record that as ABSENT rather than leaving position at 0,
+    // which is indistinguishable from an attached, fully-open gripper.
     const auto& ic = fb_.interconnect();
     if (ic.gripper_feedback().motor_size() > 0) {
-      fb.gripper = float(ic.gripper_feedback().motor(0).position()) / 100.0f;
+      const auto& m = ic.gripper_feedback().motor(0);
+      fb.gripper.present  = true;
+      fb.gripper.position = float(m.position()) / kPctPerUnit;
+      fb.gripper.current  = float(m.current_motor());
+      // MotorFeedback has no force field; effort is derived, normalized, and NOT Newtons.
+      const float e = std::fabs(fb.gripper.current) / kGripperMaxCurrentA;
+      fb.gripper.effort = e > 1.0f ? 1.0f : e;
+    } else {
+      // Zero the rest too: fb is a caller-owned, reused JointFeedback, and leaving
+      // position/effort/current at whatever it held before would let a
+      // gripper that just disappeared look like one still reporting its last state.
+      fb.gripper = GripperFeedback{};
     }
   }
 
@@ -136,26 +147,33 @@ struct KortexTransport::Impl {
       a->set_command_id(frame_id_);
     }
     // Gripper rides inside the same cyclic command, in the interconnect's
-    // gripper_command motor message. Position is percent (0..100); we map the
-    // server's 0..1 target. Only emitted when the teleop path has set a target.
-    if (cmd.gripper_active) {
-      // NOTE: the interconnect/gripper submessages are allocated lazily on the
-      // first commanded cycle — a one-time heap alloc on the RT path. This is a
-      // deliberate tradeoff (decided in final review): it keeps the gripper
-      // UNcommanded until the operator's first gripper command, so the gripper
-      // stays limp at startup rather than being actuated by a seeded default.
-      // Pre-seeding in set_servoing_low_level() would make this path alloc-free
-      // but would actuate the gripper from cycle 1; that is to be validated on
-      // hardware during the attended bring-up before adopting it.
+    // gripper_command motor message. Position, velocity (speed) and force all convert
+    // the same way, 0..1 -> percent (0..100). The source is a library GripperController
+    // (any caller stamping through it), not a specific app or path.
+    if (cmd.gripper.active) {
+      // NOTE: the interconnect/gripper submessages are allocated lazily on the first
+      // commanded cycle -- a one-time heap alloc on the RT path. Deliberate: it keeps
+      // the gripper UNcommanded until the first gripper command, so the gripper stays
+      // limp at startup rather than being actuated by a seeded default. Pre-seeding in
+      // set_servoing_low_level() would make this alloc-free but would actuate from
+      // cycle 1; still to be validated on hardware.
+      //
+      // RETRANSMISSION, NOT CESSATION: once allocated here, this submessage stays in
+      // cmd_ and is re-sent whole, every cycle, by Refresh(cmd_, 0) -- including every
+      // cycle where cmd.gripper.active is false, because this block simply does not run
+      // then and nothing clears the submessage. So after release() (see
+      // GripperController), the gripper keeps receiving "go to position P at speed S,
+      // force cap F" at 1 kHz indefinitely; it is not going quiet. The grip holds, but
+      // by continuous re-command against the last target, not by the arm ceasing to
+      // command it -- a duty-cycle/thermal consideration on a gripper stalled against
+      // an object. See GripperController::release()'s comment.
       auto* gripper = cmd_.mutable_interconnect()->mutable_gripper_command();
       if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
       auto* m = gripper->mutable_motor_cmd(0);
-      float pos = cmd.gripper;
-      if (pos < 0.0f) pos = 0.0f;
-      if (pos > 1.0f) pos = 1.0f;
-      m->set_position(pos * 100.0f);
-      m->set_velocity(kGripperVelocityPct);
-      m->set_force(kGripperForcePct);
+      m->set_position(clamp01(cmd.gripper.position) * kPctPerUnit);
+      m->set_velocity(clamp01(cmd.gripper.speed)    * kPctPerUnit);
+      // A CEILING on motor current, not a force setpoint -- see GripperCommand.
+      m->set_force(clamp01(cmd.gripper.force)       * kPctPerUnit);
     }
   }
 };

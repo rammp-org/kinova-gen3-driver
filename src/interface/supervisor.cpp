@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/interface/supervisor.h"
 #include <chrono>
+#include <string>
 namespace kinova::interface {
 using clock = std::chrono::steady_clock;
 static double secs_since(clock::time_point t0){ return std::chrono::duration<double>(clock::now()-t0).count(); }
@@ -13,11 +14,22 @@ static const char* halt_reason_string(HaltReason r) {
   return "halted";
 }
 
-Supervisor::Supervisor(JointPositionMode& pos, JointImpedanceMode& imp, JointTorqueMode& tau, JointVelocityMode& vel,
-                       RtExecutor& exec, Seqlock<JointFeedback>& snap, Dynamics& pump_dyn,
-                       StreamPort& stream, ActionServerPort& action, SupervisorConfig cfg)
-  : pos_(pos), imp_(imp), tau_(tau), vel_(vel), exec_(exec), snap_(snap), pump_dyn_(pump_dyn),
-    stream_(stream), action_(action), cfg_(cfg) {}
+namespace {
+// Named so the throw says which field, not merely that something was null.
+template <typename T>
+T& require(T* p, const char* field) {
+  if (!p) throw std::invalid_argument(std::string("SupervisorDeps::") + field +
+                                      " is required and was null");
+  return *p;
+}
+}  // namespace
+
+Supervisor::Supervisor(const SupervisorDeps& d)
+    : pos_(require(d.pos, "pos")), imp_(require(d.imp, "imp")),
+      tau_(require(d.tau, "tau")), vel_(require(d.vel, "vel")),
+      exec_(require(d.exec, "exec")), snap_(require(d.snap, "snap")),
+      pump_dyn_(require(d.pump_dyn, "pump_dyn")), stream_(require(d.stream, "stream")),
+      action_(require(d.action, "action")), grip_(d.grip), cfg_(d.cfg) {}
 Supervisor::~Supervisor(){ stop(); }
 
 void Supervisor::start() {
@@ -242,6 +254,11 @@ CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c){
 // settle-exactly-once true by construction rather than by careful reasoning.
 void Supervisor::on_halt(HaltReason r) {
   close_stream(StreamCloseCause::kHalted);   // stop admitting setpoints BEFORE the hold is latched
+  // Spec decision 5: stop stamping, do NOT command open. Opening is a motion, and
+  // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
+  // grip. Deliberately not a "safe" open -- anything held stays held rather than
+  // being dropped from wherever the arm happened to be.
+  if (grip_) grip_->release();
   std::lock_guard<std::mutex> l(q_mtx_);
   inbox_.clear();                 // a halt must never sit behind queued trajectories
   halt_reason_ = r;
@@ -282,6 +299,44 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
 }
 GainsResult    Supervisor::on_set_gains(const GainsRequest&){ return {}; }
 ArmState       Supervisor::on_query_state(){ ArmState s; state_snap_.load(s); return s; }
+
+void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
+  if (!grip_) return;            // no gripper on this robot: a no-op, not an error
+  // Matches the six arm-setpoint siblings: GripperController::set_target is
+  // documented as belonging to ONE non-RT thread (its double-buffer write is not
+  // itself thread-safe against a second concurrent writer), and nothing upstream
+  // of Supervisor guarantees that today -- an Arbiter happens to serialise via its
+  // own mutex, but two of the three in-tree wirings have no Arbiter, and a
+  // multi-threaded ROS2 executor could call in from two callback threads at once.
+  // stream_mtx_ is reused rather than adding a second lock; on_halt's grip_->release()
+  // is a single relaxed-enough atomic store with no lock of its own (see supervisor.h),
+  // so this does not change its relationship to on_halt or introduce any new nesting.
+  std::lock_guard<std::mutex> l(stream_mtx_);
+  grip_->set_target(s.command);
+}
+
+GripperState Supervisor::on_query_gripper() {
+  GripperState g;
+  // present stays false. This is "no controller wired" (a robot built without a
+  // gripper), not "no gripper attached" (present's other, hardware-detected meaning
+  // from KortexTransport/SimTransport) -- the two are conflated here deliberately:
+  // both cases mean there is nothing to report, and a caller has no use for telling
+  // "unwired" apart from "unattached".
+  if (!grip_) return g;
+  JointFeedback fb;
+  if (!snap_.load(fb)) return g; // a torn read reports absent rather than garbage
+  g.position = fb.gripper.position;
+  g.effort   = fb.gripper.effort;
+  g.current  = fb.gripper.current;
+  g.present  = fb.gripper.present;
+  // NOTE the asymmetry with ArmState::stamp_s: that one is SAMPLE time, set once
+  // inside the pump when fb was captured. This is QUERY time, computed here, on
+  // whatever fb the last pump cycle happened to leave in snap_ -- same field name,
+  // different meaning on two adjacent structs. Also: if called before start(), t0_
+  // is still default-constructed, so this returns time-since-boot, not 0.
+  g.stamp_s  = secs_since(t0_);
+  return g;
+}
 
 // Every accessor below is an atomic load, so this needs no lock and is safe to call
 // from any thread -- which is the point: it is the only way a backend can tell an

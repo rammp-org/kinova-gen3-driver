@@ -341,6 +341,16 @@ class Transport {
   only) — the real Gen3 low-level handshake. Compiled in only with
   `-DKINOVA_ENABLE_KORTEX=ON`.
 
+Two decorators wrap a `Transport` rather than implementing one from scratch —
+same shape, forward everything, and hook the one call each cares about:
+
+- **`GripperController(Transport& inner)`** (`gripper_controller.h`) — stamps a
+  `GripperCommand` onto every outgoing frame. See [Gripper](#gripper-gripper_typesh-gripper_controllerh-interfaceportsh).
+- **`FeedbackTap(Transport& inner, Seqlock<JointFeedback>& snap)`**
+  (`feedback_tap.h`) — publishes the latest `JointFeedback` into a `Seqlock` on
+  every feedback-producing call, so a non-RT thread can read robot state
+  without RtExecutor or the driver core knowing a reader exists.
+
 ---
 
 ## Telemetry — `telemetry.h`, `telemetry_consumers.h`
@@ -558,3 +568,118 @@ void set_command_timeout(double s) noexcept;
 whichever mode the stream targets; `close_stream()` calls it with a negative
 value to hand the mode back to its own configured default rather than
 disabling its watchdog outright.
+
+## Gripper — `gripper_types.h`, `gripper_controller.h`, `interface/ports.h`
+
+The gripper is not a `ControlMode` — see the [guide](../guide/gripper.md) for
+why. `GripperController` decorates `Transport`; `GripperSink` is the driving
+port `Supervisor` implements and `Arbiter` decorates, gated on the same token
+as `CommandSink` and `StreamSink`.
+
+```cpp
+// gripper_types.h — what core exchanges with the transport, normalized 0..1.
+struct GripperCommand {
+  float position = 0.0f;   // 0 (open) .. 1 (closed)
+  float speed    = 1.0f;   // fraction of max closing speed
+  float force    = 0.5f;   // fraction of max — a CEILING on motor current, not
+                            // a force setpoint; no force servo exists on this
+                            // hardware by any path
+  bool  active   = false;  // false => no gripper command emitted at all
+};
+
+inline constexpr float kGripperMaxCurrentA = 1.0f;   // MEASURED peak grip current
+
+struct GripperFeedback {
+  float position = 0.0f;   // 0 (open) .. 1 (closed)
+  float effort   = 0.0f;   // 0..1, |current| / kGripperMaxCurrentA — NOT Newtons
+  float current  = 0.0f;   // amps, raw, exactly as reported
+  bool  present  = false;  // false when no interconnect gripper is attached
+  // Deliberately NO velocity: MotorFeedback's field was measured to be the
+  // commanded speed echoed back, not a measurement — see the guide.
+};
+```
+
+```cpp
+// gripper_controller.h
+class GripperController : public Transport {
+ public:
+  explicit GripperController(Transport& inner);
+  // Non-RT, one writer. Latest wins; every call carries all three fields —
+  // speed and force are NOT sticky (see the guide's statelessness note).
+  // Clamps position/speed/force to [0, 1].
+  void set_target(const GripperCommand& c) noexcept;
+  // Non-RT, the halt path. Stops STAMPING (cmd.gripper.active = false next
+  // cycle) — it does NOT stop commanding on KortexTransport, which
+  // retransmits the last cyclic command whole every cycle regardless of
+  // `active`. The grip holds because the 2F-85 self-locks, not because the
+  // motor goes idle; see the guide's "On halt, the gripper holds".
+  void release() noexcept;
+  GripperCommand target() const noexcept;   // RT-owned view, NOT synchronized
+  // ... Transport passthrough ...
+};
+```
+
+Law: forwards every `Transport` call unchanged, and on `exchange`/`send`
+stamps the last-published `GripperCommand` into the outgoing `JointCommand`.
+No allocation, lock, or blocking call — the stamp is a fixed-size struct copy.
+
+```cpp
+// interface/value_types.h
+struct GripperSetpoint { kinova::GripperCommand command{}; Token token{}; };
+struct GripperState {
+  float  position = 0.0f;
+  float  effort   = 0.0f;
+  float  current  = 0.0f;   // amps
+  bool   present  = false;
+  double stamp_s  = 0.0;
+};
+```
+
+`GripperSetpoint` carries the command and a token, exactly like `JointSetpoint`
+and the other streaming setpoints — every command carries its own authority,
+and the token checked is the **arm's** (spec decision 1: one physical machine,
+one holder, no separate gripper grant). `GripperState` mirrors
+`GripperFeedback` plus a stamp.
+
+```cpp
+// interface/ports.h
+class GripperSink {
+ public:
+  virtual ~GripperSink() = default;
+  virtual void         on_gripper_setpoint(const GripperSetpoint&) = 0;
+  virtual GripperState on_query_gripper() = 0;
+};
+```
+
+Two methods, not four: the `Grasp` action and its cancel were cut with stall
+detection, so this tier is topic-only — set a target, read state back. Like
+`on_query_state()`, `on_query_gripper()` is never gated: reads are always open.
+`Supervisor::on_halt` calls `GripperController::release()` and nothing else —
+a deliberate no-op beyond that, so the gripper holds through a halt (see the
+[guide](../guide/gripper.md#on-halt-the-gripper-holds)).
+
+### `SupervisorDeps` — `interface/supervisor.h`
+
+```cpp
+struct SupervisorDeps {
+  JointPositionMode*      pos      = nullptr;
+  JointImpedanceMode*     imp      = nullptr;
+  JointTorqueMode*        tau      = nullptr;
+  JointVelocityMode*      vel      = nullptr;
+  RtExecutor*             exec     = nullptr;
+  Seqlock<JointFeedback>* snap     = nullptr;
+  Dynamics*               pump_dyn = nullptr;
+  StreamPort*             stream   = nullptr;
+  ActionServerPort*       action   = nullptr;
+  GripperController*      grip     = nullptr;   // OPTIONAL — null on a robot with no gripper
+  SupervisorConfig        cfg{};
+};
+```
+
+Named dependencies for the `Supervisor` constructor in place of positional
+arguments — every field but `grip` is `require()`-checked and throws naming
+the missing one at construction (fail loud at startup, not at 1 kHz). `grip`
+is the one field that is legitimately absent: `GripperFeedback::present`
+already exists for a robot with no interconnect gripper attached, so a null
+`grip` makes gripper commands no-ops and `on_query_gripper()` report
+`present = false` rather than being a construction error.
