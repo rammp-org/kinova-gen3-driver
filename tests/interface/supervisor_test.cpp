@@ -67,9 +67,10 @@ TEST(Ports, FakeBackendRecordsDrivenCalls) {
 }
 
 namespace {
-JointFeedback make_feedback(double q0) {
+JointFeedback make_feedback(double q0, double qd0 = 0.0) {
   JointFeedback f;
   f.q = JointVec::Constant(q0);
+  f.qd = JointVec::Constant(qd0);   // SimTransport::send never touches q/qd, so this holds
   return f;
 }
 
@@ -93,7 +94,8 @@ struct SupFix {
   std::atomic<bool> stop{false};
   std::thread rt;
 
-  explicit SupFix(double q0 = 0.0) : init(make_feedback(q0)), sim(init) {}
+  explicit SupFix(double q0 = 0.0, double qd0 = 0.0)
+      : init(make_feedback(q0, qd0)), sim(init) {}
 
   void run_rt() { rt = std::thread([&]{ exec.run(stop); }); }
   void teardown() { stop = true; if (rt.joinable()) rt.join(); }
@@ -1065,4 +1067,25 @@ TEST(Supervisor, AGracefulCloseAndADeadlineLapseReportDifferentCauses) {
   EXPECT_FALSE(f.sup.stream_is_open());
   EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
   f.sup.stop(); f.teardown();
+}
+
+// ee_twist must come from the SAME model and the SAME feedback sample as ee_pose, or a
+// client reading both gets a pose and a velocity that disagree about where the tool is.
+// Computed here independently so a regression in the pump shows up as a mismatch rather
+// than as a plausible-looking wrong number.
+TEST(Supervisor, QueryStateReportsEeTwistConsistentWithEePose) {
+  SupFix f(0.3, 0.1);            // q = 0.3 rad, qd = 0.1 rad/s on every joint
+  f.sup.start(); f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));   // >= one pump tick @100 Hz
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop(); f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  kinova::Dynamics dyn{URDF_PATH};
+  kinova::Jacobian6 J;
+  dyn.jacobian(s.q, J);
+  const kinova::Vector6 expected = J * s.qd;
+  EXPECT_TRUE(s.ee_twist.isApprox(expected, 1e-9))
+      << "ee_twist " << s.ee_twist.transpose() << " != J*qd " << expected.transpose();
+  EXPECT_GT(s.ee_twist.norm(), 1e-6) << "twist is the default, not a computed value";
 }
