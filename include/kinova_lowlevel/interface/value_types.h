@@ -64,6 +64,16 @@ struct GainsResult  { bool accepted=false; std::string message; };
 // Cancel had no struct to carry a token; it needs one, or any stranger can stop your motion.
 struct CancelRequest { GoalId id{}; Token token{}; };
 
+// What the streaming tier is currently doing. Every field mirrors a StreamingSession
+// accessor, all of which are atomic reads -- this is a snapshot, not a lock.
+struct StreamStatus {
+  bool            open           = false;
+  SetpointKind    kind           = SetpointKind::kJointPosition;
+  ControlModeKind control_mode   = ControlModeKind::kPosition;
+  double          timeout_s      = 0.0;
+  uint64_t        rejected_count = 0;   // refused by the SESSION, not the Arbiter
+};
+
 struct GrantResult       { bool accepted=false; Token token{}; uint64_t generation=0; std::string message; };
 struct ArbitrationStatus { ArbitrationMode mode = ArbitrationMode::kEnforced; bool estopped=false;
                            bool owned=false; std::string owner_id; uint64_t generation=0;
