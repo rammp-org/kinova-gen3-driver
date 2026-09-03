@@ -56,6 +56,8 @@ void Supervisor::pump_loop() {
     if (snap_.load(fb)) {
       ArmState s; s.q=fb.q; s.qd=fb.qd; s.tau=fb.tau; s.fault=fb.fault; s.stamp_s=secs_since(t0);
       s.ee_pose = pump_dyn_.fk(fb.q);
+      pump_dyn_.jacobian(fb.q, pump_J_);
+      s.ee_twist = pump_J_ * fb.qd;
       state_snap_.store(s);
       stream_.publish_state(s);
     }
@@ -334,6 +336,14 @@ GripperState Supervisor::on_query_gripper() {
   // is still default-constructed, so this returns time-since-boot, not 0.
   g.stamp_s  = secs_since(t0_);
   return g;
+}
+
+// Every accessor below is an atomic load, so this needs no lock and is safe to call
+// from any thread -- which is the point: it is the only way a backend can tell an
+// expired session from a live one.
+StreamStatus Supervisor::on_query_stream() {
+  return {session_.is_open(), session_.kind(), session_.control_mode(),
+          session_.timeout_s(), session_.rejected_count()};
 }
 
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {

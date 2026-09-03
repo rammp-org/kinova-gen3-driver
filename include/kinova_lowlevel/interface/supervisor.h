@@ -95,6 +95,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void             on_setpoint_joint_torque(const JointSetpoint&) override;
   void             on_setpoint_pose(const PoseSetpoint&) override;
   void             on_setpoint_twist(const TwistSetpoint&) override;
+  StreamStatus     on_query_stream() override;
 
   // GripperSink (called on the backend thread):
   void             on_gripper_setpoint(const GripperSetpoint&) override;
@@ -164,6 +165,8 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   JointVec   stream_hold_q_ = JointVec::Zero();       // last-good measured q for the teardown hold
   bool       have_hold_q_   = false;                  // false until the first successful snapshot read
   std::chrono::steady_clock::time_point t0_{};        // time origin for session stamps; set in start()
+
+  kinova::Jacobian6 pump_J_;                          // preallocated; pump thread only
 
   std::mutex q_mtx_;  std::deque<Inbound> inbox_;     // backend -> sampler handoff
   bool       halt_pending_ = false;                  // guarded by q_mtx_
