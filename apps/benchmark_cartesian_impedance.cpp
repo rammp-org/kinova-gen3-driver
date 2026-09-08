@@ -14,6 +14,7 @@
 //   ./benchmark_cartesian_impedance --ip 192.168.1.10 --dry-run
 //       --urdf ../models/gen3_7dof_2f85.urdf --duration 0
 
+#include <Eigen/Dense>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -24,7 +25,6 @@
 #include <memory>
 #include <string>
 #include <thread>
-#include <Eigen/Dense>
 
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
@@ -67,26 +67,46 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
-    else if (a == "--duration") duration_s = std::stod(next("--duration"));
-    else if (a == "--pacing") pacing_str = next("--pacing");
-    else if (a == "--csv") csv_path = next("--csv");
-    else if (a == "--kx-trans") p.Kx.head<3>().setConstant(std::stod(next("--kx-trans")));
-    else if (a == "--kx-rot") p.Kx.tail<3>().setConstant(std::stod(next("--kx-rot")));
-    else if (a == "--dx-trans") p.Dx.head<3>().setConstant(std::stod(next("--dx-trans")));
-    else if (a == "--dx-rot") p.Dx.tail<3>().setConstant(std::stod(next("--dx-rot")));
-    else if (a == "--nullspace-kp") p.nullspace_kp = std::stod(next("--nullspace-kp"));
-    else if (a == "--nullspace-kd") p.nullspace_kd = std::stod(next("--nullspace-kd"));
-    else if (a == "--gain-ramp-s") p.gain_ramp_s = std::stod(next("--gain-ramp-s"));
-    else if (a == "--pinv-damping") p.pinv_damping = std::stod(next("--pinv-damping"));
-    else if (a == "--torque-limit") p.torque_limit = std::stod(next("--torque-limit"));
-    else if (a == "--no-nullspace") p.nullspace_on = false;
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
+    else if (a == "--duration")
+      duration_s = std::stod(next("--duration"));
+    else if (a == "--pacing")
+      pacing_str = next("--pacing");
+    else if (a == "--csv")
+      csv_path = next("--csv");
+    else if (a == "--kx-trans")
+      p.Kx.head<3>().setConstant(std::stod(next("--kx-trans")));
+    else if (a == "--kx-rot")
+      p.Kx.tail<3>().setConstant(std::stod(next("--kx-rot")));
+    else if (a == "--dx-trans")
+      p.Dx.head<3>().setConstant(std::stod(next("--dx-trans")));
+    else if (a == "--dx-rot")
+      p.Dx.tail<3>().setConstant(std::stod(next("--dx-rot")));
+    else if (a == "--nullspace-kp")
+      p.nullspace_kp = std::stod(next("--nullspace-kp"));
+    else if (a == "--nullspace-kd")
+      p.nullspace_kd = std::stod(next("--nullspace-kd"));
+    else if (a == "--gain-ramp-s")
+      p.gain_ramp_s = std::stod(next("--gain-ramp-s"));
+    else if (a == "--pinv-damping")
+      p.pinv_damping = std::stod(next("--pinv-damping"));
+    else if (a == "--torque-limit")
+      p.torque_limit = std::stod(next("--torque-limit"));
+    else if (a == "--no-nullspace")
+      p.nullspace_on = false;
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -94,16 +114,17 @@ int main(int argc, char** argv) {
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
   else if (pacing_str != "sleepspin") {
     std::cerr << "--pacing must be sleepspin|nanosleep\n";
     std::exit(2);
   }
 
-  std::cout << "[imp] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing="
-            << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
-            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
-            << " dry_run=" << (dry_run ? "yes" : "no") << "\n";
+  std::cout << "[imp] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
+            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
+            << "s sim=" << (use_sim ? "yes" : "no") << " dry_run=" << (dry_run ? "yes" : "no")
+            << "\n";
 
   Dynamics dyn(urdf);
 
@@ -154,12 +175,10 @@ int main(int argc, char** argv) {
         std::printf(
             "pos[m]=(%+.3f %+.3f %+.3f)  quat=(%+.3f %+.3f %+.3f %+.3f)  "
             "Jcond=%.1f\n",
-            x.p.x(), x.p.y(), x.p.z(), x.R.w(), x.R.x(), x.R.y(), x.R.z(),
-            cond);
+            x.p.x(), x.p.y(), x.p.z(), x.R.w(), x.R.x(), x.R.y(), x.R.z(), cond);
         last_print = now;
       }
-      if (duration_s > 0.0 &&
-          std::chrono::duration<double>(now - start).count() >= duration_s) {
+      if (duration_s > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_s) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));  // ~50 Hz read
@@ -214,9 +233,9 @@ int main(int argc, char** argv) {
   }
 
   ResourceUsage usage_before = read_usage();  // NOTE: RUSAGE_THREAD; this is the
-                                               // main thread, which IS the RT loop
-                                               // thread since ex.run() runs here.
-  ex.run(g_stop);  // blocks on the main (RT) thread until stop
+                                              // main thread, which IS the RT loop
+                                              // thread since ex.run() runs here.
+  ex.run(g_stop);                             // blocks on the main (RT) thread until stop
   ResourceUsage usage_after = read_usage();
 
   t.safe_shutdown();
@@ -229,14 +248,12 @@ int main(int argc, char** argv) {
   const auto& mh = sink.compute_hist();
   std::cout << "\n==== impedance benchmark report ====\n";
   std::cout << introspect() << "\n";
-  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min()
-            << " mean=" << ch.mean() << " p50=" << ch.percentile(0.50)
-            << " p99=" << ch.percentile(0.99) << " p99.9=" << ch.percentile(0.999)
-            << " max=" << ch.max() << "\n";
-  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min()
-            << " mean=" << mh.mean() << " p50=" << mh.percentile(0.50)
-            << " p99=" << mh.percentile(0.99) << " p99.9=" << mh.percentile(0.999)
-            << " max=" << mh.max() << "\n";
+  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min() << " mean=" << ch.mean()
+            << " p50=" << ch.percentile(0.50) << " p99=" << ch.percentile(0.99)
+            << " p99.9=" << ch.percentile(0.999) << " max=" << ch.max() << "\n";
+  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min() << " mean=" << mh.mean()
+            << " p50=" << mh.percentile(0.50) << " p99=" << mh.percentile(0.99)
+            << " p99.9=" << mh.percentile(0.999) << " max=" << mh.max() << "\n";
   std::cout << "dropped=" << ring.dropped() << "\n";
   std::cout << "page faults: minflt+=" << (usage_after.minflt - usage_before.minflt)
             << " majflt+=" << (usage_after.majflt - usage_before.majflt) << "\n";

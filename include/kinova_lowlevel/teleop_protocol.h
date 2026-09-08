@@ -49,16 +49,16 @@ static_assert(sizeof(Header) == 20, "Header layout must match Python");
 
 struct PoseTargetPacket {
   Header h;
-  double pos[3];          // x, y, z [m], base frame
-  double quat_wxyz[4];    // w, x, y, z
-  float gripper;          // 0=open .. 1=closed
-  uint32_t flags;         // TargetFlags
+  double pos[3];        // x, y, z [m], base frame
+  double quat_wxyz[4];  // w, x, y, z
+  float gripper;        // 0=open .. 1=closed
+  uint32_t flags;       // TargetFlags
 };
 static_assert(sizeof(PoseTargetPacket) == 84, "PoseTarget layout mismatch");
 
 struct GainsPacket {
   Header h;
-  double Kx[6];           // [x y z | rx ry rz]
+  double Kx[6];  // [x y z | rx ry rz]
   double Dx[6];
   double nullspace_kp;
   double nullspace_kd;
@@ -71,7 +71,7 @@ static_assert(sizeof(GainsPacket) == 157, "Gains layout mismatch");
 
 struct ControlPacket {
   Header h;
-  uint32_t command;       // ControlCmd
+  uint32_t command;  // ControlCmd
   uint32_t control_seq;
 };
 static_assert(sizeof(ControlPacket) == 28, "Control layout mismatch");

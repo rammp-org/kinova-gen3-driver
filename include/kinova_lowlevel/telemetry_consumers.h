@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+
 #include "kinova_lowlevel/telemetry.h"
 namespace kinova {
 class NanoHistogram {
@@ -15,7 +16,7 @@ class NanoHistogram {
   // in, so reported values are coarse and slightly low-biased (e.g. 3000ns reads
   // as 2048). Fine for characterizing a 1 kHz loop; not an exact percentile.
   uint32_t percentile(double p) const noexcept;
-  std::string dump() const;                        // CSV-ish bucket table
+  std::string dump() const;  // CSV-ish bucket table
  private:
   std::vector<uint64_t> buckets_ = std::vector<uint64_t>(64, 0);  // bucket k = [2^k, 2^(k+1))
   uint64_t count_ = 0;
@@ -33,9 +34,10 @@ class TelemetrySink {
   std::string console_line() const;
   const NanoHistogram& cycle_hist() const { return cycle_; }
   const NanoHistogram& compute_hist() const { return compute_; }
+
  private:
   NanoHistogram cycle_, compute_, comm_, jitter_;
   uint64_t overruns_ = 0, faults_ = 0, n_ = 0;
-  void* csv_ = nullptr;   // FILE*
+  void* csv_ = nullptr;  // FILE*
 };
 }  // namespace kinova

@@ -13,6 +13,7 @@
 //   ./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf \
 //       --rate 1000 --duration 5 --kind twist --csv /tmp/bench.csv
 
+#include <Eigen/Dense>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -23,7 +24,6 @@
 #include <memory>
 #include <string>
 #include <thread>
-#include <Eigen/Dense>
 
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/joint_velocity_mode.h"
@@ -66,18 +66,30 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
-    else if (a == "--duration") duration_s = std::stod(next("--duration"));
-    else if (a == "--pacing") pacing_str = next("--pacing");
-    else if (a == "--csv") csv_path = next("--csv");
-    else if (a == "--kind") kind_str = next("--kind");
-    else if (a == "--dls-damping") p.dls_damping = std::stod(next("--dls-damping"));
-    else if (a == "--posture-gain") p.posture_gain = std::stod(next("--posture-gain"));
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
+    else if (a == "--duration")
+      duration_s = std::stod(next("--duration"));
+    else if (a == "--pacing")
+      pacing_str = next("--pacing");
+    else if (a == "--csv")
+      csv_path = next("--csv");
+    else if (a == "--kind")
+      kind_str = next("--kind");
+    else if (a == "--dls-damping")
+      p.dls_damping = std::stod(next("--dls-damping"));
+    else if (a == "--posture-gain")
+      p.posture_gain = std::stod(next("--posture-gain"));
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -85,7 +97,8 @@ int main(int argc, char** argv) {
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
   else if (pacing_str != "sleepspin") {
     std::cerr << "--pacing must be sleepspin|nanosleep\n";
     std::exit(2);
@@ -97,10 +110,9 @@ int main(int argc, char** argv) {
     std::exit(2);
   }
 
-  std::cout << "[vel] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing="
-            << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
-            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
-            << " kind=" << kind_str << "\n";
+  std::cout << "[vel] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
+            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
+            << "s sim=" << (use_sim ? "yes" : "no") << " kind=" << kind_str << "\n";
 
   Dynamics dyn(urdf);
 
@@ -197,9 +209,9 @@ int main(int argc, char** argv) {
   }
 
   ResourceUsage usage_before = read_usage();  // NOTE: RUSAGE_THREAD; this is the
-                                               // main thread, which IS the RT loop
-                                               // thread since ex.run() runs here.
-  ex.run(g_stop);  // blocks on the main (RT) thread until stop
+                                              // main thread, which IS the RT loop
+                                              // thread since ex.run() runs here.
+  ex.run(g_stop);                             // blocks on the main (RT) thread until stop
   ResourceUsage usage_after = read_usage();
 
   t.safe_shutdown();
@@ -213,14 +225,12 @@ int main(int argc, char** argv) {
   const auto& mh = sink.compute_hist();
   std::cout << "\n==== joint velocity benchmark report (kind=" << kind_str << ") ====\n";
   std::cout << introspect() << "\n";
-  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min()
-            << " mean=" << ch.mean() << " p50=" << ch.percentile(0.50)
-            << " p99=" << ch.percentile(0.99) << " p99.9=" << ch.percentile(0.999)
-            << " max=" << ch.max() << "\n";
-  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min()
-            << " mean=" << mh.mean() << " p50=" << mh.percentile(0.50)
-            << " p99=" << mh.percentile(0.99) << " p99.9=" << mh.percentile(0.999)
-            << " max=" << mh.max() << "\n";
+  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min() << " mean=" << ch.mean()
+            << " p50=" << ch.percentile(0.50) << " p99=" << ch.percentile(0.99)
+            << " p99.9=" << ch.percentile(0.999) << " max=" << ch.max() << "\n";
+  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min() << " mean=" << mh.mean()
+            << " p50=" << mh.percentile(0.50) << " p99=" << mh.percentile(0.99)
+            << " p99.9=" << mh.percentile(0.999) << " max=" << mh.max() << "\n";
   std::cout << "dropped=" << ring.dropped() << "\n";
   std::cout << "page faults: minflt+=" << (usage_after.minflt - usage_before.minflt)
             << " majflt+=" << (usage_after.majflt - usage_before.majflt) << "\n";

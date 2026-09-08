@@ -74,54 +74,88 @@ int main(int argc, char** argv) {
   double rate_hz = 1000.0;
   int cpu = -1;
   int rt_priority = 80;
-  double duration_s = 0.0;    // trajectory duration; 0 => auto from delta/speed
+  double duration_s = 0.0;  // trajectory duration; 0 => auto from delta/speed
   bool duration_set = false;
   int move_joint = -1;
   double delta = 0.0;
-  double speed = 0.2;         // rad/s peak cap; below the mode's own 0.5 default
+  double speed = 0.2;  // rad/s peak cap; below the mode's own 0.5 default
   double leash = 0.35;
-  double tick_hz = 250.0;     // rate the publisher samples the trajectory at
-  double path_tol = 0.2;      // rad; per-joint divergence guard (live feedback)
-  bool no_guard = false;      // escape hatch: disable the divergence guard
+  double tick_hz = 250.0;  // rate the publisher samples the trajectory at
+  double path_tol = 0.2;   // rad; per-joint divergence guard (live feedback)
+  bool no_guard = false;   // escape hatch: disable the divergence guard
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&](const char* name) -> std::string {
-      if (i + 1 >= argc) { std::cerr << name << " needs a value\n"; std::exit(2); }
+      if (i + 1 >= argc) {
+        std::cerr << name << " needs a value\n";
+        std::exit(2);
+      }
       return argv[++i];
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
-    else if (a == "--duration") { duration_s = std::stod(next("--duration")); duration_set = true; }
-    else if (a == "--joint") move_joint = std::stoi(next("--joint"));
-    else if (a == "--delta") delta = std::stod(next("--delta"));
-    else if (a == "--speed") speed = std::stod(next("--speed"));
-    else if (a == "--leash") leash = std::stod(next("--leash"));
-    else if (a == "--pacing") pacing_str = next("--pacing");
-    else if (a == "--tick-rate") tick_hz = std::stod(next("--tick-rate"));
-    else if (a == "--path-tol") path_tol = std::stod(next("--path-tol"));
-    else if (a == "--no-guard") no_guard = true;
-    else if (a == "--csv") csv_path = next("--csv");
-    else { std::cerr << "unknown arg: " << a << "\n"; std::exit(2); }
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
+    else if (a == "--duration") {
+      duration_s = std::stod(next("--duration"));
+      duration_set = true;
+    } else if (a == "--joint")
+      move_joint = std::stoi(next("--joint"));
+    else if (a == "--delta")
+      delta = std::stod(next("--delta"));
+    else if (a == "--speed")
+      speed = std::stod(next("--speed"));
+    else if (a == "--leash")
+      leash = std::stod(next("--leash"));
+    else if (a == "--pacing")
+      pacing_str = next("--pacing");
+    else if (a == "--tick-rate")
+      tick_hz = std::stod(next("--tick-rate"));
+    else if (a == "--path-tol")
+      path_tol = std::stod(next("--path-tol"));
+    else if (a == "--no-guard")
+      no_guard = true;
+    else if (a == "--csv")
+      csv_path = next("--csv");
+    else {
+      std::cerr << "unknown arg: " << a << "\n";
+      std::exit(2);
+    }
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
-  else if (pacing_str != "sleepspin") { std::cerr << "--pacing must be sleepspin|nanosleep\n"; return 2; }
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
+  else if (pacing_str != "sleepspin") {
+    std::cerr << "--pacing must be sleepspin|nanosleep\n";
+    return 2;
+  }
   if (move_joint >= kNumJoints || (move_joint < 0 && move_joint != -1)) {
-    std::cerr << "--joint must be 0.." << (kNumJoints - 1) << "\n"; return 2;
+    std::cerr << "--joint must be 0.." << (kNumJoints - 1) << "\n";
+    return 2;
   }
   if (delta != 0.0 && move_joint < 0) {
-    std::cerr << "--delta given without --joint; refusing to guess which joint\n"; return 2;
+    std::cerr << "--delta given without --joint; refusing to guess which joint\n";
+    return 2;
   }
-  if (speed <= 0.0) { std::cerr << "--speed must be > 0\n"; return 2; }
+  if (speed <= 0.0) {
+    std::cerr << "--speed must be > 0\n";
+    return 2;
+  }
   if (!no_guard && path_tol <= 0.0) {
-    std::cerr << "--path-tol must be > 0 (or pass --no-guard)\n"; return 2;
+    std::cerr << "--path-tol must be > 0 (or pass --no-guard)\n";
+    return 2;
   }
 
   Dynamics dyn(urdf);
@@ -132,10 +166,14 @@ int main(int argc, char** argv) {
     transport = std::make_unique<SimTransport>(init);
   } else {
 #ifndef KINOVA_NO_KORTEX
-    if (ip.empty()) { std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n"; return 2; }
+    if (ip.empty()) {
+      std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n";
+      return 2;
+    }
     transport = std::make_unique<KortexTransport>(ip);
 #else
-    std::cerr << "built without KORTEX; only --sim is available\n"; return 2;
+    std::cerr << "built without KORTEX; only --sim is available\n";
+    return 2;
 #endif
   }
   // Tap the transport so the publisher thread can read the arm's latest q for the
@@ -159,7 +197,7 @@ int main(int argc, char** argv) {
   // clip it at its own rate limit.
   JointVec target = entry.q;
   if (move_joint >= 0) target[move_joint] += delta;
-  const double travel_speed = 0.8 * speed;              // rad/s the trajectory moves at
+  const double travel_speed = 0.8 * speed;  // rad/s the trajectory moves at
   if (!duration_set) {
     duration_s = (delta != 0.0) ? std::abs(delta) / travel_speed : 4.0;
   }
@@ -168,8 +206,8 @@ int main(int argc, char** argv) {
   std::printf("\n[traj] plan: %s over %.2f s (peak %.3f rad/s, speed cap %.3f rad/s)\n",
               (delta != 0.0 ? "1-joint move" : "HOLD (no motion)"), duration_s, peak_v, speed);
   if (move_joint >= 0)
-    std::printf("[traj]   j%d: %+.4f -> %+.4f rad (%+.2f deg)\n",
-                move_joint, entry.q[move_joint], target[move_joint], delta * kRad2Deg);
+    std::printf("[traj]   j%d: %+.4f -> %+.4f rad (%+.2f deg)\n", move_joint, entry.q[move_joint],
+                target[move_joint], delta * kRad2Deg);
   if (peak_v > speed + 1e-9)
     std::printf("[traj]   WARNING: peak velocity exceeds the speed cap — the mode will lag.\n");
 
@@ -182,7 +220,10 @@ int main(int argc, char** argv) {
 
   std::cout << "[traj] starting in 2s — e-stop in reach. Ctrl-C aborts.\n";
   std::this_thread::sleep_for(std::chrono::seconds(2));
-  if (g_stop.load(std::memory_order_acquire)) { t.safe_shutdown(); return 0; }
+  if (g_stop.load(std::memory_order_acquire)) {
+    t.safe_shutdown();
+    return 0;
+  }
 
   t.set_servoing_low_level();
 
@@ -192,7 +233,7 @@ int main(int argc, char** argv) {
   JointPositionMode mode(dyn, p);
 
   interface::Trajectory tr;
-  tr.points = { {entry.q, 0.0}, {target, duration_s} };
+  tr.points = {{entry.q, 0.0}, {target, duration_s}};
 
   SampleRing ring(1 << 16);
   TelemetrySink sink(csv_path);
@@ -222,38 +263,39 @@ int main(int argc, char** argv) {
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
     if (g_stop.load(std::memory_order_acquire)) return;
 
-    interface::TrajectoryExecutor exec(mode);   // JointPositionMode IS-A JointTargetSink
-    const JointVec tol = no_guard ? JointVec::Constant(-1.0)      // guard disabled
+    interface::TrajectoryExecutor exec(mode);  // JointPositionMode IS-A JointTargetSink
+    const JointVec tol = no_guard ? JointVec::Constant(-1.0)  // guard disabled
                                   : JointVec::Constant(path_tol);
-    exec.submit(tr, interface::ControlModeKind::kPosition,
-                interface::Preemption::kLatestWins, tol);
+    exec.submit(tr, interface::ControlModeKind::kPosition, interface::Preemption::kLatestWins, tol);
 
     const auto t0 = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration<double>(1.0 / tick_hz);
-    JointVec q_meas = entry.q;   // last good measured q; the tap seeds it from the entry read
+    JointVec q_meas = entry.q;  // last good measured q; the tap seeds it from the entry read
     while (!g_stop.load(std::memory_order_acquire)) {
-      const double now_s = std::chrono::duration<double>(
-                               std::chrono::steady_clock::now() - t0).count();
+      const double now_s =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       JointFeedback fb;
-      if (snapshot.load(fb)) q_meas = fb.q;   // else keep last good q (no spurious abort)
+      if (snapshot.load(fb)) q_meas = fb.q;  // else keep last good q (no spurious abort)
       const interface::ExecStatus st = exec.tick(now_s, q_meas);
       if (st.completed) {
         if (st.error_code == interface::ExecStatus::kPathToleranceViolated)
-          std::printf("\n[traj] DIVERGENCE ABORT at t=%.2f s — a joint left the "
-                      "%.3f rad path tolerance. Arm holds; run stops.\n", now_s, path_tol);
+          std::printf(
+              "\n[traj] DIVERGENCE ABORT at t=%.2f s — a joint left the "
+              "%.3f rad path tolerance. Arm holds; run stops.\n",
+              now_s, path_tol);
         else
-          std::printf("\n[traj] trajectory complete at t=%.2f s (code=%d).\n",
-                      now_s, st.error_code);
+          std::printf("\n[traj] trajectory complete at t=%.2f s (code=%d).\n", now_s,
+                      st.error_code);
         break;
       }
       std::this_thread::sleep_for(
           std::chrono::duration_cast<std::chrono::steady_clock::duration>(period));
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));   // let the arm settle on the goal
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));  // let the arm settle on the goal
     g_stop.store(true, std::memory_order_release);
   });
 
-  ResourceUsage usage_before = read_usage();   // main thread IS the RT loop thread
+  ResourceUsage usage_before = read_usage();  // main thread IS the RT loop thread
   ex.run(g_stop);
   ResourceUsage usage_after = read_usage();
 
@@ -266,8 +308,8 @@ int main(int argc, char** argv) {
   std::cout << "\n==== trajectory run report ====\n";
   std::cout << introspect() << "\n";
   for (int i = 0; i < kNumJoints; ++i)
-    std::printf("  j%d  goal=%+8.4f  final_ref=%+8.4f  residual=%+8.4f rad\n",
-                i, target[i], q_ref[i], wrap_to_pi(target[i] - q_ref[i]));
+    std::printf("  j%d  goal=%+8.4f  final_ref=%+8.4f  residual=%+8.4f rad\n", i, target[i],
+                q_ref[i], wrap_to_pi(target[i] - q_ref[i]));
   const auto& ch = sink.cycle_hist();
   const auto& mh = sink.compute_hist();
   std::cout << "cycle_ns   n=" << ch.count() << " p50=" << ch.percentile(0.50)

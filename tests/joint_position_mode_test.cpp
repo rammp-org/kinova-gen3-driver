@@ -1,21 +1,27 @@
+#include "kinova_lowlevel/joint_position_mode.h"
+
 #include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cmath>
-#include "kinova_lowlevel/joint_position_mode.h"
+
 #include "kinova_lowlevel/units.h"
 using namespace kinova;
 
 namespace {
 
 JointVec sample_q() {
-  JointVec q; q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2; return q;
+  JointVec q;
+  q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2;
+  return q;
 }
 
 // Index of the first joint the URDF declares continuous (both limits infinite).
 // Discovered rather than hard-coded: the wrap bug this guards against is about
 // the property, not about joint 3 specifically.
 int first_continuous_joint(Dynamics& dyn) {
-  JointVec lo, hi; dyn.joint_limits(lo, hi);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
   for (int i = 0; i < kNumJoints; ++i)
     if (!std::isfinite(lo[i]) && !std::isfinite(hi[i])) return i;
   return -1;
@@ -23,7 +29,8 @@ int first_continuous_joint(Dynamics& dyn) {
 
 // Index of the first joint with real (finite) position limits.
 int first_bounded_joint(Dynamics& dyn) {
-  JointVec lo, hi; dyn.joint_limits(lo, hi);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
   for (int i = 0; i < kNumJoints; ++i)
     if (std::isfinite(lo[i]) && std::isfinite(hi[i])) return i;
   return -1;
@@ -46,7 +53,7 @@ struct PerfectServo {
   }
   void step(double dt = 0.001) {
     m.compute(fb, dt, cmd);
-    fb.q = cmd.position;   // servo lands exactly on the command
+    fb.q = cmd.position;  // servo lands exactly on the command
   }
 };
 
@@ -57,7 +64,9 @@ TEST(JointPosition, RequiresPositionModeAndCommandsNoTorque) {
   JointPositionMode m(dyn);
   for (auto x : m.required_modes()) EXPECT_EQ(x, ActuatorMode::kPosition);
 
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   JointCommand c;
   m.on_enter(fb);
   m.compute(fb, 0.001, c);
@@ -71,7 +80,9 @@ TEST(JointPosition, RequiresPositionModeAndCommandsNoTorque) {
 TEST(JointPosition, HoldsMeasuredConfigBeforeAnyTarget) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   JointCommand c;
   m.on_enter(fb);
   for (int k = 0; k < 50; ++k) m.compute(fb, 0.001, c);
@@ -82,7 +93,9 @@ TEST(JointPosition, HoldsMeasuredConfigBeforeAnyTarget) {
 TEST(JointPosition, ReferenceSeededAtMeasuredConfigOnEnter) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
   EXPECT_NEAR((m.reference() - sample_q()).norm(), 0.0, 1e-12);
 }
@@ -91,12 +104,15 @@ TEST(JointPosition, AdvancesByExactlyMaxSpeedTimesDtTowardFarTarget) {
   Dynamics dyn(URDF_PATH);
   JointPositionParams p;
   p.max_ref_speed.setConstant(0.5);
-  p.max_following_error = 0.0;          // disable the leash; isolate the rate limit
+  p.max_following_error = 0.0;  // disable the leash; isolate the rate limit
   JointPositionMode m(dyn, p);
 
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
-  JointVec target; target.setConstant(1.0);   // far relative to one cycle of travel
+  JointVec target;
+  target.setConstant(1.0);  // far relative to one cycle of travel
   m.set_target(target);
 
   JointCommand c;
@@ -111,9 +127,12 @@ TEST(JointPosition, RateLimitIsPerJoint) {
   p.max_following_error = 0.0;
   JointPositionMode m(dyn, p);
 
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
-  JointVec target; target.setConstant(1.0);
+  JointVec target;
+  target.setConstant(1.0);
   m.set_target(target);
 
   JointCommand c;
@@ -124,10 +143,11 @@ TEST(JointPosition, RateLimitIsPerJoint) {
 
 TEST(JointPosition, CallerCannotRequestSpeedAboveTheUrdfLimit) {
   Dynamics dyn(URDF_PATH);
-  JointVec v_max; dyn.velocity_limits(v_max);
+  JointVec v_max;
+  dyn.velocity_limits(v_max);
 
   JointPositionParams p;
-  p.max_ref_speed.setConstant(100.0);       // absurd; must be clamped to hardware
+  p.max_ref_speed.setConstant(100.0);  // absurd; must be clamped to hardware
   JointPositionMode m(dyn, p);
 
   const JointVec effective = m.params().max_ref_speed;
@@ -136,7 +156,8 @@ TEST(JointPosition, CallerCannotRequestSpeedAboveTheUrdfLimit) {
 
 TEST(JointPosition, NonFiniteSpeedIsSeededFromTheUrdfLimit) {
   Dynamics dyn(URDF_PATH);
-  JointVec v_max; dyn.velocity_limits(v_max);
+  JointVec v_max;
+  dyn.velocity_limits(v_max);
 
   JointPositionParams p;
   p.max_ref_speed.setConstant(std::numeric_limits<double>::infinity());
@@ -150,7 +171,8 @@ TEST(JointPosition, CommandNeverExceedsTheUrdfJointLimit) {
   Dynamics dyn(URDF_PATH);
   const int j = first_bounded_joint(dyn);
   ASSERT_GE(j, 0) << "URDF has no joint with finite position limits";
-  JointVec lo, hi; dyn.joint_limits(lo, hi);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
 
   JointPositionParams p;
   p.max_ref_speed.setConstant(1.0);
@@ -158,7 +180,7 @@ TEST(JointPosition, CommandNeverExceedsTheUrdfJointLimit) {
 
   PerfectServo servo(m, JointVec::Zero());
   JointVec target = JointVec::Zero();
-  target[j] = hi[j] + 1.0;                  // ask for a full radian past the stop
+  target[j] = hi[j] + 1.0;  // ask for a full radian past the stop
   m.set_target(target);
 
   for (int k = 0; k < 5000; ++k) {
@@ -166,7 +188,7 @@ TEST(JointPosition, CommandNeverExceedsTheUrdfJointLimit) {
     ASSERT_LE(servo.cmd.position[j], hi[j] + 1e-12)
         << "commanded past the joint limit at cycle " << k;
   }
-  EXPECT_NEAR(servo.cmd.position[j], hi[j], 1e-9);   // parks exactly on the stop
+  EXPECT_NEAR(servo.cmd.position[j], hi[j], 1e-9);  // parks exactly on the stop
 }
 
 // The j3 class of bug. Reference and measurement both live in (-pi, pi], so a
@@ -182,9 +204,11 @@ TEST(JointPosition, ContinuousJointTakesTheShortWayRound) {
   p.max_ref_speed.setConstant(0.5);
   JointPositionMode m(dyn, p);
 
-  JointVec q0 = JointVec::Zero(); q0[j] = 3.0;
+  JointVec q0 = JointVec::Zero();
+  q0[j] = 3.0;
   PerfectServo servo(m, q0);
-  JointVec target = JointVec::Zero(); target[j] = -3.0;
+  JointVec target = JointVec::Zero();
+  target[j] = -3.0;
   m.set_target(target);
 
   // First cycle must move in the +direction (up through pi), not down through 0.
@@ -214,9 +238,11 @@ TEST(JointPosition, CommandedPositionStaysWrappedForContinuousJoints) {
   p.max_ref_speed.setConstant(1.0);
   JointPositionMode m(dyn, p);
 
-  JointVec q0 = JointVec::Zero(); q0[j] = 3.0;
+  JointVec q0 = JointVec::Zero();
+  q0[j] = 3.0;
   PerfectServo servo(m, q0);
-  JointVec target = JointVec::Zero(); target[j] = -1.0;
+  JointVec target = JointVec::Zero();
+  target[j] = -1.0;
   m.set_target(target);
 
   // Whatever the path, every commanded angle must stay in the same
@@ -238,17 +264,20 @@ TEST(JointPosition, FollowingErrorLeashStopsARunawayReference) {
   p.max_following_error = 0.35;
   JointPositionMode m(dyn, p);
 
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();   // blocked: q never changes
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();  // blocked: q never changes
   m.on_enter(fb);
-  JointVec target; target.setConstant(1.0);
+  JointVec target;
+  target.setConstant(1.0);
   m.set_target(target);
 
   JointCommand c;
   for (int k = 0; k < 5000; ++k) {
-    m.compute(fb, 0.001, c);                            // fb.q stays at zero
+    m.compute(fb, 0.001, c);  // fb.q stays at zero
     ASSERT_LE(c.position[0], 0.35 + 1e-12) << "reference ran away at cycle " << k;
   }
-  EXPECT_NEAR(c.position[0], 0.35, 1e-9);               // parks at the leash
+  EXPECT_NEAR(c.position[0], 0.35, 1e-9);  // parks at the leash
 }
 
 TEST(JointPosition, LeashIsDisabledByANonPositiveValue) {
@@ -258,24 +287,28 @@ TEST(JointPosition, LeashIsDisabledByANonPositiveValue) {
   p.max_following_error = 0.0;
   JointPositionMode m(dyn, p);
 
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
-  JointVec target; target.setConstant(1.0);
+  JointVec target;
+  target.setConstant(1.0);
   m.set_target(target);
 
   JointCommand c;
   for (int k = 0; k < 2000; ++k) m.compute(fb, 0.001, c);
-  EXPECT_NEAR(c.position[0], 1.0, 1e-9);   // reaches the target despite no motion
+  EXPECT_NEAR(c.position[0], 1.0, 1e-9);  // reaches the target despite no motion
 }
 
 TEST(JointPosition, ConvergesExactlyOnTargetAndStaysThere) {
   Dynamics dyn(URDF_PATH);
   JointPositionParams p;
-  p.max_ref_speed.setConstant(0.5);        // 0.0005 rad per 1 ms cycle
+  p.max_ref_speed.setConstant(0.5);  // 0.0005 rad per 1 ms cycle
   JointPositionMode m(dyn, p);
 
   PerfectServo servo(m, JointVec::Zero());
-  JointVec target; target.setConstant(0.001);   // exactly two cycles away
+  JointVec target;
+  target.setConstant(0.001);  // exactly two cycles away
   m.set_target(target);
 
   servo.step();
@@ -293,10 +326,12 @@ TEST(JointPosition, LatestTargetWins) {
   JointPositionMode m(dyn, p);
 
   PerfectServo servo(m, JointVec::Zero());
-  JointVec a; a.setConstant(0.5);
-  JointVec b; b.setConstant(-0.5);
+  JointVec a;
+  a.setConstant(0.5);
+  JointVec b;
+  b.setConstant(-0.5);
   m.set_target(a);
-  m.set_target(b);                          // published before any compute ran
+  m.set_target(b);  // published before any compute ran
   for (int k = 0; k < 2000; ++k) servo.step();
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(servo.cmd.position[i], -0.5, 1e-9);
 }
@@ -308,9 +343,12 @@ TEST(JointPosition, SetParamsTakesEffectOnTheNextCycle) {
   p.max_following_error = 0.0;
   JointPositionMode m(dyn, p);
 
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
-  JointVec target; target.setConstant(1.0);
+  JointVec target;
+  target.setConstant(1.0);
   m.set_target(target);
 
   JointCommand c;
@@ -331,11 +369,13 @@ TEST(JointPositionMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
   p.max_ref_speed.setConstant(1.0);
   p.cmd_timeout_s = 0.05;
   JointPositionMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(JointVec::Constant(0.5));
   JointCommand out;
-  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // fresh: reference advances
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);  // fresh: reference advances
   EXPECT_GT(m.reference()[0], 0.0);
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
   EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
@@ -345,14 +385,16 @@ TEST(JointPositionMode, ZeroTimeoutDisablesTheWatchdog) {
   Dynamics dyn(URDF_PATH);
   JointPositionParams p;
   p.max_ref_speed.setConstant(1.0);
-  EXPECT_EQ(p.cmd_timeout_s, 0.0);                          // default preserves old behaviour
+  EXPECT_EQ(p.cmd_timeout_s, 0.0);  // default preserves old behaviour
   JointPositionMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(JointVec::Constant(0.5));
   JointCommand out;
   for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
-  EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
+  EXPECT_GT(m.reference()[0], 0.1);  // still tracking; nothing froze
 }
 
 // --- Cartesian pose target via in-loop IK ------------------------------------
@@ -361,15 +403,19 @@ TEST(JointPositionModePose, APoseTargetDrivesTheReferenceTowardIt) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
   Pose target = dyn.fk(q0);
-  target.p.x() += 0.05;                 // 5 cm along base x
+  target.p.x() += 0.05;  // 5 cm along base x
   m.set_target(target);
 
   JointCommand out;
-  for (int i = 0; i < 500; ++i) { m.compute(fb, 0.001, out); fb.q = out.position; }
+  for (int i = 0; i < 500; ++i) {
+    m.compute(fb, 0.001, out);
+    fb.q = out.position;
+  }
 
   const Pose reached = dyn.fk(out.position);
   EXPECT_LT((reached.p - target.p).norm(), (dyn.fk(q0).p - target.p).norm());
@@ -381,10 +427,11 @@ TEST(JointPositionModePose, APoseTargetDrivesTheReferenceTowardIt) {
 TEST(JointPositionModePose, AJointTargetStillBypassesIkEntirely) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
-  JointFeedback fb; fb.q = JointVec::Zero();
+  JointFeedback fb;
+  fb.q = JointVec::Zero();
   m.on_enter(fb);
   const JointVec q_d = JointVec::Constant(0.1);
-  m.set_target(q_d);                    // JointTargetSink overload
+  m.set_target(q_d);  // JointTargetSink overload
   JointCommand out;
   m.compute(fb, 0.001, out);
   // iters stays 0: a joint target must not pay for a solve it does not use.
@@ -395,16 +442,18 @@ TEST(JointPositionModePose, TheLatestSetterWins) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
-  Pose pose = dyn.fk(q0); pose.p.x() += 0.05;
+  Pose pose = dyn.fk(q0);
+  pose.p.x() += 0.05;
   m.set_target(pose);
   JointCommand out;
   m.compute(fb, 0.001, out);
   ASSERT_GT(m.last_ik().iters, 0);
 
-  m.set_target(q0);                     // joint target supersedes the pose
+  m.set_target(q0);  // joint target supersedes the pose
   m.compute(fb, 0.001, out);
   EXPECT_EQ(m.last_ik().iters, 0);
 }
@@ -415,18 +464,19 @@ TEST(JointPositionModePose, SustainedNonConvergenceRaisesIkFaulted) {
   p.ik_fault_s = 0.05;
   JointPositionMode m(dyn, p);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
   Pose unreachable = dyn.fk(q0);
-  unreachable.p.x() += 5.0;             // metres away: never reachable
+  unreachable.p.x() += 5.0;  // metres away: never reachable
   m.set_target(unreachable);
 
   JointCommand out;
   m.compute(fb, 0.001, out);
-  EXPECT_FALSE(m.ik_faulted());         // one bad solve is NOT a fault
+  EXPECT_FALSE(m.ik_faulted());  // one bad solve is NOT a fault
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
-  EXPECT_TRUE(m.ik_faulted());          // sustained non-convergence IS
+  EXPECT_TRUE(m.ik_faulted());  // sustained non-convergence IS
 }
 
 TEST(JointPositionModePose, AConvergedSolveClearsTheFaultAccumulator) {
@@ -435,13 +485,15 @@ TEST(JointPositionModePose, AConvergedSolveClearsTheFaultAccumulator) {
   p.ik_fault_s = 0.05;
   JointPositionMode m(dyn, p);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
-  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  Pose unreachable = dyn.fk(q0);
+  unreachable.p.x() += 5.0;
   m.set_target(unreachable);
   JointCommand out;
-  for (int i = 0; i < 20; ++i) m.compute(fb, 0.001, out);   // under the threshold
+  for (int i = 0; i < 20; ++i) m.compute(fb, 0.001, out);  // under the threshold
   ASSERT_FALSE(m.ik_faulted());
 
   // The seed PERSISTS, so chasing a target 5 m away leaves it at full stretch and
@@ -451,10 +503,10 @@ TEST(JointPositionModePose, AConvergedSolveClearsTheFaultAccumulator) {
   // not of the accumulator failing to reset. The long recovery window is what
   // gives this test its teeth: if a converged solve did NOT clear ik_bad_s_, 220
   // accumulated cycles would blow past ik_fault_s four times over.
-  m.set_target(dyn.fk(q0));             // reachable
+  m.set_target(dyn.fk(q0));  // reachable
   for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);
   EXPECT_FALSE(m.ik_faulted());
-  EXPECT_TRUE(m.last_ik().converged);   // and it really did converge, not just not-fault
+  EXPECT_TRUE(m.last_ik().converged);  // and it really did converge, not just not-fault
 }
 
 TEST(JointPositionModePose, OnEnterClearsAPreviousIkFault) {
@@ -463,9 +515,11 @@ TEST(JointPositionModePose, OnEnterClearsAPreviousIkFault) {
   p.ik_fault_s = 0.05;
   JointPositionMode m(dyn, p);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
-  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;
+  Pose unreachable = dyn.fk(q0);
+  unreachable.p.x() += 5.0;
   m.set_target(unreachable);
   JointCommand out;
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
@@ -485,18 +539,20 @@ TEST(JointPositionModePose, StaleWatchdogClearsLastIkFromAPreviousPoseSolve) {
   p.cmd_timeout_s = 0.05;
   JointPositionMode m(dyn, p);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
-  Pose target = dyn.fk(q0); target.p.x() += 0.05;
+  Pose target = dyn.fk(q0);
+  target.p.x() += 0.05;
   m.set_target(target);
 
   JointCommand out;
   m.compute(fb, 0.001, out);
-  ASSERT_GT(m.last_ik().iters, 0);            // a solve ran this cycle
+  ASSERT_GT(m.last_ik().iters, 0);  // a solve ran this cycle
 
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
-  EXPECT_EQ(m.last_ik().iters, 0);            // frozen: no solve ran this cycle
+  EXPECT_EQ(m.last_ik().iters, 0);                          // frozen: no solve ran this cycle
 }
 
 // The staleness reset must NOT reach ik_faulted_: it is a latch cleared only by
@@ -510,10 +566,12 @@ TEST(JointPositionModePose, StaleWatchdogDoesNotClearAnAlreadyLatchedIkFault) {
   p.cmd_timeout_s = 0.05;
   JointPositionMode m(dyn, p);
   const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
-  JointFeedback fb; fb.q = q0;
+  JointFeedback fb;
+  fb.q = q0;
   m.on_enter(fb);
 
-  Pose unreachable = dyn.fk(q0); unreachable.p.x() += 5.0;  // never reachable
+  Pose unreachable = dyn.fk(q0);
+  unreachable.p.x() += 5.0;  // never reachable
   m.set_target(unreachable);
 
   JointCommand out;
@@ -522,8 +580,8 @@ TEST(JointPositionModePose, StaleWatchdogDoesNotClearAnAlreadyLatchedIkFault) {
   // for the remainder of the loop.
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);
 
-  EXPECT_TRUE(m.ik_faulted());   // the latch survives the staleness reset
-  EXPECT_EQ(m.last_ik().iters, 0);   // but last_ik() still reads "no solve this cycle"
+  EXPECT_TRUE(m.ik_faulted());      // the latch survives the staleness reset
+  EXPECT_EQ(m.last_ik().iters, 0);  // but last_ik() still reads "no solve this cycle"
 }
 
 // The pose path's seed must ACCUMULATE across cycles. Re-seeding the solve from
@@ -534,17 +592,22 @@ TEST(JointPositionModePose, StaleWatchdogDoesNotClearAnAlreadyLatchedIkFault) {
 // permanent freeze on a perfectly reachable target.
 TEST(JointPositionModePose, AReachableButDistantPoseDoesNotFault) {
   Dynamics dyn(URDF_PATH);
-  JointPositionMode m(dyn);                       // defaults: ik_fault_s = 0.1
-  const JointVec q0 = (JointVec() << 0.0,0.26,3.14,-2.27,0.0,0.96,1.57).finished();
-  JointFeedback fb; fb.q = q0; m.on_enter(fb);
-  Pose target = dyn.fk(q0); target.p.x() += 0.25;  // reachable, ordinary magnitude
+  JointPositionMode m(dyn);  // defaults: ik_fault_s = 0.1
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb;
+  fb.q = q0;
+  m.on_enter(fb);
+  Pose target = dyn.fk(q0);
+  target.p.x() += 0.25;  // reachable, ordinary magnitude
   m.set_target(target);
   JointCommand out;
-  for (int i = 0; i < 3000; ++i) { m.compute(fb, 0.001, out); fb.q = out.position; }
+  for (int i = 0; i < 3000; ++i) {
+    m.compute(fb, 0.001, out);
+    fb.q = out.position;
+  }
   EXPECT_FALSE(m.ik_faulted());
   EXPECT_LT((dyn.fk(out.position).p - target.p).norm(), 1e-3);
 }
-
 
 // The persistent seed must be RE-ANCHORED when the source transitions back into
 // kPose, or a solution left over from an earlier pose session silently becomes the
@@ -553,12 +616,15 @@ TEST(JointPositionModePose, AReachableButDistantPoseDoesNotFault) {
 TEST(JointPositionModePose, ReanchorsTheSeedOnTheTransitionBackIntoPose) {
   Dynamics dyn(URDF_PATH);
   JointPositionMode m(dyn);
-  const JointVec q0 = (JointVec() << 0.0,0.26,3.14,-2.27,0.0,0.96,1.57).finished();
-  JointFeedback fb; fb.q = q0; m.on_enter(fb);
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointFeedback fb;
+  fb.q = q0;
+  m.on_enter(fb);
   JointCommand out;
 
   // Session 1: chase something far away so the seed ends up nowhere near q0.
-  Pose far_away = dyn.fk(q0); far_away.p.x() += 5.0;
+  Pose far_away = dyn.fk(q0);
+  far_away.p.x() += 5.0;
   m.set_target(far_away);
   for (int i = 0; i < 40; ++i) m.compute(fb, 0.001, out);
   ASSERT_FALSE(m.last_ik().converged);
@@ -575,5 +641,3 @@ TEST(JointPositionModePose, ReanchorsTheSeedOnTheTransitionBackIntoPose) {
   EXPECT_TRUE(m.last_ik().converged);
   EXPECT_LT(m.last_ik().pos_err, 1e-4);
 }
-
-

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <atomic>
+
 #include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/diff_ik.h"
@@ -21,7 +22,7 @@ struct JointImpedanceParams {
   // is compensated — it scales LINEARLY with zeta but only as 1/sqrt(Kq). So zeta
   // is the cheap lever against a "mushy, doesn't match my hand" feel; drop it
   // before reaching for more stiffness.
-  double zeta = 0.5;              // damping ratio; 1.0 = critically damped
+  double zeta = 0.5;  // damping ratio; 1.0 = critically damped
   // Per-joint ceiling. The URDF gives joints 5-7 an effort limit of 9 N·m; the
   // single scalar CartesianImpedanceParams uses would overrun the wrist by 4x
   // under stiff joint gains.
@@ -30,17 +31,16 @@ struct JointImpedanceParams {
   // Kq*leash while gravity compensation still passes through in full. The total
   // torque clamp cannot do this -- it eats the gravity term under load and the
   // arm sags.
-  double max_tracking_error = 0.35;   // rad
+  double max_tracking_error = 0.35;  // rad
   // Per-joint cap on reference motion [rad/s]. Left non-finite it is seeded from
   // the URDF velocity limits, so the cap can never silently sit below what the
   // hardware can actually do — a cap under hand speed accumulates lag that only
   // unwinds when the operator slows down, which reads as mush.
-  JointVec max_ref_speed = JointVec::Constant(
-      std::numeric_limits<double>::infinity());
-  double gain_ramp_s        = 0.5;    // fade the spring in over this window on entry
+  JointVec max_ref_speed = JointVec::Constant(std::numeric_limits<double>::infinity());
+  double gain_ramp_s = 0.5;  // fade the spring in over this window on entry
   // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
   // and preserves the behaviour every existing caller relies on.
-  double cmd_timeout_s      = 0.0;
+  double cmd_timeout_s = 0.0;
   DiffIkParams ik{};
 };
 
@@ -57,9 +57,7 @@ struct JointImpedanceParams {
 //
 // Live setters publish via a single-writer (non-RT) double-buffer; compute()
 // (RT thread) reads one snapshot per cycle.
-class JointImpedanceMode : public ControlMode,
-                           public PoseTargetSink,
-                           public JointTargetSink {
+class JointImpedanceMode : public ControlMode, public PoseTargetSink, public JointTargetSink {
  public:
   JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p = {});
   ActuatorModes required_modes() const override;
@@ -92,7 +90,7 @@ class JointImpedanceMode : public ControlMode,
   JointVec last_damping() const noexcept { return Dq_last_; }
 
  private:
-  JointImpedanceParams params() const noexcept;   // RT-safe: returns a value snapshot
+  JointImpedanceParams params() const noexcept;  // RT-safe: returns a value snapshot
   // Fills any non-finite IK limit with the URDF value cached at construction, so
   // a caller-supplied tighter software limit survives but the default does not
   // leave the solver unbounded.
@@ -100,9 +98,9 @@ class JointImpedanceMode : public ControlMode,
 
   Dynamics& dyn_;
   DiffIkSolver ik_;
-  JointVec q_lower_urdf_ = JointVec::Zero();   // cached in ctor: set_gains must not
-  JointVec q_upper_urdf_ = JointVec::Zero();   // touch Dynamics off the RT thread
-  JointVec v_max_urdf_ = JointVec::Zero();     // URDF velocity limits, cached in ctor
+  JointVec q_lower_urdf_ = JointVec::Zero();  // cached in ctor: set_gains must not
+  JointVec q_upper_urdf_ = JointVec::Zero();  // touch Dynamics off the RT thread
+  JointVec v_max_urdf_ = JointVec::Zero();    // URDF velocity limits, cached in ctor
   // Which joints are continuous (both URDF limits infinite). The transport wraps
   // every measured angle to (-pi, pi], so on these joints the raw reference-minus-
   // measured difference can be wrong by 2*pi and MUST be wrapped -- see compute().
@@ -139,11 +137,11 @@ class JointImpedanceMode : public ControlMode,
   // nobody is maintaining -- see compute().
   bool frozen_ = false;
 
-  JointVec q_d_ = JointVec::Zero();    // integrated reference configuration
+  JointVec q_d_ = JointVec::Zero();  // integrated reference configuration
   IkResult last_ik_{};
   double ramp_elapsed_ = 0.0;
 
-  JointVec Dq_last_ = JointVec::Zero();   // damping applied last cycle (derived)
+  JointVec Dq_last_ = JointVec::Zero();  // damping applied last cycle (derived)
 
   // Preallocated RT scratch.
   JointMat M_ = JointMat::Zero();

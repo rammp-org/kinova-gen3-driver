@@ -1,11 +1,12 @@
 #include "kinova_lowlevel/joint_velocity_mode.h"
+
 #include <algorithm>
 #include <cmath>
+
 #include "kinova_lowlevel/units.h"
 namespace kinova {
 
-JointVelocityMode::JointVelocityMode(Dynamics& dyn, JointVelocityParams p)
-    : dyn_(dyn) {
+JointVelocityMode::JointVelocityMode(Dynamics& dyn, JointVelocityParams p) : dyn_(dyn) {
   // Cache the URDF limits once. set_params runs on a non-RT thread and must never
   // touch Dynamics -- it is not thread-safe against the RT loop.
   JointVec lo, hi;
@@ -16,8 +17,10 @@ JointVelocityMode::JointVelocityMode(Dynamics& dyn, JointVelocityParams p)
   seed_limits(p);
   params_[0] = p;
   params_[1] = p;
-  ext_qd_[0].setZero(); ext_qd_[1].setZero();
-  ext_twist_[0].setZero(); ext_twist_[1].setZero();
+  ext_qd_[0].setZero();
+  ext_qd_[1].setZero();
+  ext_twist_[0].setZero();
+  ext_twist_[1].setZero();
   wd_.arm(p.cmd_timeout_s);
 }
 
@@ -32,7 +35,9 @@ void JointVelocityMode::seed_limits(JointVelocityParams& p) const noexcept {
 }
 
 ActuatorModes JointVelocityMode::required_modes() const {
-  ActuatorModes modes; modes.fill(ActuatorMode::kVelocity); return modes;
+  ActuatorModes modes;
+  modes.fill(ActuatorMode::kVelocity);
+  return modes;
 }
 
 JointVelocityParams JointVelocityMode::params() const noexcept {
@@ -51,7 +56,7 @@ void JointVelocityMode::set_velocity_target(const JointVec& qd_d) noexcept {
   ext_qd_[next] = qd_d;
   qd_active_.store(next, std::memory_order_release);
   source_.store(Source::kJoint, std::memory_order_release);
-  wd_.bump();   // must be LAST: its release publishes everything above it
+  wd_.bump();  // must be LAST: its release publishes everything above it
 }
 
 void JointVelocityMode::set_twist_target(const Vector6& V) noexcept {
@@ -59,7 +64,7 @@ void JointVelocityMode::set_twist_target(const Vector6& V) noexcept {
   ext_twist_[next] = V;
   tw_active_.store(next, std::memory_order_release);
   source_.store(Source::kTwist, std::memory_order_release);
-  wd_.bump();   // must be LAST
+  wd_.bump();  // must be LAST
 }
 
 void JointVelocityMode::set_command_timeout(double s) noexcept {
@@ -90,21 +95,21 @@ void JointVelocityMode::limit(const JointVelocityParams& p, JointVec& qd) noexce
   qd *= s;
   // Hard backstop: scaling covers the normal case, this holds even when max_qd
   // contains a zero (scale would be 0/0) or the scale underflows.
-  for (int i = 0; i < kNumJoints; ++i)
-    qd[i] = std::clamp(qd[i], -p.max_qd[i], p.max_qd[i]);
+  for (int i = 0; i < kNumJoints; ++i) qd[i] = std::clamp(qd[i], -p.max_qd[i], p.max_qd[i]);
 }
 
-void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
-                                JointCommand& out) {
-  const JointVelocityParams p = params();   // own a snapshot for the whole cycle
+void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
+  const JointVelocityParams p = params();  // own a snapshot for the whole cycle
   out.mode = ActuatorMode::kVelocity;
 
   // Staleness: the stream stopped, so stop moving. Zero is the only safe command
   // for a stiff velocity mode -- holding the last velocity would keep the arm
   // travelling toward nothing. LATCHED, so disarming cannot un-freeze it.
   const bool stale = wd_.tick(dt_s);
-  if (stale) frozen_ = true;
-  else if (wd_.fresh()) frozen_ = false;
+  if (stale)
+    frozen_ = true;
+  else if (wd_.fresh())
+    frozen_ = false;
 
   const Source src = source_.load(std::memory_order_acquire);
   if (frozen_ || src == Source::kNone) {
@@ -144,10 +149,9 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s,
 }
 
 void JointVelocityMode::solve_twist(const JointVec& q, const Vector6& V,
-                                    const JointVelocityParams& p,
-                                    JointVec& qd_out) noexcept {
+                                    const JointVelocityParams& p, JointVec& qd_out) noexcept {
   dyn_.jacobian(q, J_);
-  A_.noalias() = J_ * J_.transpose();          // 6x6, symmetric positive semi-definite
+  A_.noalias() = J_ * J_.transpose();  // 6x6, symmetric positive semi-definite
 
   // Decompose UNDAMPED first, purely to measure conditioning: LDLT hands us
   // det(J J^T) as prod(D) for free, so manipulability costs no extra solve.
@@ -160,7 +164,7 @@ void JointVelocityMode::solve_twist(const JointVec& q, const Vector6& V,
   // so there is no torque clamp standing behind a bad solve.
   double lambda = p.dls_damping;
   if (p.w_threshold > 0.0 && w_last_ < p.w_threshold) {
-    const double r = 1.0 - w_last_ / p.w_threshold;   // 0 at threshold, 1 at singular
+    const double r = 1.0 - w_last_ / p.w_threshold;  // 0 at threshold, 1 at singular
     lambda = p.dls_damping + (p.dls_damping_max - p.dls_damping) * r * r;
   }
   A_.diagonal().array() += lambda * lambda;

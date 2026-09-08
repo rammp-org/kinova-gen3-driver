@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+
 #include "kinova_lowlevel/transport.h"
 namespace kinova {
 // Real Gen3 over the KORTEX low-level cyclic API. The ONLY unit that includes
@@ -17,6 +18,7 @@ class KortexTransport : public Transport {
   void receive(JointFeedback&) override;
   void safe_shutdown() override;
   void clear_faults() override;
+
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

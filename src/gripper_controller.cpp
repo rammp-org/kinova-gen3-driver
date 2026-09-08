@@ -17,15 +17,13 @@ void GripperController::set_target(const GripperCommand& c) noexcept {
   // including unvalidated data straight off a socket, and SimTransport/KortexTransport
   // downstream have no clamp of their own to fall back on.
   buf_[next].position = clamp01(c.position);
-  buf_[next].speed    = clamp01(c.speed);
-  buf_[next].force    = clamp01(c.force);
+  buf_[next].speed = clamp01(c.speed);
+  buf_[next].force = clamp01(c.force);
   active_.store(next, std::memory_order_release);
-  stamping_.store(true, std::memory_order_release);   // LAST: publishes the buffer above it
+  stamping_.store(true, std::memory_order_release);  // LAST: publishes the buffer above it
 }
 
-void GripperController::release() noexcept {
-  stamping_.store(false, std::memory_order_release);
-}
+void GripperController::release() noexcept { stamping_.store(false, std::memory_order_release); }
 
 JointCommand GripperController::stamp(const JointCommand& c) const noexcept {
   JointCommand out = c;

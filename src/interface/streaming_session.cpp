@@ -30,12 +30,12 @@ StreamOpenResult StreamingSession::open(const StreamOpenRequest& r, double now_s
   mode_.store(r.control_mode, std::memory_order_relaxed);
   timeout_s_.store(r.timeout_s, std::memory_order_relaxed);
   last_s_.store(now_s, std::memory_order_relaxed);
-  open_.store(true, std::memory_order_release);      // marked LAST -- see the handoff rule
+  open_.store(true, std::memory_order_release);  // marked LAST -- see the handoff rule
   return {true, 0, ""};
 }
 
 void StreamingSession::close() {
-  open_.store(false, std::memory_order_release);     // marked FIRST -- see the handoff rule
+  open_.store(false, std::memory_order_release);  // marked FIRST -- see the handoff rule
 }
 
 bool StreamingSession::admit(SetpointKind k, double now_s) {
@@ -48,7 +48,8 @@ bool StreamingSession::admit(SetpointKind k, double now_s) {
 }
 
 bool StreamingSession::expired(double now_s) const {
-  if (!is_open()) return false;                      // nothing open, nothing to tear down
-  return (now_s - last_s_.load(std::memory_order_relaxed)) > timeout_s_.load(std::memory_order_relaxed);
+  if (!is_open()) return false;  // nothing open, nothing to tear down
+  return (now_s - last_s_.load(std::memory_order_relaxed)) >
+         timeout_s_.load(std::memory_order_relaxed);
 }
 }  // namespace kinova::interface

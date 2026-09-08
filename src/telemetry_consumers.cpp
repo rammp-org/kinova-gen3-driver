@@ -20,9 +20,7 @@ void NanoHistogram::add(uint32_t ns) noexcept {
 
 uint64_t NanoHistogram::count() const noexcept { return count_; }
 
-uint32_t NanoHistogram::min() const noexcept {
-  return count_ ? min_ : 0;
-}
+uint32_t NanoHistogram::min() const noexcept { return count_ ? min_ : 0; }
 
 uint32_t NanoHistogram::max() const noexcept { return max_; }
 
@@ -55,8 +53,7 @@ std::string NanoHistogram::dump() const {
     if (buckets_[k] == 0) continue;
     const uint64_t lo = 1ull << k;
     const uint64_t hi = 1ull << (k + 1);
-    std::snprintf(line, sizeof(line), "%llu,%llu,%llu\n",
-                  static_cast<unsigned long long>(lo),
+    std::snprintf(line, sizeof(line), "%llu,%llu,%llu\n", static_cast<unsigned long long>(lo),
                   static_cast<unsigned long long>(hi),
                   static_cast<unsigned long long>(buckets_[k]));
     out += line;
@@ -93,29 +90,23 @@ void TelemetrySink::consume(const CycleSample& s) {
   ++n_;
   if (csv_) {
     std::fprintf(static_cast<FILE*>(csv_), "%llu,%u,%u,%u,%u,%u\n",
-                 static_cast<unsigned long long>(s.cycle_index),
-                 s.wake_jitter_ns, s.comm_ns, s.compute_ns, s.cycle_ns,
-                 static_cast<unsigned>(s.flags));
+                 static_cast<unsigned long long>(s.cycle_index), s.wake_jitter_ns, s.comm_ns,
+                 s.compute_ns, s.cycle_ns, static_cast<unsigned>(s.flags));
   }
 }
 
 std::string TelemetrySink::console_line() const {
   char buf[384];
-  std::snprintf(
-      buf, sizeof(buf),
-      "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
-      "comm[p99=%.1f]us compute[p99=%.1f]us jitter[p99=%.1f]us "
-      "overruns=%llu faults=%llu",
-      static_cast<unsigned long long>(n_),
-      cycle_.percentile(0.5) / 1000.0,
-      cycle_.percentile(0.99) / 1000.0,
-      cycle_.percentile(0.999) / 1000.0,
-      cycle_.max() / 1000.0,
-      comm_.percentile(0.99) / 1000.0,
-      compute_.percentile(0.99) / 1000.0,
-      jitter_.percentile(0.99) / 1000.0,
-      static_cast<unsigned long long>(overruns_),
-      static_cast<unsigned long long>(faults_));
+  std::snprintf(buf, sizeof(buf),
+                "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
+                "comm[p99=%.1f]us compute[p99=%.1f]us jitter[p99=%.1f]us "
+                "overruns=%llu faults=%llu",
+                static_cast<unsigned long long>(n_), cycle_.percentile(0.5) / 1000.0,
+                cycle_.percentile(0.99) / 1000.0, cycle_.percentile(0.999) / 1000.0,
+                cycle_.max() / 1000.0, comm_.percentile(0.99) / 1000.0,
+                compute_.percentile(0.99) / 1000.0, jitter_.percentile(0.99) / 1000.0,
+                static_cast<unsigned long long>(overruns_),
+                static_cast<unsigned long long>(faults_));
   return std::string(buf);
 }
 

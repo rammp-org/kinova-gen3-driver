@@ -1,36 +1,39 @@
 #pragma once
 #include <array>
 #include <atomic>
+
+#include "kinova_lowlevel/cartesian.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
-#include "kinova_lowlevel/cartesian.h"
 #include "kinova_lowlevel/pose_target_sink.h"
 namespace kinova {
 
 struct CartesianImpedanceParams {
-  Vector6 Kx = (Vector6() << 300,300,300, 30,30,30).finished();  // N/m | N·m/rad
-  Vector6 Dx = (Vector6() << 35,35,35, 5,5,5).finished();        // N·s/m | N·m·s/rad
+  Vector6 Kx = (Vector6() << 300, 300, 300, 30, 30, 30).finished();  // N/m | N·m/rad
+  Vector6 Dx = (Vector6() << 35, 35, 35, 5, 5, 5).finished();        // N·s/m | N·m·s/rad
   // Defaults are sensible starting points; tune Kx/Dx on hardware.
-  double  nullspace_kp = 0.0;     // joint posture stiffness (N·m/rad) — 0: pure damping, no snap-back to q_rest
-  double  nullspace_kd = 8.0;     // joint posture damping (N·m·s/rad) — viscous resistance to null-space motion
-  bool    nullspace_on = true;
+  double nullspace_kp =
+      0.0;  // joint posture stiffness (N·m/rad) — 0: pure damping, no snap-back to q_rest
+  double nullspace_kd =
+      8.0;  // joint posture damping (N·m·s/rad) — viscous resistance to null-space motion
+  bool nullspace_on = true;
   // Posture target source. false (default): q_rest := entry config (legacy "hold
   // where you started"). true: q_rest := nullspace_q_rest, a FIXED config — set
   // nullspace_q_rest to an elbow-up pose and use a LOW nullspace_kp so the operator
   // can override; this is the "default toward up" behaviour for teleop.
-  bool    nullspace_use_fixed_rest = false;
-  JointVec nullspace_q_rest =     // PLACEHOLDER elbow-up home — TUNE ON HARDWARE
+  bool nullspace_use_fixed_rest = false;
+  JointVec nullspace_q_rest =  // PLACEHOLDER elbow-up home — TUNE ON HARDWARE
       (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
   // Manipulability gradient ascent: drive the redundant DOF toward dexterous
   // (non-singular) configs by climbing w(q)=√det(J Jᵀ). Off by default. When on it
   // adds manip_gain·∇w(q) to the null-space torque and costs 7 EXTRA Jacobian evals
   // per cycle — keep manip_gain small; compose with a low posture term if it wanders.
-  bool    manip_on = false;
-  double  manip_gain = 0.0;       // gradient-ascent gain on √det(J Jᵀ)
-  double  manip_fd_step = 1e-4;   // forward finite-difference step (rad) for ∇w
-  double  pinv_damping = 1e-3;    // Levenberg-Marquardt lambda for the pseudo-inverse
-  double  torque_limit = 39.0;    // per-joint clamp (N·m)
-  double  gain_ramp_s  = 0.5;     // ramp the active wrench 0->1 over this window on entry
+  bool manip_on = false;
+  double manip_gain = 0.0;      // gradient-ascent gain on √det(J Jᵀ)
+  double manip_fd_step = 1e-4;  // forward finite-difference step (rad) for ∇w
+  double pinv_damping = 1e-3;   // Levenberg-Marquardt lambda for the pseudo-inverse
+  double torque_limit = 39.0;   // per-joint clamp (N·m)
+  double gain_ramp_s = 0.5;     // ramp the active wrench 0->1 over this window on entry
 };
 
 // Task-space impedance: tau = gravity + ramp * (Jᵀ F + nullspace),
@@ -61,7 +64,7 @@ class CartesianImpedanceMode : public ControlMode, public PoseTargetSink {
   // Target source: the entry pose (written once by on_enter on the RT thread) or
   // an optional external override published by set_target.
   Pose entry_pose_;
-  JointVec q_rest_ = JointVec::Zero();   // nullspace posture target (set on_enter)
+  JointVec q_rest_ = JointVec::Zero();  // nullspace posture target (set on_enter)
   // Which joints are continuous (both URDF limits infinite). The transport wraps
   // measured angles to (-pi, pi], so the posture error on these joints must take
   // the short way round or the null-space term drives them the long way.
@@ -82,7 +85,7 @@ class CartesianImpedanceMode : public ControlMode, public PoseTargetSink {
 
   // Preallocated RT scratch.
   Jacobian6 J_;
-  JointVec  g_;
-  JointVec  tau_;
+  JointVec g_;
+  JointVec tau_;
 };
 }  // namespace kinova

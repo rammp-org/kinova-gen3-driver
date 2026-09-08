@@ -12,7 +12,25 @@
 # (pinocchioConfig.cmake lives at <prefix>/lib/cmake/pinocchio/.)
 
 cmake_minimum_required(VERSION 3.16)
-project(kinova_gen3_driver CXX)
+
+# --- version -------------------------------------------------------------------
+# package.xml is the SINGLE SOURCE OF TRUTH for the release number, and CMake
+# reads it rather than repeating it. It has to be that way round: ROS tooling
+# parses package.xml as static XML and cannot run CMake to ask, so that file is
+# the one number that genuinely cannot be generated. Repeating it here and
+# checking the two agree would be policing a duplication instead of removing it.
+#
+# Bumping a release therefore means editing package.xml and nothing else.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" _kinova_pkg_xml)
+if(NOT _kinova_pkg_xml MATCHES "<version>([0-9]+\\.[0-9]+\\.[0-9]+)</version>")
+    message(FATAL_ERROR
+        "Could not read a semantic <version> out of package.xml. That file is the "
+        "single source of truth for the release number -- fix it there.")
+endif()
+set(KINOVA_VERSION "${CMAKE_MATCH_1}")
+unset(_kinova_pkg_xml)
+
+project(kinova_gen3_driver VERSION ${KINOVA_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -124,7 +142,16 @@ install(EXPORT kinova_lowlevelTargets NAMESPACE kinova_lowlevel::
 configure_package_config_file(cmake/kinova_lowlevelConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
+# SameMajorVersion, because from 1.0 on a MINOR bump is additive by policy (see
+# "Versioning" in CONTRIBUTING.md): 1.1.0 satisfies a request for 1.0, 2.0.0
+# refuses it. Without this file a consumer CANNOT request a version at all --
+# CMake rejects a versioned find_package when the package ships no version file.
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
 
 # --- apps ---------------------------------------------------------------------

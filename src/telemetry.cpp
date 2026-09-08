@@ -38,8 +38,6 @@ bool SampleRing::pop(CycleSample& out) noexcept {
   return true;
 }
 
-uint64_t SampleRing::dropped() const noexcept {
-  return dropped_.load(std::memory_order_relaxed);
-}
+uint64_t SampleRing::dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
 }  // namespace kinova

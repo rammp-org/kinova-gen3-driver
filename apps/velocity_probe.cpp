@@ -107,10 +107,14 @@ class ConstVelocityMode : public ControlMode {
     // Trapezoid: ramp up, hold, ramp down. Never a step.
     double scale = 0.0;
     const double tail = duration_s_ - ramp_s_;
-    if (t_ < ramp_s_)        scale = (ramp_s_ > 0.0) ? t_ / ramp_s_ : 1.0;
-    else if (t_ < tail)      scale = 1.0;
-    else if (t_ < duration_s_) scale = (ramp_s_ > 0.0) ? (duration_s_ - t_) / ramp_s_ : 1.0;
-    else                     scale = 0.0;
+    if (t_ < ramp_s_)
+      scale = (ramp_s_ > 0.0) ? t_ / ramp_s_ : 1.0;
+    else if (t_ < tail)
+      scale = 1.0;
+    else if (t_ < duration_s_)
+      scale = (ramp_s_ > 0.0) ? (duration_s_ - t_) / ramp_s_ : 1.0;
+    else
+      scale = 0.0;
     if (scale < 0.0) scale = 0.0;
 
     // Sample tracking only during the flat hold, where the command is steady and
@@ -125,18 +129,18 @@ class ConstVelocityMode : public ControlMode {
     out.mode = ActuatorMode::kVelocity;
     out.velocity.setZero();
     out.velocity[joint_] = qd_ * scale;
-    out.position = fb.q;   // passthrough, as the other modes do
+    out.position = fb.q;  // passthrough, as the other modes do
     q_last_ = fb.q;
   }
 
   void on_exit() override {}
 
   // RT-thread-owned. Read only after the executor has stopped.
-  double   mean_hold_qd() const { return hold_cycles_ ? qd_sum_ / hold_cycles_ : 0.0; }
-  double   peak_hold_qd() const { return qd_peak_; }
-  bool     faulted()      const { return faulted_; }
-  JointVec q_start()      const { return q_start_; }
-  JointVec q_last()       const { return q_last_; }
+  double mean_hold_qd() const { return hold_cycles_ ? qd_sum_ / hold_cycles_ : 0.0; }
+  double peak_hold_qd() const { return qd_peak_; }
+  bool faulted() const { return faulted_; }
+  JointVec q_start() const { return q_start_; }
+  JointVec q_last() const { return q_last_; }
 
  private:
   const int joint_;
@@ -152,8 +156,8 @@ int main(int argc, char** argv) {
   std::string ip;
   std::string pacing_str = "sleepspin";
   bool use_sim = false, dry_run = false;
-  int joint = kNumJoints - 1;         // wrist: lightest, least able to hurt anything
-  double qd = 0.05;                   // rad/s
+  int joint = kNumJoints - 1;  // wrist: lightest, least able to hurt anything
+  double qd = 0.05;            // rad/s
   double duration_s = 2.0;
   double ramp_s = 0.5;
   double rate_hz = 1000.0;
@@ -167,35 +171,56 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto val = [&]() -> std::string {
-      if (i + 1 >= argc) { std::cerr << "missing value for " << a << "\n"; std::exit(2); }
+      if (i + 1 >= argc) {
+        std::cerr << "missing value for " << a << "\n";
+        std::exit(2);
+      }
       return argv[++i];
     };
-    if (a == "--ip") ip = val();
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--joint") joint = std::stoi(val());
-    else if (a == "--qd") qd = std::stod(val());
-    else if (a == "--duration") duration_s = std::stod(val());
-    else if (a == "--ramp") ramp_s = std::stod(val());
-    else if (a == "--rate") rate_hz = std::stod(val());
-    else if (a == "--cpu") cpu = std::stoi(val());
-    else if (a == "--rt-priority") rt_priority = std::stoi(val());
-    else if (a == "--pacing") pacing_str = val();
-    else { std::cerr << "unknown arg: " << a << "\n"; std::exit(2); }
+    if (a == "--ip")
+      ip = val();
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--joint")
+      joint = std::stoi(val());
+    else if (a == "--qd")
+      qd = std::stod(val());
+    else if (a == "--duration")
+      duration_s = std::stod(val());
+    else if (a == "--ramp")
+      ramp_s = std::stod(val());
+    else if (a == "--rate")
+      rate_hz = std::stod(val());
+    else if (a == "--cpu")
+      cpu = std::stoi(val());
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(val());
+    else if (a == "--pacing")
+      pacing_str = val();
+    else {
+      std::cerr << "unknown arg: " << a << "\n";
+      std::exit(2);
+    }
   }
   (void)next;
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
   else if (pacing_str != "sleepspin") {
-    std::cerr << "--pacing must be sleepspin|nanosleep\n"; return 2;
+    std::cerr << "--pacing must be sleepspin|nanosleep\n";
+    return 2;
   }
   if (joint < 0 || joint >= kNumJoints) {
-    std::cerr << "--joint must be 0.." << (kNumJoints - 1) << "\n"; return 2;
+    std::cerr << "--joint must be 0.." << (kNumJoints - 1) << "\n";
+    return 2;
   }
   // Guard rails: this is a probe, not a motion tool. Refuse to be turned into one.
   if (std::abs(qd) > 0.3) {
-    std::cerr << "--qd " << qd << " rad/s is too fast for a probe (cap 0.3). "
+    std::cerr << "--qd " << qd
+              << " rad/s is too fast for a probe (cap 0.3). "
                  "This app exists to answer yes/no, not to move the arm.\n";
     return 2;
   }
@@ -204,16 +229,16 @@ int main(int argc, char** argv) {
     return 2;
   }
   if (ramp_s * 2.0 > duration_s) {
-    std::cerr << "--ramp " << ramp_s << "s twice over exceeds --duration "
-              << duration_s << "s; there would be no steady phase to measure.\n";
+    std::cerr << "--ramp " << ramp_s << "s twice over exceeds --duration " << duration_s
+              << "s; there would be no steady phase to measure.\n";
     return 2;
   }
 
-  const double travel = std::abs(qd) * (duration_s - ramp_s);   // trapezoid area
-  std::printf("[vprobe] joint=j%d qd=%+.4f rad/s duration=%.2fs ramp=%.2fs "
-              "rate=%.0fHz sim=%s dry_run=%s\n",
-              joint, qd, duration_s, ramp_s, rate_hz,
-              use_sim ? "yes" : "no", dry_run ? "yes" : "no");
+  const double travel = std::abs(qd) * (duration_s - ramp_s);  // trapezoid area
+  std::printf(
+      "[vprobe] joint=j%d qd=%+.4f rad/s duration=%.2fs ramp=%.2fs "
+      "rate=%.0fHz sim=%s dry_run=%s\n",
+      joint, qd, duration_s, ramp_s, rate_hz, use_sim ? "yes" : "no", dry_run ? "yes" : "no");
   std::printf("[vprobe] expected travel if it TRACKS: about %+.4f rad (%+.2f deg)\n",
               travel * (qd < 0 ? -1 : 1), travel * kRad2Deg * (qd < 0 ? -1 : 1));
 
@@ -223,10 +248,14 @@ int main(int argc, char** argv) {
     transport = std::make_unique<SimTransport>(init);
   } else {
 #ifndef KINOVA_NO_KORTEX
-    if (ip.empty()) { std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n"; return 2; }
+    if (ip.empty()) {
+      std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n";
+      return 2;
+    }
     transport = std::make_unique<KortexTransport>(ip);
 #else
-    std::cerr << "built without KORTEX; only --sim is available\n"; return 2;
+    std::cerr << "built without KORTEX; only --sim is available\n";
+    return 2;
 #endif
   }
   Transport& t = *transport;
@@ -242,10 +271,12 @@ int main(int argc, char** argv) {
     for (int i = 0; i < kNumJoints; ++i) std::printf("%+7.4f ", fb.q[i]);
     std::printf("\n[dry-run] current qd: ");
     for (int i = 0; i < kNumJoints; ++i) std::printf("%+7.4f ", fb.qd[i]);
-    std::printf("\n[dry-run] would put ALL actuators in kVelocity and command "
-                "j%d at %+.4f rad/s (ramped), others at 0.\n", joint, qd);
-    std::printf("[dry-run] j%d would end up near %+.4f rad if the arm tracks it.\n",
-                joint, fb.q[joint] + travel * (qd < 0 ? -1 : 1));
+    std::printf(
+        "\n[dry-run] would put ALL actuators in kVelocity and command "
+        "j%d at %+.4f rad/s (ramped), others at 0.\n",
+        joint, qd);
+    std::printf("[dry-run] j%d would end up near %+.4f rad if the arm tracks it.\n", joint,
+                fb.q[joint] + travel * (qd < 0 ? -1 : 1));
     t.safe_shutdown();
     return 0;
   }
@@ -254,9 +285,10 @@ int main(int argc, char** argv) {
   JointFeedback entry;
   t.receive(entry);
   std::printf("\n[vprobe] entry q[j%d] = %+.4f rad\n", joint, entry.q[joint]);
-  std::printf("[vprobe] ALL actuators go to VELOCITY mode. This path has never "
-              "run on this arm.\n"
-              "[vprobe] starting in 3s — e-stop in reach. Ctrl-C aborts.\n");
+  std::printf(
+      "[vprobe] ALL actuators go to VELOCITY mode. This path has never "
+      "run on this arm.\n"
+      "[vprobe] starting in 3s — e-stop in reach. Ctrl-C aborts.\n");
   std::this_thread::sleep_for(std::chrono::seconds(3));
 
   t.set_servoing_low_level();
@@ -272,7 +304,7 @@ int main(int argc, char** argv) {
   while (!g_stop.load()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     const double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    if (el > duration_s + 0.5) break;      // +0.5s so the ramp-down completes
+    if (el > duration_s + 0.5) break;  // +0.5s so the ramp-down completes
   }
   stop = true;
   rt.join();
@@ -286,21 +318,25 @@ int main(int argc, char** argv) {
   const double peak_qd = mode.peak_hold_qd();
 
   std::printf("\n[vprobe] commanded qd (hold phase): %+.4f rad/s\n", qd);
-  std::printf("[vprobe] measured  qd (hold mean):   %+.4f rad/s   (peak %+.4f)\n",
-              mean_qd, peak_qd);
-  std::printf("[vprobe] q[j%d]: %+.4f -> %+.4f  (moved %+.4f rad, %+.2f deg)\n",
-              joint, q0[joint], q1[joint], moved, moved * kRad2Deg);
+  std::printf("[vprobe] measured  qd (hold mean):   %+.4f rad/s   (peak %+.4f)\n", mean_qd,
+              peak_qd);
+  std::printf("[vprobe] q[j%d]: %+.4f -> %+.4f  (moved %+.4f rad, %+.2f deg)\n", joint, q0[joint],
+              q1[joint], moved, moved * kRad2Deg);
 
   const char* verdict;
-  if (mode.faulted())                          verdict = "FAULTS  — the transport reported a fault";
+  if (mode.faulted())
+    verdict = "FAULTS  — the transport reported a fault";
   else if (std::abs(mean_qd) > 0.25 * std::abs(qd) && std::abs(moved) > 0.2 * travel)
-                                               verdict = "TRACKS  — velocity mode is honoured";
-  else if (std::abs(moved) < 0.05 * travel)    verdict = "IGNORES — command accepted and silently dropped";
-  else                                         verdict = "PARTIAL — it moved, but not as commanded; read the numbers above";
+    verdict = "TRACKS  — velocity mode is honoured";
+  else if (std::abs(moved) < 0.05 * travel)
+    verdict = "IGNORES — command accepted and silently dropped";
+  else
+    verdict = "PARTIAL — it moved, but not as commanded; read the numbers above";
   std::printf("\n[vprobe] VERDICT: %s\n", verdict);
   if (use_sim) {
-    std::printf("[vprobe] (--sim has no plant, so IGNORES here is expected and "
-                "is not a result about the hardware.)\n");
+    std::printf(
+        "[vprobe] (--sim has no plant, so IGNORES here is expected and "
+        "is not a result about the hardware.)\n");
   }
   return 0;
 }

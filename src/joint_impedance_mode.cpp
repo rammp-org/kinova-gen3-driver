@@ -1,6 +1,8 @@
 #include "kinova_lowlevel/joint_impedance_mode.h"
+
 #include <algorithm>
 #include <cmath>
+
 #include "kinova_lowlevel/units.h"
 namespace kinova {
 
@@ -11,8 +13,7 @@ JointImpedanceMode::JointImpedanceMode(Dynamics& dyn, JointImpedanceParams p)
   dyn.joint_limits(q_lower_urdf_, q_upper_urdf_);
   dyn.velocity_limits(v_max_urdf_);
   for (int i = 0; i < kNumJoints; ++i) {
-    continuous_[i] =
-        !std::isfinite(q_lower_urdf_[i]) && !std::isfinite(q_upper_urdf_[i]);
+    continuous_[i] = !std::isfinite(q_lower_urdf_[i]) && !std::isfinite(q_upper_urdf_[i]);
   }
   seed_limits(p);
   ik_.set_params(p.ik);
@@ -30,7 +31,9 @@ void JointImpedanceMode::seed_limits(JointImpedanceParams& p) const noexcept {
 }
 
 ActuatorModes JointImpedanceMode::required_modes() const {
-  ActuatorModes modes; modes.fill(ActuatorMode::kTorque); return modes;
+  ActuatorModes modes;
+  modes.fill(ActuatorMode::kTorque);
+  return modes;
 }
 
 JointImpedanceParams JointImpedanceMode::params() const noexcept {
@@ -49,7 +52,7 @@ void JointImpedanceMode::set_target(const Pose& x_d) noexcept {
   ext_target_[next] = x_d;
   ext_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kPose, std::memory_order_release);
-  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
+  wd_.bump();  // BOTH setters must bump, or a streamed pose reads as stale
 }
 
 void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
@@ -57,7 +60,7 @@ void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
   ext_q_target_[next] = q_d;
   jt_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kJoint, std::memory_order_release);
-  wd_.bump();   // BOTH setters must bump, or a streamed pose reads as stale
+  wd_.bump();  // BOTH setters must bump, or a streamed pose reads as stale
 }
 
 // s >= 0 arms with s; s < 0 restores this mode's own configured default.
@@ -66,7 +69,7 @@ void JointImpedanceMode::set_command_timeout(double s) noexcept {
 }
 
 void JointImpedanceMode::on_enter(const JointFeedback& fb) {
-  entry_pose_ = dyn_.fk(fb.q);                 // hold where we are
+  entry_pose_ = dyn_.fk(fb.q);  // hold where we are
   // The reference starts exactly at the measured configuration, then integrates
   // OPEN-LOOP. Re-seeding from fb.q every cycle would collapse the spring to zero
   // error and degenerate this into rigid tracking, losing all compliance.
@@ -78,9 +81,8 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
   frozen_ = false;
 }
 
-void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
-                                 JointCommand& out) {
-  const JointImpedanceParams p = params();   // own a snapshot for the whole cycle
+void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
+  const JointImpedanceParams p = params();  // own a snapshot for the whole cycle
 
   // Staleness: the stream stopped, so stop chasing it. Freeze the reference at
   // the MEASURED configuration -- the spring error collapses to zero and the arm
@@ -100,7 +102,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   // force until a real command arrives, which is also the honest reading of
   // "frozen": disarming the watchdog is not a command and must not un-freeze.
   const bool stale = wd_.tick(dt_s);
-  if (wd_.fresh()) frozen_ = false;   // only a fresh command releases the freeze
+  if (wd_.fresh()) frozen_ = false;  // only a fresh command releases the freeze
   if (stale) {
     frozen_ = true;
     q_d_ = fb.q;
@@ -122,8 +124,8 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
     const Pose target = (src == TargetSource::kPose)
                             ? ext_target_[ext_active_.load(std::memory_order_acquire)]
                             : entry_pose_;
-    ik_.set_params(p.ik);                    // fixed-size copy, no alloc
-    last_ik_ = ik_.solve(target, q_d_);      // warm-started from last cycle
+    ik_.set_params(p.ik);                // fixed-size copy, no alloc
+    last_ik_ = ik_.solve(target, q_d_);  // warm-started from last cycle
   }
 
   // Bound reference speed so a teleported target ramps in instead of slamming.
@@ -166,9 +168,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   // Ramp scales the spring 0->1 over gain_ramp_s on entry; gravity is ALWAYS
   // applied in full so the arm never sags while the spring fades in. ramp uses
   // elapsed-at-start-of-cycle, then advances.
-  const double ramp = (p.gain_ramp_s <= 0.0)
-                          ? 1.0
-                          : std::min(1.0, ramp_elapsed_ / p.gain_ramp_s);
+  const double ramp = (p.gain_ramp_s <= 0.0) ? 1.0 : std::min(1.0, ramp_elapsed_ / p.gain_ramp_s);
   tau_ = g_ + ramp * tau_;
   ramp_elapsed_ += dt_s;
 
@@ -177,7 +177,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s,
 
   out.mode = ActuatorMode::kTorque;
   out.torque = tau_;
-  out.position = fb.q;                       // passthrough for following-error hold
+  out.position = fb.q;  // passthrough for following-error hold
 }
 
 }  // namespace kinova

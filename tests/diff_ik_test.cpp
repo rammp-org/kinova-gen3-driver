@@ -1,11 +1,15 @@
-#include <gtest/gtest.h>
-#include <cmath>
 #include "kinova_lowlevel/diff_ik.h"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
 using namespace kinova;
 
 namespace {
 JointVec sample_q() {
-  JointVec q; q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2; return q;
+  JointVec q;
+  q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2;
+  return q;
 }
 // Solver tuned for tests: converge fully rather than take one teleop-sized step.
 DiffIkParams converging_params() {
@@ -27,7 +31,9 @@ TEST(DiffIk, ConvergesToReachablePoseFromPerturbedSeed) {
 
   DiffIkSolver ik(dyn, converging_params());
   JointVec q = q_true;
-  q[1] += 0.15; q[3] -= 0.20; q[5] += 0.10;      // perturbed warm start
+  q[1] += 0.15;
+  q[3] -= 0.20;
+  q[5] += 0.10;  // perturbed warm start
 
   IkResult r = ik.solve(target, q);
   EXPECT_TRUE(r.converged);
@@ -45,7 +51,7 @@ TEST(DiffIk, WarmStartAtSolutionIsNoOp) {
   JointVec q = q_true;
   IkResult r = ik.solve(dyn.fk(q_true), q);
   EXPECT_TRUE(r.converged);
-  EXPECT_EQ(r.iters, 0);                          // returned before doing any work
+  EXPECT_EQ(r.iters, 0);  // returned before doing any work
   EXPECT_NEAR((q - q_true).norm(), 0.0, 1e-12);
 }
 
@@ -76,7 +82,7 @@ TEST(DiffIk, RespectsHardJointLimits) {
 
 TEST(DiffIk, UnreachableTargetStaysBoundedAndFinite) {
   Dynamics dyn(URDF_PATH);
-  DiffIkParams p;                                  // production-ish: 4 iters, clamps on
+  DiffIkParams p;  // production-ish: 4 iters, clamps on
   dyn.joint_limits(p.q_lower, p.q_upper);
   DiffIkSolver ik(dyn, p);
   Pose target = dyn.fk(sample_q());
@@ -87,8 +93,7 @@ TEST(DiffIk, UnreachableTargetStaysBoundedAndFinite) {
   ik.solve(target, q);
   EXPECT_FALSE(q.hasNaN());
   // Per-iteration joint clamp bounds total motion by max_iters * max_joint_step.
-  EXPECT_LE((q - q0).lpNorm<Eigen::Infinity>(),
-            p.max_iters * p.max_joint_step + 1e-9);
+  EXPECT_LE((q - q0).lpNorm<Eigen::Infinity>(), p.max_iters * p.max_joint_step + 1e-9);
 }
 
 TEST(DiffIk, PostureBiasMovesConfigWithoutBreakingTheTask) {
@@ -99,13 +104,13 @@ TEST(DiffIk, PostureBiasMovesConfigWithoutBreakingTheTask) {
   DiffIkParams p = converging_params();
   p.posture_gain = 0.3;
   p.q_rest = q_true;
-  p.q_rest[2] += 0.5;                              // pull the redundant DOF
+  p.q_rest[2] += 0.5;  // pull the redundant DOF
   DiffIkSolver ik(dyn, p);
 
   JointVec q = q_true;
   IkResult r = ik.solve(target, q);
-  EXPECT_GT((q - q_true).norm(), 1e-3);            // the posture bias actually moved it
-  EXPECT_LT(r.pos_err, 1e-3);                      // ...without breaking the task
+  EXPECT_GT((q - q_true).norm(), 1e-3);  // the posture bias actually moved it
+  EXPECT_LT(r.pos_err, 1e-3);            // ...without breaking the task
   EXPECT_LT(r.rot_err, 1e-2);
 }
 
@@ -124,5 +129,5 @@ TEST(DiffIk, PostureErrorWrapsForContinuousJoints) {
   JointVec q = sample_q();
   q[0] = -3.0;
   ik.solve(dyn.fk(q), q);
-  EXPECT_LT(q[0], -3.0);        // wrapped: moves NEGATIVE, toward -pi and around
+  EXPECT_LT(q[0], -3.0);  // wrapped: moves NEGATIVE, toward -pi and around
 }

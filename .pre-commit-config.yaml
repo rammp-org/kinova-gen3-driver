@@ -1,0 +1,47 @@
+# Style and hygiene gates for the driver core. Hook revisions are pinned;
+# updating them is a deliberate PR (`pre-commit autoupdate`), never silent drift.
+#
+# NOT here yet, on purpose: clang-format. This repo has no .clang-format and
+# ~40 source files written to a consistent house style by hand. Adopting it
+# means one bulk reformat commit plus a .git-blame-ignore-revs entry, which is
+# its own reviewable change -- not a rider on the CI setup. See #36.
+repos:
+  # General housekeeping
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '(\.md$|\.markdown$)'
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+        exclude: '\.(dae|stl|obj|ply|fbx)$'
+      - id: check-yaml
+      - id: check-xml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # C++. Pinned to the SAME version used to generate the sweeping reformat in
+  # #47 -- clang-format output differs between major versions, so a mismatch here
+  # would put local and CI permanently at odds.
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+
+  # GitHub Actions. The workflows are now a load-bearing artifact of this repo,
+  # so they get a linter of their own.
+  # v1.7.12, not v1.6.27: the older release predates GitHub's arm64 hosted
+  # runners and rejects `ubuntu-22.04-arm` as an unknown label.
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  # Shell scripts -- scripts/rt_setup.sh and rt_grant_once.sh grant RT
+  # privileges, so a quoting bug there is not a style problem.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck

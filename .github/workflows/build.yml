@@ -1,0 +1,273 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A push to a PR branch supersedes the run already in flight. Without this
+# every rapid push stacks another four-runner matrix -- two of them arm64
+# KORTEX builds that each download an SDK -- and runs them all to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Every job builds on a runner of its own architecture: ubuntu-22.04 for amd64,
+# ubuntu-22.04-arm for arm64. GitHub gives public repositories both at no cost,
+# which is why nothing here emulates -- a QEMU cross build translates every
+# instruction and costs many times the wall clock for the same answer.
+#
+# arm64 is not a nice-to-have for this repo: the driver's only deployment target
+# is an aarch64 Jetson, so amd64 alone would test an architecture nobody runs.
+
+jobs:
+  # The default build is SIM-ONLY and needs no KORTEX SDK, so the whole test
+  # suite is reachable on a hosted runner with no robot. Pinocchio arrives as a
+  # cmeel wheel, the same mechanism the Jetson uses -- there is no second
+  # dependency story to maintain.
+  sim:
+    name: Sim build + tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp-deps
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+
+      # NOT a timing gate, and the step is named so it cannot be read as one.
+      # These runners are not PREEMPT_RT, have no isolated core and cannot get
+      # SCHED_FIFO -- rt_system degrades to SCHED_OTHER by design. Nothing here
+      # says anything about latency or jitter; those stay a Jetson job (#6).
+      #
+      # What it does gate is the half of the RT contract that is a property of
+      # the CODE rather than of the kernel: majflt_delta == 0 and
+      # ring.dropped() == 0 -- compute() and the executor cycle touched no new
+      # page and the SPSC ring never overflowed, in steady state after a warm-up
+      # run. An allocation, a lock or a blocking call added to the RT path breaks
+      # those on ANY kernel.
+      #
+      # NanosleepPacingProducesSamples is excluded deliberately. It is the one
+      # case in the suite that asserts neither of those -- it asserts a
+      # throughput floor (consumed > 50 over a 300 ms window), which is a timing
+      # claim, and on an oversubscribed hosted runner it could turn this gate red
+      # for exactly the reason the step says is out of scope. It still runs in
+      # ctest above; it just does not speak for allocation-freedom.
+      #
+      # Called out as its own step rather than left inside ctest's summary so a
+      # regression is legible from the job list without opening a log.
+      - name: Allocation-freedom gate (RtSafety*)
+        run: |
+          ./build/unit_tests \
+            --gtest_filter='RtSafety*-RtSafety.NanosleepPacingProducesSamples'
+
+      # The install/export path is what downstream repos actually consume, and
+      # nothing else in CI touches it -- configure and build never run install().
+      # This installs to a temp prefix and configures a throwaway consumer
+      # against it, which is the only way to know the exported package works.
+      #
+      # It also proves the version machinery rather than asserting it: the current
+      # major.minor must be satisfied and the NEXT major must be refused. The
+      # second half is the real test -- if kinova_lowlevelConfigVersion.cmake
+      # were missing or wrong, the first would still pass by accident.
+      #
+      # Both are derived from project(VERSION), never hardcoded: a literal 1.0/2.0
+      # here would invert on the day the project legitimately reaches 2.0.0 and
+      # block the release with a misleading failure.
+      - name: Install, and consume the exported package
+        run: |
+          set -euo pipefail
+          # package.xml is the single source of truth; CMake reads it (see the
+          # version block at the top of CMakeLists.txt). Read it the same way here
+          # so this gate asks the same question a consumer would.
+          VER="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' package.xml)"
+          test -n "$VER" || { echo "::error::could not read <version> from package.xml"; exit 1; }
+          MAJOR="${VER%%.*}"; REST="${VER#*.}"; MINOR="${REST%%.*}"
+          WANT_OK="${MAJOR}.${MINOR}"
+          WANT_BAD="$((MAJOR + 1)).0"
+
+          cmake --install build --prefix /tmp/inst > /dev/null
+          CVF=/tmp/inst/lib/cmake/kinova_lowlevel/kinova_lowlevelConfigVersion.cmake
+          test -f "$CVF"
+
+          # The whole chain in one assertion: package.xml -> project(VERSION) ->
+          # the generated ConfigVersion file -> what actually got installed. If the
+          # derivation in CMakeLists.txt ever silently stops matching, this is
+          # where it shows, rather than in a consumer's build months later.
+          if ! grep -q "PACKAGE_VERSION \"$VER\"" "$CVF"; then
+            echo "::error::installed ConfigVersion.cmake does not declare $VER (from package.xml):"
+            grep -i "PACKAGE_VERSION" "$CVF" || true
+            exit 1
+          fi
+          echo "package.xml $VER reached the installed ConfigVersion.cmake"
+
+          mkdir -p /tmp/consumer
+          cat > /tmp/consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer CXX)
+          find_package(kinova_lowlevel ${WANT} CONFIG REQUIRED)
+          EOF
+
+          echo "--- a $WANT_OK request must be satisfied"
+          cmake -S /tmp/consumer -B /tmp/consumer/b1 -DWANT="$WANT_OK" \
+            -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null
+
+          echo "--- a $WANT_BAD request must be refused (SameMajorVersion)"
+          if cmake -S /tmp/consumer -B /tmp/consumer/b2 -DWANT="$WANT_BAD" \
+               -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null 2>&1; then
+            echo "::error::find_package(kinova_lowlevel $WANT_BAD) SUCCEEDED against a $VER install -- the version file is not gating"
+            exit 1
+          fi
+          echo "Exported package resolves at $WANT_OK and refuses $WANT_BAD."
+
+      # End-to-end proof that the executor, transport, dynamics and telemetry
+      # actually run a loop together -- the unit tests exercise the pieces. Two
+      # seconds at 1 kHz; the timing numbers it prints are meaningless here (see
+      # above) and are deliberately not asserted on.
+      - name: Sim smoke -- the loop runs end to end
+        run: |
+          ./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf \
+            --rate 1000 --duration 2
+          ./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf \
+            --rate 1000 --duration 2
+
+  # The real-arm path. src/kortex_transport.cpp compiles ONLY under
+  # -DKINOVA_ENABLE_KORTEX=ON, so without this job those 358 lines sit outside
+  # every gate and a change that broke only them would reach the robot uncaught.
+  # It is the sole real-path consumer of Transport, joint_types and units, and
+  # the history shows shared-type changes rippling into it repeatedly (#43).
+  #
+  # The SDK comes from Kinova's public artifactory and needs no credentials,
+  # which is the whole reason this can be automated at all. Per-architecture:
+  #   arm64 -> linux_aarch64_gcc_7.4.zip   (the Jetson; the proven path)
+  #   amd64 -> linux_x86-64_gcc_5.4.zip    (newest x86-64 Kinova ships for 2.8.0)
+  # Note the mismatch -- aarch64 gets a gcc 7.4 build, x86-64 only gcc 5.4, which
+  # spans the C++11 ABI change. That makes LINKING, not just compiling, the part
+  # worth guarding on amd64.
+  #
+  # amd64 earns its place beyond coverage: the driver reaches the arm over IP,
+  # so an x86-64 build lets a laptop drive the robot without a Jetson.
+  #
+  # No robot is touched. This job builds; it never runs anything that opens a
+  # connection.
+  kortex:
+    name: KORTEX build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+            sdk_zip: linux_x86-64_gcc_5.4.zip
+            sdk_sha256: 3c5cbb273b366c5b7cc277abed29574b38b4d2c2ce02877178290adbb76d7c3c
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            sdk_zip: linux_aarch64_gcc_7.4.zip
+            sdk_sha256: b16b184424724486664f4430fd6e43a8da703ed4b46dfdb25f5e36b8ac4732ae
+    runs-on: ${{ matrix.runner }}
+    env:
+      KORTEX_SDK_BASE: https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0
+      KORTEX_HW_DIR: /opt/kortex/kortex_api_2.8.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp-deps
+
+      - name: Fetch the KORTEX C++ SDK
+        run: |
+          sudo mkdir -p "$KORTEX_HW_DIR"
+          sudo chown "$USER" "$KORTEX_HW_DIR"
+          curl -fsSL "${KORTEX_SDK_BASE}/${{ matrix.sdk_zip }}" -o /tmp/kortex.zip
+
+          # The URL pins a version, but an Artifactory path is mutable: a replaced
+          # or truncated artifact would silently change what CI calls green and
+          # what gets statically linked into the binary that drives the arm.
+          # Verify before unzipping, not after.
+          echo "${{ matrix.sdk_sha256 }}  /tmp/kortex.zip" | sha256sum -c - || {
+            echo "::error::KORTEX SDK checksum mismatch -- the published artifact changed. Verify it with Kinova before updating the pin."
+            exit 1
+          }
+
+          python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            /tmp/kortex.zip "$KORTEX_HW_DIR"
+          rm -f /tmp/kortex.zip
+          # Fail here, with a clear message, rather than inside CMake's guard.
+          test -f "$KORTEX_HW_DIR/lib/release/libKortexApiCpp.a"
+          test -f "$KORTEX_HW_DIR/include/client/RouterClient.h"
+
+      - name: Configure with KORTEX enabled
+        run: |
+          cmake -S . -B build-kortex \
+            -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX" \
+            -DKINOVA_ENABLE_KORTEX=ON \
+            -DKORTEX_HW_DIR="$KORTEX_HW_DIR"
+
+      - name: Build
+        run: cmake --build build-kortex -j"$(nproc)"
+
+      # A green build is not proof the real transport is IN the binary: if
+      # kortex_transport.cpp silently dropped out of the source list, or an app
+      # kept KINOVA_NO_KORTEX, everything would still compile and link -- against
+      # the sim fallback. Assert the symbol is actually there.
+      - name: The binary carries the real KortexTransport
+        run: |
+          if ! nm -C build-kortex/libkinova_lowlevel.a 2>/dev/null \
+               | grep -q 'kinova::KortexTransport::connect'; then
+            echo "::error::libkinova_lowlevel.a has no KortexTransport::connect -- the real transport did not make it into the build"
+            exit 1
+          fi
+          echo "KortexTransport is linked in."
+
+      # The tests are transport-agnostic (SimTransport only) but this proves the
+      # KORTEX-enabled binary is not merely linkable -- it runs, and the suite
+      # behaves identically with the real transport compiled in. Nothing here
+      # opens a connection: no --ip is ever passed.
+      - name: Tests, with KORTEX compiled in
+        run: ctest --test-dir build-kortex --output-on-failure
+
+  # The error path: with the option ON and no SDK, configure must fail loudly and
+  # for the documented reason. One runner is enough -- this tests CMake logic,
+  # which is architecture-independent.
+  kortex-guard:
+    name: KORTEX option fails loudly without an SDK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp-deps
+
+      - name: Configure with KORTEX on and no SDK present
+        run: |
+          if cmake -S . -B build-guard -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX" \
+               -DKINOVA_ENABLE_KORTEX=ON -DKORTEX_HW_DIR=/nonexistent \
+               > configure.log 2>&1; then
+            echo "::error::configure SUCCEEDED with KINOVA_ENABLE_KORTEX=ON and no SDK -- the guard in CMakeLists.txt is not firing"
+            exit 1
+          fi
+          grep -q "cannot find KORTEX API headers" configure.log || {
+            echo "::error::configure failed, but not with the documented KORTEX guard message"
+            cat configure.log
+            exit 1
+          }
+          echo "Guard fired as documented."
