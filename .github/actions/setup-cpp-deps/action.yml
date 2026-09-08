@@ -32,4 +32,6 @@ runs:
         PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
         test -f "$PREFIX/lib/cmake/pinocchio/pinocchioConfig.cmake"
         echo "CMEEL_PREFIX=$PREFIX" >> "$GITHUB_ENV"
-        echo "LD_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+        # Append: empty on today's hosted images, but a self-hosted Jetson runner
+        # (the eventual home of the timing job, #6) may well set it already.
+        echo "LD_LIBRARY_PATH=$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"

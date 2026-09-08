@@ -12,10 +12,25 @@
 # (pinocchioConfig.cmake lives at <prefix>/lib/cmake/pinocchio/.)
 
 cmake_minimum_required(VERSION 3.16)
-# VERSION is the single source of truth for the release number: it drives the
-# generated kinova_lowlevelConfigVersion.cmake below, and package.xml must be
-# kept in step with it by hand (ROS tooling parses that file, not this one).
-project(kinova_gen3_driver VERSION 1.0.0 LANGUAGES CXX)
+
+# --- version -------------------------------------------------------------------
+# package.xml is the SINGLE SOURCE OF TRUTH for the release number, and CMake
+# reads it rather than repeating it. It has to be that way round: ROS tooling
+# parses package.xml as static XML and cannot run CMake to ask, so that file is
+# the one number that genuinely cannot be generated. Repeating it here and
+# checking the two agree would be policing a duplication instead of removing it.
+#
+# Bumping a release therefore means editing package.xml and nothing else.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/package.xml" _kinova_pkg_xml)
+if(NOT _kinova_pkg_xml MATCHES "<version>([0-9]+\\.[0-9]+\\.[0-9]+)</version>")
+    message(FATAL_ERROR
+        "Could not read a semantic <version> out of package.xml. That file is the "
+        "single source of truth for the release number -- fix it there.")
+endif()
+set(KINOVA_VERSION "${CMAKE_MATCH_1}")
+unset(_kinova_pkg_xml)
+
+project(kinova_gen3_driver VERSION ${KINOVA_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

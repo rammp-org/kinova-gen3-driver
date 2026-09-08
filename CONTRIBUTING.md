@@ -78,6 +78,7 @@ green amd64 build alone would be testing a machine nobody runs.
 |---|---|
 | `ctest` | The suite passes. |
 | `unit_tests --gtest_filter='RtSafety*'` | **Allocation-freedom** — zero major page faults and zero dropped telemetry samples in steady state. |
+| Install + consume | The exported package resolves at the current major.minor, refuses the next major, and `package.xml` agrees with `project(VERSION)`. |
 | Sim smoke | The executor, transport, dynamics and telemetry run a 1 kHz loop together. |
 | **KORTEX build** | The real-arm transport still compiles and links, and the symbol is actually in the binary. The SDK is fetched from Kinova's public artifactory, per architecture. |
 | KORTEX guard | With the option on and no SDK, configure fails loudly and for the documented reason. |
@@ -100,10 +101,14 @@ The RT contract has two halves, and CI only gates one of them.
 
 CI runs on hosted runners. They are not `PREEMPT_RT`, have no isolated core,
 and cannot get `SCHED_FIFO` — `rt_system` degrades to `SCHED_OTHER` by design.
-So the half CI gates is the one that is a property of the *code*: every
-`RtSafety*` case asserts `majflt_delta == 0` and `ring.dropped() == 0` after a
-warm-up run, which is broken by an allocation, a lock, or a blocking call on the
-RT path regardless of which kernel it runs on.
+So the half CI gates is the one that is a property of the *code*: the allocation
+cases assert `majflt_delta == 0` and `ring.dropped() == 0` after a warm-up run,
+which is broken by an allocation, a lock, or a blocking call on the RT path
+regardless of which kernel it runs on.
+
+`RtSafety.NanosleepPacingProducesSamples` is the exception and is excluded from
+the gate: it asserts a throughput floor rather than either of those, which is a
+timing claim this runner cannot honestly make. It still runs under `ctest`.
 
 The other half — latency, jitter, deadline misses — is a property of the *kernel
 and the machine*, and CI says nothing about it. A green build is not evidence
@@ -183,12 +188,23 @@ it, but it is not the trap.
 
 ### Cutting a release
 
-1. Bump `project(... VERSION x.y.z)` in `CMakeLists.txt` **and** `<version>` in
-   `package.xml` — the generated `kinova_lowlevelConfigVersion.cmake` follows the
-   first, and ROS tooling reads the second.
-2. Merge `dev` into `main`.
-3. Tag `main` as `vx.y.z` and push the tag.
-4. Move the consuming repo's `.repos` pin to the new tag.
+Open a `release: vX.Y.Z` PR into `dev` containing **only** the bump and the
+changelog, so the diff is the claim and is reviewable on its own:
+
+1. Bump `<version>` in `package.xml`. That is the only place the number lives —
+   `CMakeLists.txt` reads it, and the generated
+   `kinova_lowlevelConfigVersion.cmake` follows from that.
+2. In `CHANGELOG.md`, rename `Unreleased` to the new version, date it, and add
+   the comparison links at the bottom.
+3. Merge that PR, then merge `dev` into `main`.
+4. **Wait for CI to go green on `main`**, then tag it `vX.Y.Z` and push the tag —
+   so the tag points at a commit that has passed the gates, not one you hope will.
+5. Move the consuming repo's `.repos` pin to the new tag. This ordering is forced:
+   a consumer can only pin a tag that exists.
+
+Bump at release time, not on every merge — you cannot know whether the next
+release is minor or major until you see what landed. And the sharpest signal for
+MAJOR is not the diff: it is whether `kinova-gen3-ros2` needed an adoption commit.
 
 Compatibility is `SameMajorVersion`, so a consumer asking
 `find_package(kinova_lowlevel 1.0 CONFIG REQUIRED)` accepts any 1.x and refuses
