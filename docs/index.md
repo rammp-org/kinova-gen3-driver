@@ -42,13 +42,16 @@ feature list. This table is the honest version.
 | `GripperController` | Yes — measured on the arm | In-loop RT-safety case only | Commanded/measured force maxima are independently guessed |
 | Interface tier | Yes — [stream check](integration/stream_check.md), and `ExecuteJointTrajectory` end to end | RT-safety cases in loop | Goals complete on elapsed time, not arrival ([#17](https://github.com/rammp-org/kinova-gen3-driver/issues/17)); `joint_names` ignored ([#16](https://github.com/rammp-org/kinova-gen3-driver/issues/16)) |
 
-Two things this table is deliberately not shy about: the URDF masses do not match
+One thing this table is deliberately not shy about: the URDF masses do not match
 the true system ([#5](https://github.com/rammp-org/kinova-gen3-driver/issues/5)),
-which weakens every gravity-model number downstream of it; and the driver ships
-**0.x tags** because the API is still moving
-([#37](https://github.com/rammp-org/kinova-gen3-driver/issues/37)). Everything
-tracked for a stable release is on the
-[v1.0.0 milestone](https://github.com/rammp-org/kinova-gen3-driver/milestone/1).
+which weakens every gravity-model number downstream of it.
+
+Nothing above is a reason not to build on this driver — it is a list of what to
+check before trusting a particular number, and it is why the API is now stable
+even where the characterisation is not. From **1.0.0** on the driver follows
+semantic versioning and consumers pin an exact tag; see
+[Versioning](https://github.com/rammp-org/kinova-gen3-driver/blob/main/CONTRIBUTING.md#versioning)
+for what the public surface covers.
 
 The pages under `integration/` linked above are bring-up and hardware procedures
 for whoever is at the arm; they live in the repo rather than in this site's nav.
