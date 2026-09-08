@@ -1,6 +1,7 @@
+#include "kinova_lowlevel/feedback_tap.h"
+
 #include <gtest/gtest.h>
 
-#include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/transport.h"
 
 using namespace kinova;
@@ -53,9 +54,9 @@ TEST(FeedbackTap, ExchangePublishesInnerFeedbackIntoSnapshot) {
   JointFeedback fb;
   tap.exchange(cmd, fb);
 
-  EXPECT_NEAR(fb.q[0], 0.42, 1e-12);   // caller still gets the feedback
+  EXPECT_NEAR(fb.q[0], 0.42, 1e-12);  // caller still gets the feedback
   JointFeedback snapped;
-  ASSERT_TRUE(snap.load(snapped));     // and it was tapped into the snapshot
+  ASSERT_TRUE(snap.load(snapped));  // and it was tapped into the snapshot
   EXPECT_NEAR(snapped.q[0], 0.42, 1e-12);
 }
 
@@ -85,5 +86,5 @@ TEST(FeedbackTap, ForwardsCommandsAndCallsToInner) {
   cmd.torque.setConstant(3.0);
   JointFeedback fb;
   tap.exchange(cmd, fb);
-  EXPECT_NEAR(inner.last_cmd.torque[0], 3.0, 1e-12);   // reached the wrapped transport
+  EXPECT_NEAR(inner.last_cmd.torque[0], 3.0, 1e-12);  // reached the wrapped transport
 }

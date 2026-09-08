@@ -27,13 +27,14 @@ class SimTransport : public Transport {
   // cap (see GripperFeedback::effort). Do not calibrate a holding-detector against
   // this sim's effort value.
   void set_gripper_blocked_at(float position) { gripper_block_ = position; }
+
  private:
   void step_gripper(const GripperCommand&);
   JointFeedback state_;
   JointCommand last_cmd_;
   int latency_us_ = 0;
   uint64_t frame_ = 0;
-  float gripper_lag_   = 1.0f;    // default: reach the target in one cycle (old behaviour)
-  float gripper_block_ = -1.0f;   // no object
+  float gripper_lag_ = 1.0f;     // default: reach the target in one cycle (old behaviour)
+  float gripper_block_ = -1.0f;  // no object
 };
 }  // namespace kinova

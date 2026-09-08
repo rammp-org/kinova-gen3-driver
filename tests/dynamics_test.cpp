@@ -1,6 +1,8 @@
-#include <gtest/gtest.h>
-#include <cmath>
 #include "kinova_lowlevel/dynamics.h"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
 using namespace kinova;
 TEST(Dynamics, LoadsModel) {
   Dynamics dyn(URDF_PATH);
@@ -18,13 +20,15 @@ TEST(Dynamics, GravityFiniteAndLoadsJointOffAxis) {
   JointVec q = JointVec::Zero(), tau;
   dyn.gravity(q, tau);
   EXPECT_TRUE(tau.allFinite());
-  JointVec q2 = JointVec::Zero(); q2[1] = M_PI / 2.0;   // arm horizontal
-  JointVec tau2; dyn.gravity(q2, tau2);
+  JointVec q2 = JointVec::Zero();
+  q2[1] = M_PI / 2.0;  // arm horizontal
+  JointVec tau2;
+  dyn.gravity(q2, tau2);
   EXPECT_GT(tau2.cwiseAbs().maxCoeff(), 1.0);
 }
 TEST(Dynamics, DefaultEeFrameResolvesOn2f85) {
-  Dynamics dyn(URDF_PATH);                 // default frame "gen3_end_effector_link"
-  EXPECT_EQ(dyn.nv(), kNumJoints);         // ctor did not throw
+  Dynamics dyn(URDF_PATH);          // default frame "gen3_end_effector_link"
+  EXPECT_EQ(dyn.nv(), kNumJoints);  // ctor did not throw
 }
 
 TEST(Dynamics, UnknownFrameThrows) {
@@ -36,9 +40,9 @@ TEST(DynamicsFk, NeutralPoseIsFiniteUnitQuatInReach) {
   JointVec q = JointVec::Zero();
   Pose x = dyn.fk(q);
   EXPECT_TRUE(x.p.allFinite());
-  EXPECT_NEAR(x.R.norm(), 1.0, 1e-9);              // unit quaternion
-  EXPECT_GT(x.p.norm(), 0.05);                     // tip is away from base origin
-  EXPECT_LT(x.p.norm(), 1.5);                      // within physical reach
+  EXPECT_NEAR(x.R.norm(), 1.0, 1e-9);  // unit quaternion
+  EXPECT_GT(x.p.norm(), 0.05);         // tip is away from base origin
+  EXPECT_LT(x.p.norm(), 1.5);          // within physical reach
 }
 
 TEST(DynamicsFk, BaseYawRotatesTipAboutVerticalAxis) {
@@ -54,15 +58,15 @@ TEST(DynamicsFk, BaseYawRotatesTipAboutVerticalAxis) {
   Pose a = dyn.fk(q);
   q[0] = M_PI / 2.0;
   Pose b = dyn.fk(q);
-  EXPECT_NEAR(b.p.z(), a.p.z(), 1e-6);                          // vertical axis: height held
-  EXPECT_GT((b.p.head<2>() - a.p.head<2>()).norm(), 0.01);     // tip moved horizontally
+  EXPECT_NEAR(b.p.z(), a.p.z(), 1e-6);                      // vertical axis: height held
+  EXPECT_GT((b.p.head<2>() - a.p.head<2>()).norm(), 0.01);  // tip moved horizontally
 }
 
 namespace {
 // Angular part of a small rotation R_b * R_a^{-1} as a rotation vector.
 Eigen::Vector3d rotvec(const Eigen::Quaterniond& Ra, const Eigen::Quaterniond& Rb) {
   Eigen::Quaterniond qe = Rb * Ra.inverse();
-  if (qe.w() < 0) qe.coeffs() *= -1.0;     // shortest path
+  if (qe.w() < 0) qe.coeffs() *= -1.0;  // shortest path
   Eigen::AngleAxisd aa(qe.normalized());
   return aa.angle() * aa.axis();
 }
@@ -71,17 +75,19 @@ Eigen::Vector3d rotvec(const Eigen::Quaterniond& Ra, const Eigen::Quaterniond& R
 TEST(DynamicsJacobian, MatchesFiniteDifferenceOfFk) {
   Dynamics dyn(URDF_PATH);
   JointVec q;
-  q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2;     // a non-singular pose
-  Jacobian6 J; dyn.jacobian(q, J);
+  q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2;  // a non-singular pose
+  Jacobian6 J;
+  dyn.jacobian(q, J);
 
   const double eps = 1e-6;
   for (int i = 0; i < kNumJoints; ++i) {
-    JointVec qp = q; qp[i] += eps;
+    JointVec qp = q;
+    qp[i] += eps;
     Pose a = dyn.fk(q), b = dyn.fk(qp);
-    Eigen::Vector3d dlin = (b.p - a.p) / eps;          // world-frame linear vel
-    Eigen::Vector3d dang = rotvec(a.R, b.R) / eps;     // world-frame angular vel
-    EXPECT_NEAR((J.block<3,1>(0,i) - dlin).norm(), 0.0, 1e-4) << "lin col " << i;
-    EXPECT_NEAR((J.block<3,1>(3,i) - dang).norm(), 0.0, 1e-4) << "ang col " << i;
+    Eigen::Vector3d dlin = (b.p - a.p) / eps;       // world-frame linear vel
+    Eigen::Vector3d dang = rotvec(a.R, b.R) / eps;  // world-frame angular vel
+    EXPECT_NEAR((J.block<3, 1>(0, i) - dlin).norm(), 0.0, 1e-4) << "lin col " << i;
+    EXPECT_NEAR((J.block<3, 1>(3, i) - dang).norm(), 0.0, 1e-4) << "ang col " << i;
   }
 }
 TEST(Dynamics, JointLimitsMatchUrdf) {
@@ -97,9 +103,12 @@ TEST(Dynamics, JointLimitsMatchUrdf) {
     EXPECT_LT(lo[i], 0.0);
     EXPECT_GT(hi[i], 0.0);
   }
-  EXPECT_NEAR(lo[1], -2.41, 1e-6);  EXPECT_NEAR(hi[1], 2.41, 1e-6);
-  EXPECT_NEAR(lo[3], -2.66, 1e-6);  EXPECT_NEAR(hi[3], 2.66, 1e-6);
-  EXPECT_NEAR(lo[5], -2.23, 1e-6);  EXPECT_NEAR(hi[5], 2.23, 1e-6);
+  EXPECT_NEAR(lo[1], -2.41, 1e-6);
+  EXPECT_NEAR(hi[1], 2.41, 1e-6);
+  EXPECT_NEAR(lo[3], -2.66, 1e-6);
+  EXPECT_NEAR(hi[3], 2.66, 1e-6);
+  EXPECT_NEAR(lo[5], -2.23, 1e-6);
+  EXPECT_NEAR(hi[5], 2.23, 1e-6);
 }
 TEST(Dynamics, VelocityLimitsMatchUrdf) {
   Dynamics dyn(URDF_PATH);

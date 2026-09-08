@@ -67,7 +67,7 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
   int n = 0;
   size_t pos = 0;
   while (true) {
-    if (n == kNumJoints) return false;            // more values than joints
+    if (n == kNumJoints) return false;  // more values than joints
     const size_t comma = s.find(',', pos);
     const std::string tok =
         (comma == std::string::npos) ? s.substr(pos) : s.substr(pos, comma - pos);
@@ -75,14 +75,14 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
     try {
       size_t used = 0;
       vals[n++] = std::stod(tok, &used);
-      if (used != tok.size()) return false;       // trailing garbage in the token
+      if (used != tok.size()) return false;  // trailing garbage in the token
     } catch (const std::exception&) {
       return false;
     }
     if (comma == std::string::npos) break;
     pos = comma + 1;
   }
-  if (n == 1) {                                   // scalar broadcasts to all joints
+  if (n == 1) {  // scalar broadcasts to all joints
     out.setConstant(vals[0]);
     return true;
   }
@@ -127,45 +127,57 @@ int main(int argc, char** argv) {
     auto next_joint_vec = [&](const char* name, JointVec& out) {
       const std::string s = next(name);
       if (!parse_joint_vec(s, out)) {
-        std::cerr << name << " needs 1 or " << kNumJoints
-                  << " comma-separated numbers, got: " << s << "\n";
+        std::cerr << name << " needs 1 or " << kNumJoints << " comma-separated numbers, got: " << s
+                  << "\n";
         std::exit(2);
       }
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--ee-frame") ee_frame = next("--ee-frame");
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
-    else if (a == "--pacing") pacing_str = next("--pacing");
-    else if (a == "--duration") duration_s = std::stod(next("--duration"));
-    else if (a == "--csv") csv_path = next("--csv");
-    else if (a == "--scale") scale = std::stod(next("--scale"));
-    else if (a == "--damping") damping = std::stod(next("--damping"));
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
+    else if (a == "--pacing")
+      pacing_str = next("--pacing");
+    else if (a == "--duration")
+      duration_s = std::stod(next("--duration"));
+    else if (a == "--csv")
+      csv_path = next("--csv");
+    else if (a == "--scale")
+      scale = std::stod(next("--scale"));
+    else if (a == "--damping")
+      damping = std::stod(next("--damping"));
     else if (a == "--torque-limit") {
       next_joint_vec("--torque-limit", torque_limit_override);
       torque_limit_set = true;
-    }
-    else {
+    } else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
   else if (pacing_str != "sleepspin") {
     std::cerr << "--pacing must be sleepspin|nanosleep\n";
     std::exit(2);
   }
 
-  std::cout << "[bench] urdf=" << urdf << " ee_frame=" << ee_frame << " rate="
-            << rate_hz << "Hz pacing=" << pacing_str << " cpu=" << cpu
-            << " prio=" << rt_priority << " duration=" << duration_s
-            << "s sim=" << (use_sim ? "yes" : "no") << "\n";
+  std::cout << "[bench] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
+            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no") << "\n";
 
   Dynamics dyn(urdf, ee_frame);
 
@@ -215,15 +227,16 @@ int main(int argc, char** argv) {
         for (int i = 0; i < kNumJoints; ++i) {
           const double res = fb.tau[i] - tau_g[i];
           if (std::abs(res) > max_res) max_res = std::abs(res);
-          std::printf("  %d | %8.2f | %8.2f | %8.2f | %+9.3f\n", i + 1,
-                      fb.q[i] * kRad2Deg, fb.tau[i], tau_g[i], res);
+          std::printf("  %d | %8.2f | %8.2f | %8.2f | %+9.3f\n", i + 1, fb.q[i] * kRad2Deg,
+                      fb.tau[i], tau_g[i], res);
         }
-        std::printf("  -> max|residual| = %.3f Nm  (large/growing toward the tip "
-                    "=> URDF payload mismatch)\n\n", max_res);
+        std::printf(
+            "  -> max|residual| = %.3f Nm  (large/growing toward the tip "
+            "=> URDF payload mismatch)\n\n",
+            max_res);
         last_print = now;
       }
-      if (duration_s > 0.0 &&
-          std::chrono::duration<double>(now - start).count() >= duration_s) {
+      if (duration_s > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_s) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));  // ~50 Hz read
@@ -286,9 +299,9 @@ int main(int argc, char** argv) {
   }
 
   ResourceUsage usage_before = read_usage();  // NOTE: RUSAGE_THREAD; this is the
-                                               // main thread, which IS the RT loop
-                                               // thread since ex.run() runs here.
-  ex.run(g_stop);  // blocks on the main (RT) thread until stop
+                                              // main thread, which IS the RT loop
+                                              // thread since ex.run() runs here.
+  ex.run(g_stop);                             // blocks on the main (RT) thread until stop
   ResourceUsage usage_after = read_usage();
 
   t.safe_shutdown();
@@ -301,14 +314,12 @@ int main(int argc, char** argv) {
   const auto& mh = sink.compute_hist();
   std::cout << "\n==== benchmark report ====\n";
   std::cout << introspect() << "\n";
-  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min()
-            << " mean=" << ch.mean() << " p50=" << ch.percentile(0.50)
-            << " p99=" << ch.percentile(0.99) << " p99.9=" << ch.percentile(0.999)
-            << " max=" << ch.max() << "\n";
-  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min()
-            << " mean=" << mh.mean() << " p50=" << mh.percentile(0.50)
-            << " p99=" << mh.percentile(0.99) << " p99.9=" << mh.percentile(0.999)
-            << " max=" << mh.max() << "\n";
+  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min() << " mean=" << ch.mean()
+            << " p50=" << ch.percentile(0.50) << " p99=" << ch.percentile(0.99)
+            << " p99.9=" << ch.percentile(0.999) << " max=" << ch.max() << "\n";
+  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min() << " mean=" << mh.mean()
+            << " p50=" << mh.percentile(0.50) << " p99=" << mh.percentile(0.99)
+            << " p99.9=" << mh.percentile(0.999) << " max=" << mh.max() << "\n";
   std::cout << "dropped=" << ring.dropped() << "\n";
   std::cout << "page faults: minflt+=" << (usage_after.minflt - usage_before.minflt)
             << " majflt+=" << (usage_after.majflt - usage_before.majflt) << "\n";

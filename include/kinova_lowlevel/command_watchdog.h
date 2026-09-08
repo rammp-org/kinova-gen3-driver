@@ -40,8 +40,12 @@ class CommandWatchdog {
   bool tick(double dt_s) noexcept {
     const uint64_t c = count_.load(std::memory_order_acquire);
     fresh_ = (c != last_seen_);
-    if (fresh_) { last_seen_ = c; stale_s_ = 0.0; }
-    else        { stale_s_ += dt_s; }
+    if (fresh_) {
+      last_seen_ = c;
+      stale_s_ = 0.0;
+    } else {
+      stale_s_ += dt_s;
+    }
     const double t = timeout_s_.load(std::memory_order_acquire);
     return t > 0.0 && stale_s_ >= t;
   }
@@ -53,7 +57,7 @@ class CommandWatchdog {
   bool fresh() const noexcept { return fresh_; }
 
   double stale_for() const noexcept { return stale_s_; }
-  bool   armed()     const noexcept { return timeout_s_.load(std::memory_order_acquire) > 0.0; }
+  bool armed() const noexcept { return timeout_s_.load(std::memory_order_acquire) > 0.0; }
 
  private:
   // tick() runs on the RT thread, so both atomics must be genuine lock-free
@@ -65,10 +69,10 @@ class CommandWatchdog {
   static_assert(std::atomic<double>::is_always_lock_free,
                 "CommandWatchdog is on the RT path: atomic<double> must be lock-free");
 
-  std::atomic<uint64_t> count_{0};       // writer -> RT freshness signal
-  std::atomic<double>   timeout_s_{0.0};
-  uint64_t last_seen_ = 0;               // RT-owned
-  double   stale_s_   = 0.0;             // RT-owned
-  bool     fresh_     = false;           // RT-owned: last tick() saw a new command
+  std::atomic<uint64_t> count_{0};  // writer -> RT freshness signal
+  std::atomic<double> timeout_s_{0.0};
+  uint64_t last_seen_ = 0;  // RT-owned
+  double stale_s_ = 0.0;    // RT-owned
+  bool fresh_ = false;      // RT-owned: last tick() saw a new command
 };
 }  // namespace kinova

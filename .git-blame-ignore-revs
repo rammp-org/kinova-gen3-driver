@@ -1,0 +1,9 @@
+# Revisions to skip in `git blame`, so it reaches the author of a line rather
+# than the commit that reformatted it. Enable with:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub honours this file automatically.
+
+# style: apply clang-format across the tree (#47)
+e4ea78e4b0cc6d9f5b34f376675b68a736df6aae

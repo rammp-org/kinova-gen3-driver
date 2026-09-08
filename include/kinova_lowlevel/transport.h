@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+
 #include "kinova_lowlevel/joint_types.h"
 namespace kinova {
 using ActuatorModes = std::array<ActuatorMode, kNumJoints>;

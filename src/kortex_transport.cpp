@@ -1,5 +1,13 @@
 #include "kinova_lowlevel/kortex_transport.h"
 
+#include <ActuatorConfigClientRpc.h>
+#include <BaseClientRpc.h>
+#include <BaseCyclicClientRpc.h>
+#include <RouterClient.h>
+#include <SessionManager.h>
+#include <TransportClientTcp.h>
+#include <TransportClientUdp.h>
+
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -8,14 +16,6 @@
 #include <thread>
 
 #include "kinova_lowlevel/units.h"
-
-#include <BaseClientRpc.h>
-#include <BaseCyclicClientRpc.h>
-#include <ActuatorConfigClientRpc.h>
-#include <SessionManager.h>
-#include <RouterClient.h>
-#include <TransportClientTcp.h>
-#include <TransportClientUdp.h>
 
 namespace k_api = Kinova::Api;
 
@@ -34,10 +34,14 @@ inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); 
 // Map our ActuatorMode -> KORTEX ActuatorConfig control mode.
 k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
   switch (m) {
-    case ActuatorMode::kPosition: return k_api::ActuatorConfig::ControlMode::POSITION;
-    case ActuatorMode::kVelocity: return k_api::ActuatorConfig::ControlMode::VELOCITY;
-    case ActuatorMode::kTorque:   return k_api::ActuatorConfig::ControlMode::TORQUE;
-    case ActuatorMode::kCurrent:  return k_api::ActuatorConfig::ControlMode::CURRENT;
+    case ActuatorMode::kPosition:
+      return k_api::ActuatorConfig::ControlMode::POSITION;
+    case ActuatorMode::kVelocity:
+      return k_api::ActuatorConfig::ControlMode::VELOCITY;
+    case ActuatorMode::kTorque:
+      return k_api::ActuatorConfig::ControlMode::TORQUE;
+    case ActuatorMode::kCurrent:
+      return k_api::ActuatorConfig::ControlMode::CURRENT;
   }
   return k_api::ActuatorConfig::ControlMode::POSITION;
 }
@@ -88,8 +92,7 @@ struct KortexTransport::Impl {
     fb.frame_id = fb_.frame_id();
     bool fault = false;
     for (int i = 0; i < n_; ++i) {
-      if (fb_.actuators(i).fault_bank_a() != 0u ||
-          fb_.actuators(i).fault_bank_b() != 0u) {
+      if (fb_.actuators(i).fault_bank_a() != 0u || fb_.actuators(i).fault_bank_b() != 0u) {
         fault = true;
       }
     }
@@ -100,9 +103,9 @@ struct KortexTransport::Impl {
     const auto& ic = fb_.interconnect();
     if (ic.gripper_feedback().motor_size() > 0) {
       const auto& m = ic.gripper_feedback().motor(0);
-      fb.gripper.present  = true;
+      fb.gripper.present = true;
       fb.gripper.position = float(m.position()) / kPctPerUnit;
-      fb.gripper.current  = float(m.current_motor());
+      fb.gripper.current = float(m.current_motor());
       // MotorFeedback has no force field; effort is derived, normalized, and NOT Newtons.
       const float e = std::fabs(fb.gripper.current) / kGripperMaxCurrentA;
       fb.gripper.effort = e > 1.0f ? 1.0f : e;
@@ -171,9 +174,9 @@ struct KortexTransport::Impl {
       if (gripper->motor_cmd_size() == 0) gripper->add_motor_cmd();
       auto* m = gripper->mutable_motor_cmd(0);
       m->set_position(clamp01(cmd.gripper.position) * kPctPerUnit);
-      m->set_velocity(clamp01(cmd.gripper.speed)    * kPctPerUnit);
+      m->set_velocity(clamp01(cmd.gripper.speed) * kPctPerUnit);
       // A CEILING on motor current, not a force setpoint -- see GripperCommand.
-      m->set_force(clamp01(cmd.gripper.force)       * kPctPerUnit);
+      m->set_force(clamp01(cmd.gripper.force) * kPctPerUnit);
     }
   }
 };
@@ -313,15 +316,31 @@ void KortexTransport::safe_shutdown() {
   }
 
   if (I.tcp_sess) {
-    try { I.tcp_sess->CloseSession(); } catch (...) {}
+    try {
+      I.tcp_sess->CloseSession();
+    } catch (...) {
+    }
   }
   if (I.udp_sess) {
-    try { I.udp_sess->CloseSession(); } catch (...) {}
+    try {
+      I.udp_sess->CloseSession();
+    } catch (...) {
+    }
   }
   if (I.tcp_router) I.tcp_router->SetActivationStatus(false);
   if (I.udp_router) I.udp_router->SetActivationStatus(false);
-  if (I.tcp) { try { I.tcp->disconnect(); } catch (...) {} }
-  if (I.udp) { try { I.udp->disconnect(); } catch (...) {} }
+  if (I.tcp) {
+    try {
+      I.tcp->disconnect();
+    } catch (...) {
+    }
+  }
+  if (I.udp) {
+    try {
+      I.udp->disconnect();
+    } catch (...) {
+    }
+  }
 
   // Tear down clients/sessions/routers/transports (reverse of creation).
   I.act_cfg.reset();

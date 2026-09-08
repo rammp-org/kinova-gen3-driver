@@ -36,10 +36,17 @@ Without `uv`: `pip install pre-commit && pre-commit install`.
 Hook revisions are pinned. Updating them is a deliberate PR
 (`pre-commit autoupdate`), never silent drift.
 
-`clang-format` is deliberately **not** in the hook set yet. The repo has no
-`.clang-format` and ~40 source files written to a consistent house style by hand;
-adopting it means one bulk reformat plus a `.git-blame-ignore-revs` entry, which
-is its own reviewable change rather than a rider on something else.
+C++ is formatted by `clang-format` (stock Google at 100 columns, see
+`.clang-format`). The hook is pinned to the exact version the tree was formatted
+with — clang-format output differs between major versions, so bumping it means
+re-running the sweep, not just editing the rev.
+
+One bulk reformat is recorded in `.git-blame-ignore-revs`. Enable it so
+`git blame` reaches the author rather than the reformat:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
 
 ## Building and testing
 
@@ -91,7 +98,7 @@ what catches a regression, and CI is what makes it unskippable.
 
 The RT contract has two halves, and CI only gates one of them.
 
-CI runs on a hosted x86-64 runner. It is not `PREEMPT_RT`, has no isolated core,
+CI runs on hosted runners. They are not `PREEMPT_RT`, have no isolated core,
 and cannot get `SCHED_FIFO` — `rt_system` degrades to `SCHED_OTHER` by design.
 So the half CI gates is the one that is a property of the *code*: every
 `RtSafety*` case asserts `majflt_delta == 0` and `ring.dropped() == 0` after a

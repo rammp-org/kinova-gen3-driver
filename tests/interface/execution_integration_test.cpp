@@ -9,11 +9,13 @@
 // q == this-cycle commanded q. That is exactly the loop RtExecutor runs per cycle
 // (exchange -> tick -> compute), minus the threading, run deterministically.
 #include <gtest/gtest.h>
+
 #include <cmath>
+
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/interface/trajectory_executor.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
-#include "kinova_lowlevel/interface/trajectory_executor.h"
 
 using namespace kinova;
 using kinova::interface::ControlModeKind;
@@ -24,13 +26,16 @@ using kinova::interface::TrajectoryExecutor;
 
 namespace {
 JointVec vecn(std::initializer_list<double> v) {
-  JointVec q; int i = 0; for (double x : v) q[i++] = x; return q;
+  JointVec q;
+  int i = 0;
+  for (double x : v) q[i++] = x;
+  return q;
 }
 Trajectory line(const JointVec& q0, const JointVec& q1, double dur_s) {
-  return { { {q0, 0.0}, {q1, dur_s} } };
+  return {{{q0, 0.0}, {q1, dur_s}}};
 }
-const JointVec kDisabledTol = JointVec::Constant(-1.0);   // per-joint guard off
-constexpr double kDt = 0.001;                             // 1 kHz
+const JointVec kDisabledTol = JointVec::Constant(-1.0);  // per-joint guard off
+constexpr double kDt = 0.001;                            // 1 kHz
 }  // namespace
 
 // A trajectory submitted to JointPositionMode drives the commanded joint
@@ -38,29 +43,31 @@ constexpr double kDt = 0.001;                             // 1 kHz
 // trajectory's final timestamp; the executor reports completion there.
 TEST(ExecutionIntegration, PositionTrajectoryConvergesToGoalOnSchedule) {
   Dynamics dyn(URDF_PATH);
-  JointPositionMode mode(dyn);                 // default params: 0.5 rad/s cap, 0.35 leash
-  TrajectoryExecutor exec(mode);               // mode IS-A kinova::JointTargetSink
+  JointPositionMode mode(dyn);    // default params: 0.5 rad/s cap, 0.35 leash
+  TrajectoryExecutor exec(mode);  // mode IS-A kinova::JointTargetSink
 
   const JointVec q0 = vecn({0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2});
-  const JointVec q1 = q0 + JointVec::Constant(0.30);   // 0.30 rad move...
-  const double dur = 4.0;                              // ...over 4 s -> 0.075 rad/s << 0.5 cap
+  const JointVec q1 = q0 + JointVec::Constant(0.30);  // 0.30 rad move...
+  const double dur = 4.0;                             // ...over 4 s -> 0.075 rad/s << 0.5 cap
 
-  JointFeedback fb; fb.q = q0; fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = q0;
+  fb.qd.setZero();
   mode.on_enter(fb);
-  ASSERT_EQ(exec.submit(line(q0, q1, dur), ControlModeKind::kPosition,
-                        Preemption::kLatestWins, kDisabledTol),
+  ASSERT_EQ(exec.submit(line(q0, q1, dur), ControlModeKind::kPosition, Preemption::kLatestWins,
+                        kDisabledTol),
             kinova::interface::SubmitResult::kAccepted);
 
   double t = 0.0;
   ExecStatus st{};
   JointCommand cmd;
-  for (int step = 0; step < 6000; ++step) {    // 4 s traj + settle margin
-    st = exec.tick(t, fb.q);                    // publish sampled q_d to the mode
-    mode.compute(fb, kDt, cmd);                 // mode -> position command
-    fb.q = cmd.position;                        // ideal position servo: arm reaches it
+  for (int step = 0; step < 6000; ++step) {  // 4 s traj + settle margin
+    st = exec.tick(t, fb.q);                 // publish sampled q_d to the mode
+    mode.compute(fb, kDt, cmd);              // mode -> position command
+    fb.q = cmd.position;                     // ideal position servo: arm reaches it
     fb.qd.setZero();
     t += kDt;
-    if (st.completed && (fb.q - q1).norm() < 1e-3) break;   // done + settled
+    if (st.completed && (fb.q - q1).norm() < 1e-3) break;  // done + settled
   }
   EXPECT_TRUE(st.completed) << "executor never reported completion";
   EXPECT_NEAR((fb.q - q1).norm(), 0.0, 1e-3) << "arm did not reach the goal";
@@ -76,17 +83,19 @@ TEST(ExecutionIntegration, StalledArmTripsPathToleranceAbort) {
 
   const JointVec q0 = vecn({0.0, 0.2, 0.0, 0.5, 0.0, -0.3, 0.0});
   const JointVec q1 = q0 + JointVec::Constant(0.30);
-  JointFeedback fb; fb.q = q0; fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = q0;
+  fb.qd.setZero();
   mode.on_enter(fb);
-  exec.submit(line(q0, q1, 3.0), ControlModeKind::kPosition,
-              Preemption::kLatestWins, JointVec::Constant(0.05));   // tight guard
+  exec.submit(line(q0, q1, 3.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+              JointVec::Constant(0.05));  // tight guard
 
   double t = 0.0;
   ExecStatus st{};
   JointCommand cmd;
   for (int step = 0; step < 3000; ++step) {
-    st = exec.tick(t, fb.q);                    // measured q stays q0 (arm stuck)
-    mode.compute(fb, kDt, cmd);                 // command ignored by the "stuck" plant
+    st = exec.tick(t, fb.q);     // measured q stays q0 (arm stuck)
+    mode.compute(fb, kDt, cmd);  // command ignored by the "stuck" plant
     t += kDt;
     if (st.completed) break;
   }
@@ -104,23 +113,25 @@ TEST(ExecutionIntegration, ImpedanceModeReferenceTracksTrajectory) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
-  p.max_ref_speed.setConstant(1e9);            // don't rate-limit the reference here
+  p.max_ref_speed.setConstant(1e9);  // don't rate-limit the reference here
   JointImpedanceMode mode(dyn, p);
-  TrajectoryExecutor exec(mode);               // JointImpedanceMode IS-A JointTargetSink now
+  TrajectoryExecutor exec(mode);  // JointImpedanceMode IS-A JointTargetSink now
 
   const JointVec q0 = vecn({0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2});
   const JointVec q1 = q0 + JointVec::Constant(0.20);
   const double dur = 2.0;
-  JointFeedback fb; fb.q = q0; fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = q0;
+  fb.qd.setZero();
   mode.on_enter(fb);
-  exec.submit(line(q0, q1, dur), ControlModeKind::kImpedance,
-              Preemption::kLatestWins, kDisabledTol);
+  exec.submit(line(q0, q1, dur), ControlModeKind::kImpedance, Preemption::kLatestWins,
+              kDisabledTol);
 
   double t = 0.0;
   ExecStatus st{};
   JointCommand cmd;
   for (int step = 0; step < 3000; ++step) {
-    st = exec.tick(t, fb.q);                    // publish sampled q_d as the joint reference
+    st = exec.tick(t, fb.q);  // publish sampled q_d as the joint reference
     mode.compute(fb, kDt, cmd);
     // Reference must equal the trajectory sample at this time (IK bypassed).
     const JointVec expected = kinova::interface::sample(line(q0, q1, dur), t);
@@ -133,5 +144,5 @@ TEST(ExecutionIntegration, ImpedanceModeReferenceTracksTrajectory) {
     if (st.completed) break;
   }
   EXPECT_TRUE(st.completed);
-  EXPECT_NEAR((mode.reference() - q1).norm(), 0.0, 1e-9);   // reference reached the goal
+  EXPECT_NEAR((mode.reference() - q1).norm(), 0.0, 1e-9);  // reference reached the goal
 }

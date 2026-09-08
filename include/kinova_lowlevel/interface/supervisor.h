@@ -6,18 +6,19 @@
 #include <optional>
 #include <stdexcept>
 #include <thread>
+
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
+#include "kinova_lowlevel/interface/ports.h"
+#include "kinova_lowlevel/interface/streaming_session.h"
+#include "kinova_lowlevel/interface/trajectory_executor.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_target_sink.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
-#include "kinova_lowlevel/interface/ports.h"
-#include "kinova_lowlevel/interface/streaming_session.h"
-#include "kinova_lowlevel/interface/trajectory_executor.h"
 namespace kinova::interface {
 
 // Reuse the last-good measured q when a lock-free feedback-snapshot read fails
@@ -30,7 +31,11 @@ inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
   return loaded ? fresh : last;
 }
 
-struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; double mode_settle_s = 0.25; };
+struct SupervisorConfig {
+  double sampler_hz = 250.0;
+  double pump_hz = 100.0;
+  double mode_settle_s = 0.25;
+};
 
 // Everything the Supervisor needs, in one named place.
 //
@@ -56,50 +61,50 @@ struct SupervisorConfig { double sampler_hz = 250.0; double pump_hz = 100.0; dou
 // which is legible in a way that ten positional arguments -- two of which were the same
 // object passed as different port types -- was not.
 struct SupervisorDeps {
-  JointPositionMode*      pos      = nullptr;
-  JointImpedanceMode*     imp      = nullptr;
-  JointTorqueMode*        tau      = nullptr;
-  JointVelocityMode*      vel      = nullptr;
-  RtExecutor*             exec     = nullptr;
-  Seqlock<JointFeedback>* snap     = nullptr;
-  Dynamics*               pump_dyn = nullptr;
-  StreamPort*             stream   = nullptr;
-  ActionServerPort*       action   = nullptr;
+  JointPositionMode* pos = nullptr;
+  JointImpedanceMode* imp = nullptr;
+  JointTorqueMode* tau = nullptr;
+  JointVelocityMode* vel = nullptr;
+  RtExecutor* exec = nullptr;
+  Seqlock<JointFeedback>* snap = nullptr;
+  Dynamics* pump_dyn = nullptr;
+  StreamPort* stream = nullptr;
+  ActionServerPort* action = nullptr;
   // OPTIONAL. Null means this robot has no gripper, which is a real configuration --
   // GripperFeedback::present exists for exactly that. Gripper commands become no-ops
   // and on_query_gripper reports present=false. Not validated by require().
-  GripperController*      grip     = nullptr;
-  SupervisorConfig        cfg{};
+  GripperController* grip = nullptr;
+  SupervisorConfig cfg{};
 };
 
 class Supervisor : public CommandSink, public StreamSink, public GripperSink {
  public:
   explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
-  void start();   // request initial (position) mode; spawn sampler + pump threads
-  void stop();    // signal + join both threads
+  void start();  // request initial (position) mode; spawn sampler + pump threads
+  void stop();   // signal + join both threads
 
   // CommandSink (called on the backend thread):
-  GoalResponse   on_trajectory_goal(const TrajectoryGoal&) override;
-  void           on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
+  GoalResponse on_trajectory_goal(const TrajectoryGoal&) override;
+  void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
-  GainsResult    on_set_gains(const GainsRequest&) override;
-  ArmState       on_query_state() override;
-  void           on_halt(HaltReason) override;
+  GainsResult on_set_gains(const GainsRequest&) override;
+  ArmState on_query_state() override;
+  void on_halt(HaltReason) override;
 
   // StreamSink (called on the backend thread):
   StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
-  void             on_stream_close(const StreamCloseRequest&) override;
-  void             on_setpoint_joint_position(const JointSetpoint&) override;
-  void             on_setpoint_joint_velocity(const JointSetpoint&) override;
-  void             on_setpoint_joint_torque(const JointSetpoint&) override;
-  void             on_setpoint_pose(const PoseSetpoint&) override;
-  void             on_setpoint_twist(const TwistSetpoint&) override;
-  StreamStatus     on_query_stream() override;
+  void on_stream_close(const StreamCloseRequest&) override;
+  void on_setpoint_joint_position(const JointSetpoint&) override;
+  void on_setpoint_joint_velocity(const JointSetpoint&) override;
+  void on_setpoint_joint_torque(const JointSetpoint&) override;
+  void on_setpoint_pose(const PoseSetpoint&) override;
+  void on_setpoint_twist(const TwistSetpoint&) override;
+  StreamStatus on_query_stream() override;
 
   // GripperSink (called on the backend thread):
-  void             on_gripper_setpoint(const GripperSetpoint&) override;
-  GripperState     on_query_gripper() override;
+  void on_gripper_setpoint(const GripperSetpoint&) override;
+  GripperState on_query_gripper() override;
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
@@ -109,7 +114,11 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   StreamCloseCause stream_close_cause() const { return close_cause_.load(); }
 
  private:
-  struct Inbound { GoalId id; TrajectoryGoal goal; bool cancel=false; };
+  struct Inbound {
+    GoalId id;
+    TrajectoryGoal goal;
+    bool cancel = false;
+  };
   void sampler_loop();
   void pump_loop();
   // The joint-target sink a control mode kind owns, EXPLICIT over all four kinds.
@@ -123,15 +132,20 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // One teardown, four callers: graceful close, deadline expiry, IK fault, on_halt.
   void close_stream(StreamCloseCause);
 
-  JointPositionMode& pos_;  JointImpedanceMode& imp_;  JointTorqueMode& tau_;  JointVelocityMode& vel_;
+  JointPositionMode& pos_;
+  JointImpedanceMode& imp_;
+  JointTorqueMode& tau_;
+  JointVelocityMode& vel_;
   RtExecutor& exec_;
-  Seqlock<JointFeedback>& snap_;  Dynamics& pump_dyn_;
-  StreamPort& stream_;  ActionServerPort& action_;
+  Seqlock<JointFeedback>& snap_;
+  Dynamics& pump_dyn_;
+  StreamPort& stream_;
+  ActionServerPort& action_;
   // Pointer, not a reference -- legitimately absent on a robot with no gripper.
   GripperController* grip_ = nullptr;
   SupervisorConfig cfg_;
 
-  std::optional<TrajectoryExecutor> traj_;            // rebuilt on mode switch
+  std::optional<TrajectoryExecutor> traj_;  // rebuilt on mode switch
   // Which mode the EXECUTOR is running. ATOMIC because it is written by the
   // sampler on a goal-driven mode change AND by the backend thread when a
   // streaming session opens in a different mode, while both threads read it.
@@ -146,10 +160,10 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // change can desynchronise it from traj_. Both must agree with the goal before
   // the rebind may be skipped -- either one alone leaves a silent desync.
   ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
-  std::atomic<bool> in_flight_{false};                // read by on_trajectory_goal
+  std::atomic<bool> in_flight_{false};  // read by on_trajectory_goal
 
-  StreamingSession  session_;                         // streaming-tier lifecycle
-  std::atomic<bool> stream_open_{false};              // mirrors session_, read by the sampler + goal pre-check
+  StreamingSession session_;              // streaming-tier lifecycle
+  std::atomic<bool> stream_open_{false};  // mirrors session_, read by the sampler + goal pre-check
   // Why the last session ended. Written by whichever thread ran the teardown,
   // read by anyone asking after the fact.
   std::atomic<StreamCloseCause> close_cause_{StreamCloseCause::kNone};
@@ -162,16 +176,17 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // cannot disarm the watchdog a re-open has just armed. Backend/sampler threads
   // only -- never taken on the RT path, and never held across the mode settle.
   std::mutex stream_mtx_;
-  JointVec   stream_hold_q_ = JointVec::Zero();       // last-good measured q for the teardown hold
-  bool       have_hold_q_   = false;                  // false until the first successful snapshot read
-  std::chrono::steady_clock::time_point t0_{};        // time origin for session stamps; set in start()
+  JointVec stream_hold_q_ = JointVec::Zero();   // last-good measured q for the teardown hold
+  bool have_hold_q_ = false;                    // false until the first successful snapshot read
+  std::chrono::steady_clock::time_point t0_{};  // time origin for session stamps; set in start()
 
-  kinova::Jacobian6 pump_J_;                          // preallocated; pump thread only
+  kinova::Jacobian6 pump_J_;  // preallocated; pump thread only
 
-  std::mutex q_mtx_;  std::deque<Inbound> inbox_;     // backend -> sampler handoff
-  bool       halt_pending_ = false;                  // guarded by q_mtx_
-  HaltReason halt_reason_  = HaltReason::kOwnershipRevoked;   // guarded by q_mtx_
-  Seqlock<ArmState> state_snap_;                      // pump -> query_state
+  std::mutex q_mtx_;
+  std::deque<Inbound> inbox_;                               // backend -> sampler handoff
+  bool halt_pending_ = false;                               // guarded by q_mtx_
+  HaltReason halt_reason_ = HaltReason::kOwnershipRevoked;  // guarded by q_mtx_
+  Seqlock<ArmState> state_snap_;                            // pump -> query_state
 
   std::atomic<bool> running_{false};
   std::thread sampler_, pump_;

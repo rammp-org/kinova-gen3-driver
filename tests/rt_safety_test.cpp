@@ -1,22 +1,24 @@
 #include <gtest/gtest.h>
+
 #include <atomic>
 #include <chrono>
 #include <thread>
-#include "kinova_lowlevel/rt_executor.h"
-#include "kinova_lowlevel/sim_transport.h"
-#include "kinova_lowlevel/joint_torque_mode.h"
+
+#include "interface/fake_backend.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
-#include "kinova_lowlevel/joint_impedance_mode.h"
-#include "kinova_lowlevel/joint_position_mode.h"
-#include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/dynamics.h"
-#include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
-#include "kinova_lowlevel/interface/value_types.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/supervisor.h"
-#include "interface/fake_backend.h"
+#include "kinova_lowlevel/interface/value_types.h"
+#include "kinova_lowlevel/joint_impedance_mode.h"
+#include "kinova_lowlevel/joint_position_mode.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
+#include "kinova_lowlevel/joint_velocity_mode.h"
+#include "kinova_lowlevel/rt_executor.h"
+#include "kinova_lowlevel/rt_system.h"
+#include "kinova_lowlevel/sim_transport.h"
 using namespace kinova;
 
 // RUSAGE_THREAD note: read_usage() reports the CALLING thread's faults. To make
@@ -28,10 +30,11 @@ using namespace kinova;
 // sees zero NEW major faults. The shared atomics carry the readings back to the
 // test thread for assertions.
 TEST(RtSafety, NoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
+  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -39,7 +42,13 @@ TEST(RtSafety, NoMajorFaultsSteadyState) {
   std::atomic<uint64_t> majflt_delta{~0ull};
   std::atomic<uint64_t> minflt_delta{~0ull};
 
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: run the loop ~200ms so all first-touch faults (code,
@@ -83,17 +92,24 @@ TEST(RtSafety, NoMajorFaultsSteadyState) {
 }
 
 TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  CartesianImpedanceMode mode(dyn);              // defaults; nullspace on
+  CartesianImpedanceMode mode(dyn);  // defaults; nullspace on
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
   std::atomic<uint64_t> minflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages before measuring.
@@ -133,16 +149,23 @@ TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {
 // Same structure as the Cartesian case above, for the joint-space mode. This is
 // the check that proves the IK running INSIDE the 1 kHz cycle does not allocate.
 TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointImpedanceMode mode(dyn);                  // defaults: IK runs every cycle
+  JointImpedanceMode mode(dyn);  // defaults: IK runs every cycle
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages before measuring.
@@ -187,18 +210,25 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
 // then stop, which exercises the tracking branch, the fresh->frozen transition
 // and the sustained frozen path in one window.
 TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
-  p.cmd_timeout_s = 0.05;                        // armed: the freeze branch is live
+  p.cmd_timeout_s = 0.05;  // armed: the freeze branch is live
   JointImpedanceMode mode(dyn, p);
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages -- INCLUDING the freeze
@@ -247,7 +277,8 @@ TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
 // the cheapest control path we have. The check still matters: the reference
 // integrator runs every cycle and must stay allocation-free like the rest.
 TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
   JointPositionMode mode(dyn);
@@ -256,7 +287,13 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages before measuring.
@@ -280,7 +317,8 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
       // keeps the integrator working during the measured window instead of
       // idling at the entry configuration where every clamp is a no-op.
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
-      JointVec target; target.setConstant(0.4);
+      JointVec target;
+      target.setConstant(0.4);
       mode.set_target(target);
       std::this_thread::sleep_for(std::chrono::milliseconds(480));
       measure_stop.store(true);
@@ -306,7 +344,8 @@ TEST(RtSafety, JointPositionModeNoMajorFaultsSteadyState) {
 // published throughout, exactly as a streaming client would -- a stale target
 // freezes the reference and the solve would never run.
 TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
   JointPositionMode mode(dyn);
@@ -319,7 +358,13 @@ TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages, INCLUDING the IK solve.
@@ -328,7 +373,7 @@ TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
     std::thread warm_watch([&] {
       for (int i = 0; i < 20; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        mode.set_target(target);   // after on_enter, so it is not dropped at entry
+        mode.set_target(target);  // after on_enter, so it is not dropped at entry
       }
       warm_stop.store(true);
     });
@@ -377,19 +422,26 @@ TEST(RtSafety, JointPositionModePoseNoMajorFaultsSteadyState) {
 // release-store stamp path gets its first-touch faults during warm-up and stays
 // LIVE -- not just present -- during the measured window.
 TEST(RtSafety, GripperControllerInLoopNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport sim(init);
   GripperController gc(sim);
   Seqlock<JointFeedback> snap;
   FeedbackTap tap(gc, snap);
   Dynamics dyn(URDF_PATH);
-  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
+  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(tap, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::atomic<bool> stop_writer{false};
   std::thread writer([&] {
@@ -459,19 +511,26 @@ TEST(RtSafety, GripperControllerInLoopNoMajorFaultsSteadyState) {
 // Jacobian/LDLT code and scratch) and the re-armed measured window (re-entry
 // drops the warm-up's target the same way).
 TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointVelocityMode mode(dyn);          // defaults: posture bias on, DLS damping on
+  JointVelocityMode mode(dyn);  // defaults: posture bias on, DLS damping on
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
   Vector6 V = Vector6::Zero();
-  V[2] = 0.05;   // non-zero so the DLS solve runs every cycle, not a zero short-circuit
+  V[2] = 0.05;  // non-zero so the DLS solve runs every cycle, not a zero short-circuit
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages, INCLUDING the twist solve.
@@ -479,7 +538,7 @@ TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
     std::atomic<bool> warm_stop{false};
     std::thread warm_watch([&] {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
-      mode.set_twist_target(V);   // after on_enter, so it isn't dropped at entry
+      mode.set_twist_target(V);  // after on_enter, so it isn't dropped at entry
       std::this_thread::sleep_for(std::chrono::milliseconds(180));
       warm_stop.store(true);
     });
@@ -516,17 +575,23 @@ TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
 // and the test above exercise kSleepSpin; this confirms the other strategy runs
 // the loop and produces samples without crashing).
 TEST(RtSafety, NanosleepPacingProducesSamples) {
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointTorqueMode mode(dyn);      // defaults: tau_ff never set == gravity-comp hold
+  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {1000.0, Pacing::kClockNanosleep, {0, -1, true}});
   ex.request_mode(&mode);
 
   std::atomic<bool> stop{false};
   uint64_t consumed = 0;
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) ++consumed; } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) ++consumed;
+    }
+  });
   std::thread watch([&] {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     stop.store(true);
@@ -563,7 +628,8 @@ interface::Trajectory ramp7(double from, double to, double dur) {
 // the pump is actively reading feedback throughout the measured window.
 TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   using namespace kinova::interface;
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport sim(init);
   Dynamics dyn(URDF_PATH), pump_dyn(URDF_PATH);
   Seqlock<JointFeedback> snap;
@@ -576,16 +642,28 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
   interface::SupervisorDeps deps;
-  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
-  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
-  deps.stream = &be; deps.action = &be;
+  deps.pos = &pos;
+  deps.imp = &imp;
+  deps.tau = &tau;
+  deps.vel = &vel;
+  deps.exec = &ex;
+  deps.snap = &snap;
+  deps.pump_dyn = &pump_dyn;
+  deps.stream = &be;
+  deps.action = &be;
   Supervisor sup(deps);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
-  sup.start();   // requests position mode; spawns sampler + pump threads now
+  sup.start();  // requests position mode; spawns sampler + pump threads now
 
   // Long ramp (5s) so it is still executing across the whole warm-up + measured
   // window below: the sampler keeps ticking pos.set_target() and the pump keeps
@@ -594,8 +672,9 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
   g.trajectory = ramp7(0.0, 0.2, 5.0);
   g.control_mode = ControlModeKind::kPosition;
   g.preemption = Preemption::kLatestWins;
-  g.path_tolerance = JointVec::Constant(-1.0);   // guard off: SimTransport is a static echo
-  GoalId id{}; id[0] = 1;
+  g.path_tolerance = JointVec::Constant(-1.0);  // guard off: SimTransport is a static echo
+  GoalId id{};
+  id[0] = 1;
   ASSERT_EQ(sup.on_trajectory_goal(g), GoalResponse::kAccept);
   sup.on_trajectory_accepted(id, g);
 
@@ -651,7 +730,8 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
 // set_target() traffic flowing across the measured window.
 TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   using namespace kinova::interface;
-  JointFeedback init; init.q.setZero();
+  JointFeedback init;
+  init.q.setZero();
   SimTransport sim(init);
   Dynamics dyn(URDF_PATH), pump_dyn(URDF_PATH);
   Seqlock<JointFeedback> snap;
@@ -664,20 +744,32 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   RtExecutor ex(tap, ring, {1000.0, Pacing::kSleepSpin, {}});
   FakeBackend be;
   interface::SupervisorDeps deps;
-  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
-  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
-  deps.stream = &be; deps.action = &be;
+  deps.pos = &pos;
+  deps.imp = &imp;
+  deps.tau = &tau;
+  deps.vel = &vel;
+  deps.exec = &ex;
+  deps.snap = &snap;
+  deps.pump_dyn = &pump_dyn;
+  deps.stream = &be;
+  deps.action = &be;
   Supervisor sup(deps);
 
   std::atomic<bool> stop{false};
   std::atomic<uint64_t> majflt_delta{~0ull};
-  std::thread drain([&] { CycleSample s; while (!stop.load()) { while (ring.pop(s)) {} } });
+  std::thread drain([&] {
+    CycleSample s;
+    while (!stop.load()) {
+      while (ring.pop(s)) {
+      }
+    }
+  });
 
-  sup.start();   // requests position mode; spawns sampler + pump threads now
+  sup.start();  // requests position mode; spawns sampler + pump threads now
 
   StreamOpenRequest r;
   r.kind = SetpointKind::kJointPosition;
-  r.control_mode = ControlModeKind::kPosition;   // already active: no mode settle
+  r.control_mode = ControlModeKind::kPosition;  // already active: no mode settle
   r.timeout_s = 1.0;
   ASSERT_TRUE(sup.on_stream_open(r).accepted);
 
@@ -686,7 +778,8 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   // static echo), so this measures the WRITE traffic, not any motion.
   std::atomic<bool> stop_writer{false};
   std::thread writer([&] {
-    JointSetpoint sp; sp.values = JointVec::Zero();
+    JointSetpoint sp;
+    sp.values = JointVec::Zero();
     while (!stop_writer.load(std::memory_order_acquire)) {
       sup.on_setpoint_joint_position(sp);
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -704,7 +797,7 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
 
     ResourceUsage u0 = read_usage();
 
-    ex.request_mode(&pos);        // the warm-up run consumed the previous request
+    ex.request_mode(&pos);  // the warm-up run consumed the previous request
     std::atomic<bool> measure_stop{false};
     std::thread measure_watch([&] {
       std::this_thread::sleep_for(std::chrono::milliseconds(2000));
@@ -723,7 +816,7 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   stop_writer.store(true, std::memory_order_release);
   writer.join();
   drain.join();
-  EXPECT_TRUE(sup.stream_is_open());   // the writer kept the deadline fresh throughout
+  EXPECT_TRUE(sup.stream_is_open());  // the writer kept the deadline fresh throughout
   sup.stop();
 
   EXPECT_EQ(majflt_delta.load(), 0u);

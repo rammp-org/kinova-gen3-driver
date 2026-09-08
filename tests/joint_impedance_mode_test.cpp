@@ -1,19 +1,24 @@
+#include "kinova_lowlevel/joint_impedance_mode.h"
+
 #include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cmath>
-#include "kinova_lowlevel/joint_impedance_mode.h"
+
 #include "kinova_lowlevel/units.h"
 using namespace kinova;
 
 namespace {
 JointVec sample_q() {
-  JointVec q; q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2; return q;
+  JointVec q;
+  q << 0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2;
+  return q;
 }
 // Isolate the impedance law: no ramp, no IK motion, no reference rate limit.
 JointImpedanceParams static_params() {
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
-  p.ik.max_iters = 0;          // freeze q_d at its seeded value
+  p.ik.max_iters = 0;  // freeze q_d at its seeded value
   p.max_ref_speed.setConstant(1e9);
   return p;
 }
@@ -22,9 +27,13 @@ JointImpedanceParams static_params() {
 TEST(JointImpedance, RequiresTorqueAndPassesThroughPosition) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   for (auto x : m.required_modes()) EXPECT_EQ(x, ActuatorMode::kTorque);
-  JointCommand c; m.on_enter(fb); m.compute(fb, 0.001, c);
+  JointCommand c;
+  m.on_enter(fb);
+  m.compute(fb, 0.001, c);
   EXPECT_EQ(c.mode, ActuatorMode::kTorque);
   EXPECT_NEAR((c.position - fb.q).norm(), 0.0, 1e-12);
 }
@@ -32,17 +41,23 @@ TEST(JointImpedance, RequiresTorqueAndPassesThroughPosition) {
 TEST(JointImpedance, AtReferenceZeroVelGivesGravityOnly) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
-  m.on_enter(fb);                       // q_d := fb.q -> zero spring error
-  JointCommand c; m.compute(fb, 0.001, c);
-  JointVec g; dyn.gravity(fb.q, g);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);  // q_d := fb.q -> zero spring error
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  JointVec g;
+  dyn.gravity(fb.q, g);
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i], 1e-9);
 }
 
 TEST(JointImpedance, ReferenceSeededAtMeasuredConfigOnEnter) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
   EXPECT_NEAR((m.reference() - fb.q).norm(), 0.0, 1e-12);
 }
@@ -51,20 +66,26 @@ TEST(JointImpedance, MatchesIndependentlyComputedLaw) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p = static_params();
   JointImpedanceMode m(dyn, p);
-  JointFeedback enter; enter.q = sample_q(); enter.qd.setZero();
-  m.on_enter(enter);                                  // q_d := sample_q()
+  JointFeedback enter;
+  enter.q = sample_q();
+  enter.qd.setZero();
+  m.on_enter(enter);  // q_d := sample_q()
 
-  JointFeedback fb; fb.q = sample_q();
-  fb.q[1] -= 0.10; fb.q[4] += 0.08;                   // displace from the reference
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.q[1] -= 0.10;
+  fb.q[4] += 0.08;  // displace from the reference
   fb.qd.setConstant(0.05);
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointCommand c;
+  m.compute(fb, 0.001, c);
 
-  JointVec g; dyn.gravity(fb.q, g);
-  JointMat M; dyn.mass_matrix(fb.q, M);
+  JointVec g;
+  dyn.gravity(fb.q, g);
+  JointMat M;
+  dyn.mass_matrix(fb.q, M);
   JointVec expected;
   for (int i = 0; i < kNumJoints; ++i) {
-    const double e = std::clamp(enter.q[i] - fb.q[i],
-                                -p.max_tracking_error, p.max_tracking_error);
+    const double e = std::clamp(enter.q[i] - fb.q[i], -p.max_tracking_error, p.max_tracking_error);
     const double Dq = 2.0 * p.zeta * std::sqrt(p.Kq[i] * M(i, i));
     expected[i] = g[i] + p.Kq[i] * e - Dq * fb.qd[i];
     expected[i] = std::clamp(expected[i], -p.torque_limit[i], p.torque_limit[i]);
@@ -76,28 +97,37 @@ TEST(JointImpedance, PerJointTorqueClampHonorsWristLimit) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p = static_params();
   p.Kq.setConstant(5000.0);
-  p.max_tracking_error = 10.0;                        // let the spring run away
+  p.max_tracking_error = 10.0;  // let the spring run away
   JointImpedanceMode m(dyn, p);
-  JointFeedback enter; enter.q = sample_q(); enter.qd.setZero();
+  JointFeedback enter;
+  enter.q = sample_q();
+  enter.qd.setZero();
   m.on_enter(enter);
-  JointFeedback fb = enter; fb.q.array() += 0.5;      // huge error on every joint
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointFeedback fb = enter;
+  fb.q.array() += 0.5;  // huge error on every joint
+  JointCommand c;
+  m.compute(fb, 0.001, c);
   for (int i = 0; i < kNumJoints; ++i)
     EXPECT_LE(std::abs(c.torque[i]), p.torque_limit[i] + 1e-9) << "joint " << i;
-  EXPECT_LE(std::abs(c.torque[6]), 9.0 + 1e-9);       // wrist limit, not 39
+  EXPECT_LE(std::abs(c.torque[6]), 9.0 + 1e-9);  // wrist limit, not 39
 }
 
 TEST(JointImpedance, LeashCapsSpringButNotGravity) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p = static_params();
   p.max_tracking_error = 0.05;
-  p.torque_limit.setConstant(1e6);                    // isolate the leash
+  p.torque_limit.setConstant(1e6);  // isolate the leash
   JointImpedanceMode m(dyn, p);
-  JointFeedback enter; enter.q = sample_q(); enter.qd.setZero();
+  JointFeedback enter;
+  enter.q = sample_q();
+  enter.qd.setZero();
   m.on_enter(enter);
-  JointFeedback fb = enter; fb.q[0] -= 1.0;           // way past the leash
-  JointCommand c; m.compute(fb, 0.001, c);
-  JointVec g; dyn.gravity(fb.q, g);
+  JointFeedback fb = enter;
+  fb.q[0] -= 1.0;  // way past the leash
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  JointVec g;
+  dyn.gravity(fb.q, g);
   // Spring saturates at Kq*leash; gravity is untouched (never scaled or clamped).
   EXPECT_NEAR(c.torque[0], g[0] + p.Kq[0] * p.max_tracking_error, 1e-9);
 }
@@ -107,15 +137,21 @@ TEST(JointImpedance, RampScalesSpringButGravityStaysFull) {
   JointImpedanceParams p = static_params();
   p.gain_ramp_s = 1.0;
   JointImpedanceMode m(dyn, p);
-  JointFeedback enter; enter.q = sample_q(); enter.qd.setZero();
+  JointFeedback enter;
+  enter.q = sample_q();
+  enter.qd.setZero();
   m.on_enter(enter);
-  JointFeedback fb = enter; fb.q[1] -= 0.10;
-  JointVec g; dyn.gravity(fb.q, g);
+  JointFeedback fb = enter;
+  fb.q[1] -= 0.10;
+  JointVec g;
+  dyn.gravity(fb.q, g);
 
-  JointCommand c0; m.compute(fb, 0.25, c0);           // elapsed 0 -> ramp 0
+  JointCommand c0;
+  m.compute(fb, 0.25, c0);  // elapsed 0 -> ramp 0
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c0.torque[i], g[i], 1e-9);
 
-  JointCommand c1; m.compute(fb, 0.25, c1);           // elapsed 0.25 -> ramp 0.25
+  JointCommand c1;
+  m.compute(fb, 0.25, c1);  // elapsed 0.25 -> ramp 0.25
   EXPECT_NEAR(c1.torque[1], g[1] + 0.25 * p.Kq[1] * 0.10, 1e-7);
 }
 
@@ -123,18 +159,22 @@ TEST(JointImpedance, ReferenceSpeedLimitBoundsMotionOnTeleportedTarget) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
-  p.max_ref_speed.setConstant(0.5);                   // rad/s
+  p.max_ref_speed.setConstant(0.5);  // rad/s
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
-  Pose far = dyn.fk(fb.q); far.p += Eigen::Vector3d(0.4, 0.3, -0.2);
+  Pose far = dyn.fk(fb.q);
+  far.p += Eigen::Vector3d(0.4, 0.3, -0.2);
   m.set_target(far);
 
   const JointVec before = m.reference();
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointCommand c;
+  m.compute(fb, 0.001, c);
   const double moved = (m.reference() - before).lpNorm<Eigen::Infinity>();
-  EXPECT_GT(moved, 0.0);                                 // it did move toward the target
-  EXPECT_LE(moved, 0.5 * 0.001 + 1e-12);                 // ...but no faster than allowed
+  EXPECT_GT(moved, 0.0);                  // it did move toward the target
+  EXPECT_LE(moved, 0.5 * 0.001 + 1e-12);  // ...but no faster than allowed
 }
 
 TEST(JointImpedance, IkLimitsSeededFromUrdf) {
@@ -143,13 +183,20 @@ TEST(JointImpedance, IkLimitsSeededFromUrdf) {
   // walk the reference past a hard stop.
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, JointImpedanceParams{});
-  JointVec lo, hi; dyn.joint_limits(lo, hi);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
 
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
-  Pose far = dyn.fk(fb.q); far.p += Eigen::Vector3d(3.0, 3.0, 3.0);
+  Pose far = dyn.fk(fb.q);
+  far.p += Eigen::Vector3d(3.0, 3.0, 3.0);
   m.set_target(far);
-  for (int k = 0; k < 5000; ++k) { JointCommand c; m.compute(fb, 0.001, c); }
+  for (int k = 0; k < 5000; ++k) {
+    JointCommand c;
+    m.compute(fb, 0.001, c);
+  }
 
   const JointVec q_ref = m.reference();
   EXPECT_FALSE(q_ref.hasNaN());
@@ -171,17 +218,23 @@ TEST(JointImpedance, ContinuousJointErrorTakesShortWayAroundTheWrap) {
   // joint spins continuously -- every wrap reasserts the same error.
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p = static_params();
-  p.torque_limit.setConstant(1e6);              // isolate the spring from the clamp
+  p.torque_limit.setConstant(1e6);  // isolate the spring from the clamp
   JointImpedanceMode m(dyn, p);
-  JointFeedback enter; enter.q = sample_q(); enter.q[2] = 3.13; enter.qd.setZero();
-  m.on_enter(enter);                            // q_d[2] := 3.13
+  JointFeedback enter;
+  enter.q = sample_q();
+  enter.q[2] = 3.13;
+  enter.qd.setZero();
+  m.on_enter(enter);  // q_d[2] := 3.13
 
-  JointFeedback fb = enter; fb.q[2] = -3.13;    // joint crossed the wrap boundary
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointFeedback fb = enter;
+  fb.q[2] = -3.13;  // joint crossed the wrap boundary
+  JointCommand c;
+  m.compute(fb, 0.001, c);
 
-  JointVec g; dyn.gravity(fb.q, g);
+  JointVec g;
+  dyn.gravity(fb.q, g);
   const double spring = c.torque[2] - g[2];
-  const double true_err = wrap_to_pi(3.13 - (-3.13));   // = -0.0232 rad
+  const double true_err = wrap_to_pi(3.13 - (-3.13));  // = -0.0232 rad
   EXPECT_LT(spring, 0.0) << "spring must push the SHORT way, not saturate forward";
   EXPECT_NEAR(spring, p.Kq[2] * true_err, 1e-9);
 }
@@ -193,16 +246,21 @@ TEST(JointImpedance, ContinuousReferenceStaysBounded) {
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
   p.ik.q_rest = sample_q();
-  p.ik.q_rest[2] = 3.14;                        // the shipped default: on the boundary
-  p.ik.posture_gain = 1.0;                      // drive the posture term hard
+  p.ik.q_rest[2] = 3.14;    // the shipped default: on the boundary
+  p.ik.posture_gain = 1.0;  // drive the posture term hard
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
-  for (int k = 0; k < 20000; ++k) { JointCommand c; m.compute(fb, 0.001, c); }
+  for (int k = 0; k < 20000; ++k) {
+    JointCommand c;
+    m.compute(fb, 0.001, c);
+  }
 
   const JointVec q_ref = m.reference();
   EXPECT_FALSE(q_ref.hasNaN());
-  for (int i : {0, 2, 4, 6}) {                  // the continuous joints
+  for (int i : {0, 2, 4, 6}) {  // the continuous joints
     EXPECT_LE(std::abs(q_ref[i]), M_PI + 1e-9) << "joint index " << i;
   }
 }
@@ -214,12 +272,17 @@ TEST(JointImpedance, DampingDerivedFromInertiaAndStiffness) {
   JointImpedanceParams p = static_params();
   p.zeta = 0.7;
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setConstant(0.1);
-  m.on_enter(fb);                                  // q_d := fb.q -> spring term is 0
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setConstant(0.1);
+  m.on_enter(fb);  // q_d := fb.q -> spring term is 0
+  JointCommand c;
+  m.compute(fb, 0.001, c);
 
-  JointMat M; dyn.mass_matrix(fb.q, M);
-  JointVec g; dyn.gravity(fb.q, g);
+  JointMat M;
+  dyn.mass_matrix(fb.q, M);
+  JointVec g;
+  dyn.gravity(fb.q, g);
   for (int i = 0; i < kNumJoints; ++i) {
     const double expected = 2.0 * p.zeta * std::sqrt(p.Kq[i] * M(i, i));
     EXPECT_NEAR(m.last_damping()[i], expected, 1e-12) << "joint " << i;
@@ -235,13 +298,18 @@ TEST(JointImpedance, DampingTracksConfigurationNotJustGains) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m1(dyn, static_params()), m2(dyn, static_params());
 
-  JointFeedback extended; extended.q.setZero(); extended.qd.setConstant(0.1);
-  JointFeedback folded; folded.qd.setConstant(0.1);
+  JointFeedback extended;
+  extended.q.setZero();
+  extended.qd.setConstant(0.1);
+  JointFeedback folded;
+  folded.qd.setConstant(0.1);
   folded.q << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57;
 
   JointCommand c;
-  m1.on_enter(extended); m1.compute(extended, 0.001, c);
-  m2.on_enter(folded);   m2.compute(folded, 0.001, c);
+  m1.on_enter(extended);
+  m1.compute(extended, 0.001, c);
+  m2.on_enter(folded);
+  m2.compute(folded, 0.001, c);
 
   EXPECT_GT(m2.last_damping()[0], 3.0 * m1.last_damping()[0])
       << "damping must follow the configuration, not stay constant";
@@ -249,16 +317,21 @@ TEST(JointImpedance, DampingTracksConfigurationNotJustGains) {
 
 TEST(JointImpedance, ZetaScalesDampingLinearly) {
   Dynamics dyn(URDF_PATH);
-  JointImpedanceParams a = static_params(); a.zeta = 0.5;
-  JointImpedanceParams b = static_params(); b.zeta = 1.0;   // critically damped
+  JointImpedanceParams a = static_params();
+  a.zeta = 0.5;
+  JointImpedanceParams b = static_params();
+  b.zeta = 1.0;  // critically damped
   JointImpedanceMode ma(dyn, a), mb(dyn, b);
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setConstant(0.1);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setConstant(0.1);
   JointCommand c;
-  ma.on_enter(fb); ma.compute(fb, 0.001, c);
-  mb.on_enter(fb); mb.compute(fb, 0.001, c);
+  ma.on_enter(fb);
+  ma.compute(fb, 0.001, c);
+  mb.on_enter(fb);
+  mb.compute(fb, 0.001, c);
   for (int i = 0; i < kNumJoints; ++i) {
-    EXPECT_NEAR(mb.last_damping()[i], 2.0 * ma.last_damping()[i], 1e-12)
-        << "joint " << i;
+    EXPECT_NEAR(mb.last_damping()[i], 2.0 * ma.last_damping()[i], 1e-12) << "joint " << i;
   }
 }
 
@@ -270,17 +343,22 @@ TEST(JointImpedance, RefSpeedSeededFromUrdfVelocityLimits) {
   JointImpedanceParams p;
   p.gain_ramp_s = 0.0;
   JointImpedanceMode m(dyn, p);
-  JointVec v_urdf; dyn.velocity_limits(v_urdf);
+  JointVec v_urdf;
+  dyn.velocity_limits(v_urdf);
 
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
-  Pose far = dyn.fk(fb.q); far.p += Eigen::Vector3d(1.0, 1.0, 1.0);  // pull hard
+  Pose far = dyn.fk(fb.q);
+  far.p += Eigen::Vector3d(1.0, 1.0, 1.0);  // pull hard
   m.set_target(far);
 
   const double dt = 0.001;
   for (int k = 0; k < 50; ++k) {
     const JointVec before = m.reference();
-    JointCommand c; m.compute(fb, dt, c);
+    JointCommand c;
+    m.compute(fb, dt, c);
     const JointVec step = m.reference() - before;
     for (int i = 0; i < kNumJoints; ++i) {
       EXPECT_LE(std::abs(step[i]), v_urdf[i] * dt + 1e-12) << "joint " << i;
@@ -295,24 +373,28 @@ TEST(JointImpedance, RefSpeedSeededFromUrdfVelocityLimits) {
 TEST(JointImpedance, JointTargetDrivesReferenceDirectlyBypassingIk) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
 
   JointVec q_cmd = sample_q();
-  q_cmd[0] += 0.05; q_cmd[3] -= 0.07;          // small joint move, within the spring leash
-  m.set_target(q_cmd);                          // JointTargetSink overload -> IK bypassed
+  q_cmd[0] += 0.05;
+  q_cmd[3] -= 0.07;     // small joint move, within the spring leash
+  m.set_target(q_cmd);  // JointTargetSink overload -> IK bypassed
 
-  JointCommand c; m.compute(fb, 0.001, c);
+  JointCommand c;
+  m.compute(fb, 0.001, c);
   // The reference is the commanded joint config EXACTLY — an IK solve of some pose
   // could not reproduce an arbitrary q_cmd like this, so this pins the direct path.
   EXPECT_NEAR((m.reference() - q_cmd).norm(), 0.0, 1e-12);
 
   // Torque is the joint spring about q_cmd plus gravity (qd = 0, ramp = 1).
-  JointVec g; dyn.gravity(fb.q, g);
+  JointVec g;
+  dyn.gravity(fb.q, g);
   const JointImpedanceParams p = static_params();
   for (int i = 0; i < kNumJoints; ++i) {
-    const double e =
-        std::clamp(q_cmd[i] - fb.q[i], -p.max_tracking_error, p.max_tracking_error);
+    const double e = std::clamp(q_cmd[i] - fb.q[i], -p.max_tracking_error, p.max_tracking_error);
     EXPECT_NEAR(c.torque[i], g[i] + p.Kq[i] * e, 1e-9) << "joint " << i;
   }
 }
@@ -320,12 +402,16 @@ TEST(JointImpedance, JointTargetDrivesReferenceDirectlyBypassingIk) {
 TEST(JointImpedance, JointTargetSupersedesPoseTarget) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());
-  JointFeedback fb; fb.q = sample_q(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
   m.on_enter(fb);
-  m.set_target(dyn.fk(sample_q()));            // Cartesian target first...
-  JointVec q_cmd = sample_q(); q_cmd[2] += 0.06;
-  m.set_target(q_cmd);                          // ...then a joint target: latest wins
-  JointCommand c; m.compute(fb, 0.001, c);
+  m.set_target(dyn.fk(sample_q()));  // Cartesian target first...
+  JointVec q_cmd = sample_q();
+  q_cmd[2] += 0.06;
+  m.set_target(q_cmd);  // ...then a joint target: latest wins
+  JointCommand c;
+  m.compute(fb, 0.001, c);
   EXPECT_NEAR((m.reference() - q_cmd).norm(), 0.0, 1e-12);
 }
 
@@ -337,11 +423,13 @@ TEST(JointImpedanceMode, StaleTargetFreezesTheReferenceAtMeasuredQ) {
   p.max_ref_speed.setConstant(1.0);
   p.cmd_timeout_s = 0.05;
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(JointVec::Constant(0.5));
   JointCommand out;
-  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);   // fresh: reference advances
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);  // fresh: reference advances
   EXPECT_GT(m.reference()[0], 0.0);
   for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // 100 ms with no new command
   EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);
@@ -351,29 +439,33 @@ TEST(JointImpedanceMode, ZeroTimeoutDisablesTheWatchdog) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.max_ref_speed.setConstant(1.0);
-  EXPECT_EQ(p.cmd_timeout_s, 0.0);                          // default preserves old behaviour
+  EXPECT_EQ(p.cmd_timeout_s, 0.0);  // default preserves old behaviour
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(JointVec::Constant(0.5));
   JointCommand out;
   for (int i = 0; i < 500; ++i) m.compute(fb, 0.001, out);
-  EXPECT_GT(m.reference()[0], 0.1);                         // still tracking; nothing froze
+  EXPECT_GT(m.reference()[0], 0.1);  // still tracking; nothing froze
 }
 
 TEST(JointImpedanceMode, AStreamedPoseKeepsTheWatchdogFresh) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.max_ref_speed.setConstant(1.0);
-  p.cmd_timeout_s = 0.05;                       // 50 ms deadline
+  p.cmd_timeout_s = 0.05;  // 50 ms deadline
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   // A pose the arm is NOT already at, so "did the reference move" discriminates.
   const Pose away = dyn.fk(JointVec::Constant(0.2));
   JointCommand out;
-  for (int i = 0; i < 200; ++i) {               // 200 ms, well past the deadline
-    if (i % 10 == 0) m.set_target(away);        // a pose setpoint every 10 ms
+  for (int i = 0; i < 200; ++i) {         // 200 ms, well past the deadline
+    if (i % 10 == 0) m.set_target(away);  // a pose setpoint every 10 ms
     m.compute(fb, 0.001, out);
   }
   // Had the pose setter failed to bump the watchdog, the reference would have
@@ -387,14 +479,16 @@ TEST(JointImpedanceMode, AStreamedPoseThatSTOPSDoesGoStale) {
   p.max_ref_speed.setConstant(1.0);
   p.cmd_timeout_s = 0.05;
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(dyn.fk(JointVec::Constant(0.2)));
   JointCommand out;
-  for (int i = 0; i < 10; ++i)  m.compute(fb, 0.001, out);   // fresh: advances
+  for (int i = 0; i < 10; ++i) m.compute(fb, 0.001, out);  // fresh: advances
   ASSERT_GT(std::abs(m.reference()[0]), 0.0);
-  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);   // stream stops
-  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);              // frozen at measured q
+  for (int i = 0; i < 100; ++i) m.compute(fb, 0.001, out);  // stream stops
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);             // frozen at measured q
 }
 
 // A freeze must LATCH. Disarming the watchdog is not a command, so it must not
@@ -409,18 +503,20 @@ TEST(JointImpedanceMode, DisarmingAfterAFreezeDoesNotResurrectATarget) {
   p.max_ref_speed.setConstant(1.0);
   p.cmd_timeout_s = 0.05;
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setConstant(0.3); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setConstant(0.3);
+  fb.qd.setZero();
   m.on_enter(fb);
   // POSE setpoints only: set_target(const JointVec&) is never called here, so the
   // joint target buffer is never written by anyone.
   m.set_target(dyn.fk(JointVec::Constant(0.6)));
   JointCommand out;
-  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);   // stream stops -> freeze
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);  // stream stops -> freeze
   ASSERT_NEAR(m.reference()[0], fb.q[0], 1e-9);
 
-  m.set_command_timeout(0.0);                                // session closes: disarm
+  m.set_command_timeout(0.0);  // session closes: disarm
   for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);
-  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);              // still frozen at measured q
+  EXPECT_NEAR(m.reference()[0], fb.q[0], 1e-9);  // still frozen at measured q
   for (int i = 0; i < kNumJoints; ++i)
     EXPECT_TRUE(std::isfinite(out.torque[i])) << "non-finite torque on joint " << i;
 }
@@ -432,13 +528,15 @@ TEST(JointImpedanceMode, AFreshCommandReleasesTheFreeze) {
   p.max_ref_speed.setConstant(1.0);
   p.cmd_timeout_s = 0.05;
   JointImpedanceMode m(dyn, p);
-  JointFeedback fb; fb.q.setZero(); fb.qd.setZero();
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
   m.on_enter(fb);
   m.set_target(dyn.fk(JointVec::Constant(0.2)));
   JointCommand out;
-  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);   // freeze
+  for (int i = 0; i < 200; ++i) m.compute(fb, 0.001, out);  // freeze
   ASSERT_NEAR(m.reference()[0], fb.q[0], 1e-9);
-  m.set_target(dyn.fk(JointVec::Constant(0.2)));             // stream resumes
+  m.set_target(dyn.fk(JointVec::Constant(0.2)));  // stream resumes
   for (int i = 0; i < 30; ++i) m.compute(fb, 0.001, out);
-  EXPECT_GT(std::abs(m.reference()[0]), 1e-6);               // tracking again
+  EXPECT_GT(std::abs(m.reference()[0]), 1e-6);  // tracking again
 }

@@ -34,6 +34,7 @@
 //   # sim (no robot); protocol/plumbing only, the arm will not move
 //   ./joint_position_check --sim --urdf ../models/gen3_7dof_2f85.urdf
 
+#include <Eigen/Dense>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -45,7 +46,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <Eigen/Dense>
 
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/joint_position_mode.h"
@@ -75,8 +75,10 @@ void report_state(const JointFeedback& fb, const JointVec& lo, const JointVec& h
     const double deg = fb.q[i] * kRad2Deg;
     if (deg < 0.0) ++negatives;
     std::printf("  j%d  q=%+8.4f rad  %+9.3f deg  ", i, fb.q[i], deg);
-    if (continuous) std::printf("[continuous]      ");
-    else std::printf("[%+.2f,%+.2f]   ", lo[i], hi[i]);
+    if (continuous)
+      std::printf("[continuous]      ");
+    else
+      std::printf("[%+.2f,%+.2f]   ", lo[i], hi[i]);
     std::printf("-> would command %+9.3f deg\n", deg);
   }
   if (negatives > 0) {
@@ -92,7 +94,7 @@ void report_state(const JointFeedback& fb, const JointVec& lo, const JointVec& h
 struct Waypoint {
   std::string label;
   JointVec q;
-  double settle_s;   // how long to sit here once the travel time has elapsed
+  double settle_s;  // how long to sit here once the travel time has elapsed
 };
 
 // Scripted sequence for eyeballing the mode on the real arm. Deliberately moves
@@ -103,28 +105,25 @@ struct Waypoint {
 // and the least able to hurt anything if a direction is wrong. Waypoints are
 // clamped to the URDF limits here as well as in the mode, so the printed plan is
 // what will actually happen rather than what was asked for.
-std::vector<Waypoint> build_sequence(const JointVec& home, int from_joint,
-                                     double delta, double speed,
-                                     const JointVec& lo, const JointVec& hi) {
+std::vector<Waypoint> build_sequence(const JointVec& home, int from_joint, double delta,
+                                     double speed, const JointVec& lo, const JointVec& hi) {
   std::vector<Waypoint> wps;
   const double travel = std::abs(delta) / std::max(1e-9, speed);
   wps.push_back({"settle — NOTHING should move here", home, 2.0});
   for (int j = kNumJoints - 1; j >= from_joint; --j) {
     JointVec away = home;
     away[j] += delta;
-    if (std::isfinite(lo[j]) && std::isfinite(hi[j]))
-      away[j] = std::clamp(away[j], lo[j], hi[j]);
+    if (std::isfinite(lo[j]) && std::isfinite(hi[j])) away[j] = std::clamp(away[j], lo[j], hi[j]);
     const double moved = away[j] - home[j];
     char buf[160];
-    std::snprintf(buf, sizeof(buf),
-                  "j%d %+.3f rad (%+.1f deg) — ONLY this joint should move", j,
+    std::snprintf(buf, sizeof(buf), "j%d %+.3f rad (%+.1f deg) — ONLY this joint should move", j,
                   moved, moved * kRad2Deg);
     wps.push_back({buf, away, 0.7});
     std::snprintf(buf, sizeof(buf), "j%d back to start", j);
     wps.push_back({buf, home, 0.7});
   }
   wps.push_back({"HOME — compare against where the arm started", home, 2.0});
-  for (auto& w : wps) w.settle_s += travel;   // allow for the move itself
+  for (auto& w : wps) w.settle_s += travel;  // allow for the move itself
   return wps;
 }
 }  // namespace
@@ -142,10 +141,10 @@ int main(int argc, char** argv) {
   double duration_s = 5.0;
   int move_joint = -1;
   double delta = 0.0;
-  double speed = 0.2;       // rad/s; below the mode's own 0.5 default
+  double speed = 0.2;  // rad/s; below the mode's own 0.5 default
   double leash = 0.35;
   bool sequence = false;
-  int from_joint = 4;       // wrist only by default; lower it deliberately
+  int from_joint = 4;  // wrist only by default; lower it deliberately
   bool duration_set = false;
 
   for (int i = 1; i < argc; ++i) {
@@ -157,22 +156,39 @@ int main(int argc, char** argv) {
       }
       return argv[++i];
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
-    else if (a == "--duration") { duration_s = std::stod(next("--duration")); duration_set = true; }
-    else if (a == "--sequence") sequence = true;
-    else if (a == "--from-joint") from_joint = std::stoi(next("--from-joint"));
-    else if (a == "--pacing") pacing_str = next("--pacing");
-    else if (a == "--csv") csv_path = next("--csv");
-    else if (a == "--joint") move_joint = std::stoi(next("--joint"));
-    else if (a == "--delta") delta = std::stod(next("--delta"));
-    else if (a == "--speed") speed = std::stod(next("--speed"));
-    else if (a == "--leash") leash = std::stod(next("--leash"));
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
+    else if (a == "--duration") {
+      duration_s = std::stod(next("--duration"));
+      duration_set = true;
+    } else if (a == "--sequence")
+      sequence = true;
+    else if (a == "--from-joint")
+      from_joint = std::stoi(next("--from-joint"));
+    else if (a == "--pacing")
+      pacing_str = next("--pacing");
+    else if (a == "--csv")
+      csv_path = next("--csv");
+    else if (a == "--joint")
+      move_joint = std::stoi(next("--joint"));
+    else if (a == "--delta")
+      delta = std::stod(next("--delta"));
+    else if (a == "--speed")
+      speed = std::stod(next("--speed"));
+    else if (a == "--leash")
+      leash = std::stod(next("--leash"));
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -180,7 +196,8 @@ int main(int argc, char** argv) {
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
   else if (pacing_str != "sleepspin") {
     std::cerr << "--pacing must be sleepspin|nanosleep\n";
     std::exit(2);
@@ -201,12 +218,11 @@ int main(int argc, char** argv) {
     std::cerr << "--from-joint must be 0.." << (kNumJoints - 1) << "\n";
     return 2;
   }
-  if (sequence && delta == 0.0) delta = 0.2;   // sequence needs some motion
+  if (sequence && delta == 0.0) delta = 0.2;  // sequence needs some motion
 
-  std::cout << "[jpos] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing="
-            << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
-            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
-            << " dry_run=" << (dry_run ? "yes" : "no")
+  std::cout << "[jpos] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
+            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
+            << "s sim=" << (use_sim ? "yes" : "no") << " dry_run=" << (dry_run ? "yes" : "no")
             << " speed=" << speed << "rad/s leash=" << leash << "rad\n";
 
   Dynamics dyn(urdf);
@@ -246,9 +262,8 @@ int main(int argc, char** argv) {
       report_state(fb, lo, hi);
       const auto wps = build_sequence(fb.q, from_joint, delta, speed, lo, hi);
       double total = 0.0;
-      std::cout << "\n[dry-run] sequence plan (" << wps.size()
-                << " waypoints, joints j" << from_joint << "..j"
-                << (kNumJoints - 1) << " at " << speed << " rad/s):\n";
+      std::cout << "\n[dry-run] sequence plan (" << wps.size() << " waypoints, joints j"
+                << from_joint << "..j" << (kNumJoints - 1) << " at " << speed << " rad/s):\n";
       for (size_t k = 0; k < wps.size(); ++k) {
         total += wps[k].settle_s;
         std::printf("  %2zu. [%5.1fs] %s\n", k + 1, total, wps[k].label.c_str());
@@ -271,8 +286,7 @@ int main(int argc, char** argv) {
         report_state(fb, lo, hi);
         last_print = now;
       }
-      if (duration_s > 0.0 &&
-          std::chrono::duration<double>(now - start).count() >= duration_s) {
+      if (duration_s > 0.0 && std::chrono::duration<double>(now - start).count() >= duration_s) {
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));  // ~50 Hz read
@@ -294,31 +308,29 @@ int main(int argc, char** argv) {
   if (sequence) {
     wps = build_sequence(entry.q, from_joint, delta, speed, lo, hi);
     double total = 0.0;
-    std::cout << "\n[jpos] VISUAL CHECK SEQUENCE — joints j" << from_joint
-              << "..j" << (kNumJoints - 1) << " at " << speed << " rad/s:\n";
+    std::cout << "\n[jpos] VISUAL CHECK SEQUENCE — joints j" << from_joint << "..j"
+              << (kNumJoints - 1) << " at " << speed << " rad/s:\n";
     for (size_t k = 0; k < wps.size(); ++k) {
       total += wps[k].settle_s;
       std::printf("  %2zu. [%5.1fs] %s\n", k + 1, total, wps[k].label.c_str());
     }
-    std::cout <<
-        "\n[jpos] WHAT TO WATCH FOR:\n"
-        "   * step 1: the arm does not move at all. Any twitch here is a bug.\n"
-        "   * each move: ONLY the named joint turns, in the direction printed.\n"
-        "   * each return: that joint goes back, the others never moved.\n"
-        "   * the end: the arm is visibly where it started, and every residual\n"
-        "     in the report reads ~0.0000. That is the reference being exact.\n"
-        "   * throughout: motion is smooth and rate-limited, never a snap.\n";
+    std::cout << "\n[jpos] WHAT TO WATCH FOR:\n"
+                 "   * step 1: the arm does not move at all. Any twitch here is a bug.\n"
+                 "   * each move: ONLY the named joint turns, in the direction printed.\n"
+                 "   * each return: that joint goes back, the others never moved.\n"
+                 "   * the end: the arm is visibly where it started, and every residual\n"
+                 "     in the report reads ~0.0000. That is the reference being exact.\n"
+                 "   * throughout: motion is smooth and rate-limited, never a snap.\n";
     std::printf("[jpos] total ~%.0f s.\n", total);
     // Hard outer cap so the run always terminates even if the sequence thread
     // wedges. The sequence normally stops the loop itself.
     if (!duration_set) duration_s = total + 5.0;
   } else if (move_joint >= 0) {
     target[move_joint] += delta;
-    std::printf("\n[jpos] MOVING j%d by %+.4f rad (%+.2f deg): %+.4f -> %+.4f rad\n",
-                move_joint, delta, delta * kRad2Deg, entry.q[move_joint],
-                target[move_joint]);
-    std::printf("[jpos] at %.2f rad/s that takes about %.1f s of travel.\n",
-                speed, std::abs(delta) / std::max(1e-9, speed));
+    std::printf("\n[jpos] MOVING j%d by %+.4f rad (%+.2f deg): %+.4f -> %+.4f rad\n", move_joint,
+                delta, delta * kRad2Deg, entry.q[move_joint], target[move_joint]);
+    std::printf("[jpos] at %.2f rad/s that takes about %.1f s of travel.\n", speed,
+                std::abs(delta) / std::max(1e-9, speed));
   } else {
     std::cout << "\n[jpos] HOLD ONLY — target is the entry configuration, no "
                  "motion is requested.\n";
@@ -334,8 +346,8 @@ int main(int argc, char** argv) {
   JointPositionMode mode(dyn, p);
   {
     const JointVec eff = mode.params().max_ref_speed;
-    std::printf("[jpos] effective speed after URDF clamp: %.3f .. %.3f rad/s\n",
-                eff.minCoeff(), eff.maxCoeff());
+    std::printf("[jpos] effective speed after URDF clamp: %.3f .. %.3f rad/s\n", eff.minCoeff(),
+                eff.maxCoeff());
   }
 
   SampleRing ring(1 << 16);
@@ -353,7 +365,7 @@ int main(int argc, char** argv) {
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    while (ring.pop(s)) sink.consume(s);   // final drain
+    while (ring.pop(s)) sink.consume(s);  // final drain
   });
 
   RtExecutor ex(t, ring, {rate_hz, pacing, {rt_priority, cpu, true}});
@@ -371,8 +383,7 @@ int main(int argc, char** argv) {
     }
     for (size_t k = 0; k < wps.size(); ++k) {
       if (g_stop.load(std::memory_order_acquire)) return;
-      std::printf("\n[jpos] %2zu/%zu  %s\n", k + 1, wps.size(),
-                  wps[k].label.c_str());
+      std::printf("\n[jpos] %2zu/%zu  %s\n", k + 1, wps.size(), wps[k].label.c_str());
       std::fflush(stdout);
       mode.set_target(wps[k].q);
       // Sleep in slices so Ctrl-C aborts promptly mid-waypoint rather than at
@@ -403,7 +414,7 @@ int main(int argc, char** argv) {
     });
   }
 
-  ResourceUsage usage_before = read_usage();   // main thread IS the RT loop thread
+  ResourceUsage usage_before = read_usage();  // main thread IS the RT loop thread
   ex.run(g_stop);
   ResourceUsage usage_after = read_usage();
 
@@ -418,19 +429,17 @@ int main(int argc, char** argv) {
   std::cout << "\n==== joint position check report ====\n";
   std::cout << introspect() << "\n";
   for (int i = 0; i < kNumJoints; ++i) {
-    std::printf("  j%d  target=%+8.4f  final_ref=%+8.4f  residual=%+8.4f rad\n",
-                i, target[i], q_ref[i], wrap_to_pi(target[i] - q_ref[i]));
+    std::printf("  j%d  target=%+8.4f  final_ref=%+8.4f  residual=%+8.4f rad\n", i, target[i],
+                q_ref[i], wrap_to_pi(target[i] - q_ref[i]));
   }
   const auto& ch = sink.cycle_hist();
   const auto& mh = sink.compute_hist();
-  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min()
-            << " mean=" << ch.mean() << " p50=" << ch.percentile(0.50)
-            << " p99=" << ch.percentile(0.99) << " p99.9=" << ch.percentile(0.999)
-            << " max=" << ch.max() << "\n";
-  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min()
-            << " mean=" << mh.mean() << " p50=" << mh.percentile(0.50)
-            << " p99=" << mh.percentile(0.99) << " p99.9=" << mh.percentile(0.999)
-            << " max=" << mh.max() << "\n";
+  std::cout << "cycle_ns   n=" << ch.count() << " min=" << ch.min() << " mean=" << ch.mean()
+            << " p50=" << ch.percentile(0.50) << " p99=" << ch.percentile(0.99)
+            << " p99.9=" << ch.percentile(0.999) << " max=" << ch.max() << "\n";
+  std::cout << "compute_ns n=" << mh.count() << " min=" << mh.min() << " mean=" << mh.mean()
+            << " p50=" << mh.percentile(0.50) << " p99=" << mh.percentile(0.99)
+            << " p99.9=" << mh.percentile(0.999) << " max=" << mh.max() << "\n";
   std::cout << "dropped=" << ring.dropped() << "\n";
   std::cout << "page faults: minflt+=" << (usage_after.minflt - usage_before.minflt)
             << " majflt+=" << (usage_after.majflt - usage_before.majflt) << "\n";

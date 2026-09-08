@@ -89,25 +89,34 @@ void on_sigint(int) { g_stop.store(true); }
 // anything unexpected arriving on the action port.
 class ConsoleBackend : public StreamPort, public ActionServerPort {
  public:
-  void publish_state(const ArmState& s) override { last_ = s; ++states_; }
+  void publish_state(const ArmState& s) override {
+    last_ = s;
+    ++states_;
+  }
   void publish_feedback(const GoalId&, const TrajectoryFeedback&) override {}
   void settle(const GoalId&, const TrajectoryResult& r) override {
-    std::printf("[stream] UNEXPECTED goal settle during a stream: code=%d %s\n",
-                r.error_code, r.error_string.c_str());
+    std::printf("[stream] UNEXPECTED goal settle during a stream: code=%d %s\n", r.error_code,
+                r.error_string.c_str());
   }
   ArmState last() const { return last_; }
   uint64_t states() const { return states_; }
+
  private:
   ArmState last_{};
   uint64_t states_ = 0;
 };
 
-struct Sample { double t; const char* phase; JointVec q; JointVec tau; };
+struct Sample {
+  double t;
+  const char* phase;
+  JointVec q;
+  JointVec tau;
+};
 
 const char* phase_of(double t, double stream_s, double stale_s, double resume_s) {
-  if (t < stream_s)                              return "STREAM";
-  if (t < stream_s + stale_s)                    return "STALE ";
-  if (t < stream_s + stale_s + resume_s)         return "RESUME";
+  if (t < stream_s) return "STREAM";
+  if (t < stream_s + stale_s) return "STALE ";
+  if (t < stream_s + stale_s + resume_s) return "RESUME";
   return "CLOSE ";
 }
 }  // namespace
@@ -117,8 +126,8 @@ int main(int argc, char** argv) {
   std::string kind_s = "joint-position", mode_s = "impedance";
   bool use_sim = false, dry_run = false;
   int joint = kNumJoints - 1;
-  double delta = 0.05;          // rad, for position/pose kinds
-  double tau_ff = 1.0;          // N*m, for the torque kind
+  double delta = 0.05;  // rad, for position/pose kinds
+  double tau_ff = 1.0;  // N*m, for the torque kind
   double stream_s = 2.0, stale_s = 1.0, resume_s = 1.0;
   double cmd_rate_hz = 100.0, timeout_s = 0.1;
   double rate_hz = 1000.0;
@@ -127,46 +136,86 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto val = [&]() -> std::string {
-      if (i + 1 >= argc) { std::cerr << "missing value for " << a << "\n"; std::exit(2); }
+      if (i + 1 >= argc) {
+        std::cerr << "missing value for " << a << "\n";
+        std::exit(2);
+      }
       return argv[++i];
     };
-    if      (a == "--ip") ip = val();
-    else if (a == "--urdf") urdf = val();
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--dry-run") dry_run = true;
-    else if (a == "--kind") kind_s = val();
-    else if (a == "--mode") mode_s = val();
-    else if (a == "--joint") joint = std::stoi(val());
-    else if (a == "--delta") delta = std::stod(val());
-    else if (a == "--tau") tau_ff = std::stod(val());
-    else if (a == "--stream-s") stream_s = std::stod(val());
-    else if (a == "--stale-s") stale_s = std::stod(val());
-    else if (a == "--resume-s") resume_s = std::stod(val());
-    else if (a == "--cmd-rate") cmd_rate_hz = std::stod(val());
-    else if (a == "--timeout") timeout_s = std::stod(val());
-    else if (a == "--rate") rate_hz = std::stod(val());
-    else if (a == "--cpu") cpu = std::stoi(val());
-    else if (a == "--rt-priority") rt_priority = std::stoi(val());
-    else if (a == "--pacing") pacing_str = val();
-    else { std::cerr << "unknown arg: " << a << "\n"; std::exit(2); }
+    if (a == "--ip")
+      ip = val();
+    else if (a == "--urdf")
+      urdf = val();
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--dry-run")
+      dry_run = true;
+    else if (a == "--kind")
+      kind_s = val();
+    else if (a == "--mode")
+      mode_s = val();
+    else if (a == "--joint")
+      joint = std::stoi(val());
+    else if (a == "--delta")
+      delta = std::stod(val());
+    else if (a == "--tau")
+      tau_ff = std::stod(val());
+    else if (a == "--stream-s")
+      stream_s = std::stod(val());
+    else if (a == "--stale-s")
+      stale_s = std::stod(val());
+    else if (a == "--resume-s")
+      resume_s = std::stod(val());
+    else if (a == "--cmd-rate")
+      cmd_rate_hz = std::stod(val());
+    else if (a == "--timeout")
+      timeout_s = std::stod(val());
+    else if (a == "--rate")
+      rate_hz = std::stod(val());
+    else if (a == "--cpu")
+      cpu = std::stoi(val());
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(val());
+    else if (a == "--pacing")
+      pacing_str = val();
+    else {
+      std::cerr << "unknown arg: " << a << "\n";
+      std::exit(2);
+    }
   }
 
   Pacing pacing = Pacing::kSleepSpin;
-  if (pacing_str == "nanosleep") pacing = Pacing::kClockNanosleep;
-  else if (pacing_str != "sleepspin") { std::cerr << "--pacing must be sleepspin|nanosleep\n"; return 2; }
+  if (pacing_str == "nanosleep")
+    pacing = Pacing::kClockNanosleep;
+  else if (pacing_str != "sleepspin") {
+    std::cerr << "--pacing must be sleepspin|nanosleep\n";
+    return 2;
+  }
 
   SetpointKind kind;
-  if      (kind_s == "joint-position") kind = SetpointKind::kJointPosition;
-  else if (kind_s == "pose")           kind = SetpointKind::kEePose;
-  else if (kind_s == "joint-torque")   kind = SetpointKind::kJointTorque;
-  else { std::cerr << "--kind must be joint-position|pose|joint-torque "
-                      "(the velocity kinds need JointVelocityMode, which does not exist yet)\n"; return 2; }
+  if (kind_s == "joint-position")
+    kind = SetpointKind::kJointPosition;
+  else if (kind_s == "pose")
+    kind = SetpointKind::kEePose;
+  else if (kind_s == "joint-torque")
+    kind = SetpointKind::kJointTorque;
+  else {
+    std::cerr << "--kind must be joint-position|pose|joint-torque "
+                 "(the velocity kinds need JointVelocityMode, which does not exist yet)\n";
+    return 2;
+  }
 
   ControlModeKind mode;
-  if      (mode_s == "position")  mode = ControlModeKind::kPosition;
-  else if (mode_s == "impedance") mode = ControlModeKind::kImpedance;
-  else if (mode_s == "torque")    mode = ControlModeKind::kTorque;
-  else { std::cerr << "--mode must be position|impedance|torque\n"; return 2; }
+  if (mode_s == "position")
+    mode = ControlModeKind::kPosition;
+  else if (mode_s == "impedance")
+    mode = ControlModeKind::kImpedance;
+  else if (mode_s == "torque")
+    mode = ControlModeKind::kTorque;
+  else {
+    std::cerr << "--mode must be position|impedance|torque\n";
+    return 2;
+  }
 
   // Same table the driver enforces. Checking it here too means an unsupported
   // pair is refused before we connect to an arm, rather than after.
@@ -176,13 +225,18 @@ int main(int argc, char** argv) {
                  "joint-torque + torque.\n";
     return 2;
   }
-  if (joint < 0 || joint >= kNumJoints) { std::cerr << "--joint must be 0.." << (kNumJoints-1) << "\n"; return 2; }
+  if (joint < 0 || joint >= kNumJoints) {
+    std::cerr << "--joint must be 0.." << (kNumJoints - 1) << "\n";
+    return 2;
+  }
   if (std::abs(delta) > 0.2) {
-    std::cerr << "--delta " << delta << " rad is too large for a bring-up harness (cap 0.2).\n"; return 2;
+    std::cerr << "--delta " << delta << " rad is too large for a bring-up harness (cap 0.2).\n";
+    return 2;
   }
   if (timeout_s <= 0.0) {
     std::cerr << "--timeout must be > 0: an unbounded stream has no safe-stop, and the driver "
-                 "refuses it at open anyway.\n"; return 2;
+                 "refuses it at open anyway.\n";
+    return 2;
   }
 
   JointTorqueParams tp;
@@ -192,25 +246,33 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  std::printf("[stream] kind=%s mode=%s joint=j%d timeout=%.3fs cmd_rate=%.0fHz "
-              "phases stream=%.1fs stale=%.1fs resume=%.1fs sim=%s dry_run=%s\n",
-              kind_s.c_str(), mode_s.c_str(), joint, timeout_s, cmd_rate_hz,
-              stream_s, stale_s, resume_s, use_sim ? "yes" : "no", dry_run ? "yes" : "no");
-  std::printf("[stream] on STALE, %s\n",
-              mode == ControlModeKind::kTorque
-                  ? "torque mode should ramp its feedforward to zero and settle to gravity-comp hold"
-                  : "the mode should freeze its reference at MEASURED q and stop advancing");
+  std::printf(
+      "[stream] kind=%s mode=%s joint=j%d timeout=%.3fs cmd_rate=%.0fHz "
+      "phases stream=%.1fs stale=%.1fs resume=%.1fs sim=%s dry_run=%s\n",
+      kind_s.c_str(), mode_s.c_str(), joint, timeout_s, cmd_rate_hz, stream_s, stale_s, resume_s,
+      use_sim ? "yes" : "no", dry_run ? "yes" : "no");
+  std::printf(
+      "[stream] on STALE, %s\n",
+      mode == ControlModeKind::kTorque
+          ? "torque mode should ramp its feedforward to zero and settle to gravity-comp hold"
+          : "the mode should freeze its reference at MEASURED q and stop advancing");
 
   Dynamics dyn(urdf), pump_dyn(urdf);
 
   std::unique_ptr<Transport> transport;
-  if (use_sim) { JointFeedback init; transport = std::make_unique<SimTransport>(init); }
-  else {
+  if (use_sim) {
+    JointFeedback init;
+    transport = std::make_unique<SimTransport>(init);
+  } else {
 #ifndef KINOVA_NO_KORTEX
-    if (ip.empty()) { std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n"; return 2; }
+    if (ip.empty()) {
+      std::cerr << "real-robot mode requires --ip <addr> (or --sim)\n";
+      return 2;
+    }
     transport = std::make_unique<KortexTransport>(ip);
 #else
-    std::cerr << "built without KORTEX; only --sim is available\n"; return 2;
+    std::cerr << "built without KORTEX; only --sim is available\n";
+    return 2;
 #endif
   }
   Transport& raw = *transport;
@@ -225,13 +287,15 @@ int main(int argc, char** argv) {
     for (int i = 0; i < kNumJoints; ++i)
       std::printf("  j%d  q=%+8.4f rad  tau=%+8.3f N*m\n", i, fb.q[i], fb.tau[i]);
     if (kind == SetpointKind::kJointTorque)
-      std::printf("\n[dry-run] would stream %+.3f N*m of feedforward on j%d, on top of gravity comp.\n",
-                  tau_ff, joint);
+      std::printf(
+          "\n[dry-run] would stream %+.3f N*m of feedforward on j%d, on top of gravity comp.\n",
+          tau_ff, joint);
     else
-      std::printf("\n[dry-run] would stream j%d from %+.4f to %+.4f rad (%+.2f deg).\n",
-                  joint, fb.q[joint], fb.q[joint] + delta, delta * kRad2Deg);
-    std::printf("[dry-run] then STOP streaming for %.1fs to exercise the watchdog, resume, and close.\n",
-                stale_s);
+      std::printf("\n[dry-run] would stream j%d from %+.4f to %+.4f rad (%+.2f deg).\n", joint,
+                  fb.q[joint], fb.q[joint] + delta, delta * kRad2Deg);
+    std::printf(
+        "[dry-run] then STOP streaming for %.1fs to exercise the watchdog, resume, and close.\n",
+        stale_s);
     raw.safe_shutdown();
     return 0;
   }
@@ -239,11 +303,12 @@ int main(int argc, char** argv) {
   raw.connect();
   JointFeedback entry;
   raw.receive(entry);
-  std::printf("\n[stream] entry: q[j%d]=%+.4f rad  tau[j%d]=%+.3f N*m\n",
-              joint, entry.q[joint], joint, entry.tau[joint]);
+  std::printf("\n[stream] entry: q[j%d]=%+.4f rad  tau[j%d]=%+.3f N*m\n", joint, entry.q[joint],
+              joint, entry.tau[joint]);
   if (mode == ControlModeKind::kPosition)
-    std::printf("[stream] POSITION mode has NO compliance — the servo chases the command at full "
-                "authority. Nothing absorbs a mistake.\n");
+    std::printf(
+        "[stream] POSITION mode has NO compliance — the servo chases the command at full "
+        "authority. Nothing absorbs a mistake.\n");
   std::printf("[stream] starting in 3s — e-stop in reach. Ctrl-C aborts.\n");
   std::this_thread::sleep_for(std::chrono::seconds(3));
 
@@ -260,9 +325,15 @@ int main(int argc, char** argv) {
   RtExecutor ex(tap, ring, {rate_hz, pacing, {rt_priority, cpu, true, true}});
   ConsoleBackend backend;
   interface::SupervisorDeps deps;
-  deps.pos = &pos; deps.imp = &imp; deps.tau = &tau; deps.vel = &vel;
-  deps.exec = &ex; deps.snap = &snap; deps.pump_dyn = &pump_dyn;
-  deps.stream = &backend; deps.action = &backend;
+  deps.pos = &pos;
+  deps.imp = &imp;
+  deps.tau = &tau;
+  deps.vel = &vel;
+  deps.exec = &ex;
+  deps.snap = &snap;
+  deps.pump_dyn = &pump_dyn;
+  deps.stream = &backend;
+  deps.action = &backend;
   Supervisor sup(deps);
 
   sup.start();
@@ -275,8 +346,12 @@ int main(int argc, char** argv) {
   open_req.timeout_s = timeout_s;
   const StreamOpenResult opened = sup.on_stream_open(open_req);
   if (!opened.accepted) {
-    std::printf("\n[stream] session REFUSED: code=%d %s\n", opened.error_code, opened.message.c_str());
-    stop = true; rt.join(); sup.stop(); raw.safe_shutdown();
+    std::printf("\n[stream] session REFUSED: code=%d %s\n", opened.error_code,
+                opened.message.c_str());
+    stop = true;
+    rt.join();
+    sup.stop();
+    raw.safe_shutdown();
     return 1;
   }
   std::printf("[stream] session open.\n\n");
@@ -309,14 +384,20 @@ int main(int argc, char** argv) {
       const bool ok = snap.load(fb);
       if (ok) {
         if (kind == SetpointKind::kJointTorque) {
-          JointSetpoint sp; sp.values.setZero(); sp.values[joint] = tau_ff;
+          JointSetpoint sp;
+          sp.values.setZero();
+          sp.values[joint] = tau_ff;
           sup.on_setpoint_joint_torque(sp);
         } else if (kind == SetpointKind::kEePose) {
-          JointVec target = entry.q; target[joint] = entry.q[joint] + delta;
-          PoseSetpoint sp; sp.pose = dyn.fk(target);
+          JointVec target = entry.q;
+          target[joint] = entry.q[joint] + delta;
+          PoseSetpoint sp;
+          sp.pose = dyn.fk(target);
           sup.on_setpoint_pose(sp);
         } else {
-          JointSetpoint sp; sp.values = entry.q; sp.values[joint] = entry.q[joint] + delta;
+          JointSetpoint sp;
+          sp.values = entry.q;
+          sp.values[joint] = entry.q[joint] + delta;
           sup.on_setpoint_joint_position(sp);
         }
       }
@@ -325,7 +406,7 @@ int main(int argc, char** argv) {
     if (el >= next_sample) {
       JointFeedback fb;
       if (snap.load(fb)) trace.push_back({el, ph, fb.q, fb.tau});
-      next_sample = el + 0.05;   // 20 Hz
+      next_sample = el + 0.05;  // 20 Hz
     }
     std::this_thread::sleep_for(
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(cmd_period));
@@ -350,24 +431,25 @@ int main(int argc, char** argv) {
     std::printf("  %5.2fs  %s  q=%+8.4f  tau=%+8.3f\n", s.t, s.phase, s.q[joint], s.tau[joint]);
 
   if (after_ok)
-    std::printf("\n[stream] after close: q[j%d]=%+.4f rad (entry was %+.4f, moved %+.4f)\n",
-                joint, after.q[joint], entry.q[joint], after.q[joint] - entry.q[joint]);
-  std::printf("[stream] state publications seen: %llu\n",
-              (unsigned long long)backend.states());
+    std::printf("\n[stream] after close: q[j%d]=%+.4f rad (entry was %+.4f, moved %+.4f)\n", joint,
+                after.q[joint], entry.q[joint], after.q[joint] - entry.q[joint]);
+  std::printf("[stream] state publications seen: %llu\n", (unsigned long long)backend.states());
 
-  std::printf("\n[stream] WHAT TO CHECK:\n"
-              "   * STREAM: j%d moves toward the commanded value, smoothly and rate-limited.\n"
-              "   * STALE:  motion STOPS within about %.3fs of the last setpoint. %s\n"
-              "   * RESUME: motion picks up again — the freeze released on a fresh command.\n"
-              "   * CLOSE:  the arm holds where it is and does NOT slew back toward the\n"
-              "             last streamed setpoint. A slew here means the teardown hold failed.\n"
-              "   * throughout: no goal settle lines appear (nothing but the stream is driving).\n",
-              joint, timeout_s,
-              mode == ControlModeKind::kTorque
-                  ? "Torque: the feedforward ramps out and the arm settles to gravity-comp hold."
-                  : "Position/impedance: the reference freezes at measured q.");
+  std::printf(
+      "\n[stream] WHAT TO CHECK:\n"
+      "   * STREAM: j%d moves toward the commanded value, smoothly and rate-limited.\n"
+      "   * STALE:  motion STOPS within about %.3fs of the last setpoint. %s\n"
+      "   * RESUME: motion picks up again — the freeze released on a fresh command.\n"
+      "   * CLOSE:  the arm holds where it is and does NOT slew back toward the\n"
+      "             last streamed setpoint. A slew here means the teardown hold failed.\n"
+      "   * throughout: no goal settle lines appear (nothing but the stream is driving).\n",
+      joint, timeout_s,
+      mode == ControlModeKind::kTorque
+          ? "Torque: the feedforward ramps out and the arm settles to gravity-comp hold."
+          : "Position/impedance: the reference freezes at measured q.");
   if (use_sim)
-    std::printf("[stream] (--sim is a static echo: the arm never moves and the trace is flat. "
-                "Plumbing only — the STALE phase proves nothing about hardware.)\n");
+    std::printf(
+        "[stream] (--sim is a static echo: the arm never moves and the trace is flat. "
+        "Plumbing only — the STALE phase proves nothing about hardware.)\n");
   return 0;
 }

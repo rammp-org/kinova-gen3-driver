@@ -52,13 +52,10 @@ class Seqlock {
 // RtExecutor or the driver library.
 class FeedbackTap : public Transport {
  public:
-  FeedbackTap(Transport& inner, Seqlock<JointFeedback>& snap)
-      : inner_(inner), snap_(snap) {}
+  FeedbackTap(Transport& inner, Seqlock<JointFeedback>& snap) : inner_(inner), snap_(snap) {}
   void connect() override { inner_.connect(); }
   void set_servoing_low_level() override { inner_.set_servoing_low_level(); }
-  void set_actuator_modes(const ActuatorModes& m) override {
-    inner_.set_actuator_modes(m);
-  }
+  void set_actuator_modes(const ActuatorModes& m) override { inner_.set_actuator_modes(m); }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     inner_.exchange(c, fb);
     snap_.store(fb);

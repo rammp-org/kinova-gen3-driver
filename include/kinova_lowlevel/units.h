@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+
 #include "kinova_lowlevel/joint_types.h"
 namespace kinova {
 inline JointVec deg_to_rad(const JointVec& d) { return d * kDeg2Rad; }

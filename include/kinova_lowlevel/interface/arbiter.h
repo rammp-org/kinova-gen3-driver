@@ -3,6 +3,7 @@
 #include <mutex>
 #include <random>
 #include <string>
+
 #include "kinova_lowlevel/interface/ports.h"
 namespace kinova::interface {
 
@@ -25,58 +26,58 @@ namespace kinova::interface {
 class Arbiter : public CommandSink, public StreamSink, public GripperSink, public ArbitrationSink {
  public:
   // seed == 0 -> seed the token RNG from std::random_device.
-  Arbiter(CommandSink& downstream, StreamSink& downstream_stream,
-          GripperSink& downstream_gripper, ArbitrationMode mode, uint64_t seed = 0);
+  Arbiter(CommandSink& downstream, StreamSink& downstream_stream, GripperSink& downstream_gripper,
+          ArbitrationMode mode, uint64_t seed = 0);
 
   // ArbitrationSink
-  GrantResult       grant(const std::string& owner_id) override;
-  void              revoke() override;
-  void              estop() override;
-  void              estop_clear() override;
+  GrantResult grant(const std::string& owner_id) override;
+  void revoke() override;
+  void estop() override;
+  void estop_clear() override;
   ArbitrationStatus status() const override;
 
   // CommandSink
-  GoalResponse   on_trajectory_goal(const TrajectoryGoal&) override;
-  void           on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
+  GoalResponse on_trajectory_goal(const TrajectoryGoal&) override;
+  void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
-  GainsResult    on_set_gains(const GainsRequest&) override;
-  ArmState       on_query_state() override;       // never gated -- reads are always open
-  void           on_halt(HaltReason) override;    // pass-through
+  GainsResult on_set_gains(const GainsRequest&) override;
+  ArmState on_query_state() override;  // never gated -- reads are always open
+  void on_halt(HaltReason) override;   // pass-through
 
   // StreamSink
   StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
-  void             on_stream_close(const StreamCloseRequest&) override;
-  void             on_setpoint_joint_position(const JointSetpoint&) override;
-  void             on_setpoint_joint_velocity(const JointSetpoint&) override;
-  void             on_setpoint_joint_torque(const JointSetpoint&) override;
-  void             on_setpoint_pose(const PoseSetpoint&) override;
-  void             on_setpoint_twist(const TwistSetpoint&) override;
-  StreamStatus     on_query_stream() override;   // never gated -- reads are always open
+  void on_stream_close(const StreamCloseRequest&) override;
+  void on_setpoint_joint_position(const JointSetpoint&) override;
+  void on_setpoint_joint_velocity(const JointSetpoint&) override;
+  void on_setpoint_joint_torque(const JointSetpoint&) override;
+  void on_setpoint_pose(const PoseSetpoint&) override;
+  void on_setpoint_twist(const TwistSetpoint&) override;
+  StreamStatus on_query_stream() override;  // never gated -- reads are always open
 
   // GripperSink
-  void         on_gripper_setpoint(const GripperSetpoint&) override;
-  GripperState on_query_gripper() override;   // never gated -- reads are always open
+  void on_gripper_setpoint(const GripperSetpoint&) override;
+  GripperState on_query_gripper() override;  // never gated -- reads are always open
 
  private:
-  bool  admit(const Token&) const;   // caller holds m_
-  Token mint();                      // caller holds m_
+  bool admit(const Token&) const;  // caller holds m_
+  Token mint();                    // caller holds m_
 
-  CommandSink&    down_;
-  StreamSink&     down_stream_;
-  GripperSink&    down_grip_;
+  CommandSink& down_;
+  StreamSink& down_stream_;
+  GripperSink& down_grip_;
   ArbitrationMode mode_;
   mutable std::mutex m_;
   std::mt19937_64 rng_;
-  bool        owned_ = false;
+  bool owned_ = false;
   // ATOMIC and deliberately readable WITHOUT m_. Delegated calls run under m_, and
   // Supervisor::on_stream_open now sleeps mode_settle_s (250 ms) inside one of
   // them -- an e-stop that has to queue behind that is not an e-stop. estop()
   // latches this BEFORE it contends for m_, so admission is refused from that
   // instant regardless of who holds the lock.
   std::atomic<bool> estopped_{false};
-  Token       token_{};
+  Token token_{};
   std::string owner_id_;
-  uint64_t    generation_ = 0;
-  uint64_t    rejected_ = 0;
+  uint64_t generation_ = 0;
+  uint64_t rejected_ = 0;
 };
 }  // namespace kinova::interface
