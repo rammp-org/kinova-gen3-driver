@@ -98,25 +98,29 @@ jobs:
       - name: Install, and consume the exported package
         run: |
           set -euo pipefail
-          VER="$(sed -n 's/^project(.*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
-          test -n "$VER" || { echo "::error::could not read VERSION out of project() in CMakeLists.txt"; exit 1; }
+          # package.xml is the single source of truth; CMake reads it (see the
+          # version block at the top of CMakeLists.txt). Read it the same way here
+          # so this gate asks the same question a consumer would.
+          VER="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' package.xml)"
+          test -n "$VER" || { echo "::error::could not read <version> from package.xml"; exit 1; }
           MAJOR="${VER%%.*}"; REST="${VER#*.}"; MINOR="${REST%%.*}"
           WANT_OK="${MAJOR}.${MINOR}"
           WANT_BAD="$((MAJOR + 1)).0"
 
-          # The one number CMake does NOT own. ROS tooling reads package.xml, so a
-          # bump that misses it leaves the two disagreeing with CI still green --
-          # which would be an odd hole in the job whose whole purpose is to prove
-          # the version machinery.
-          PKG="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' package.xml)"
-          if [ "$PKG" != "$VER" ]; then
-            echo "::error::package.xml says $PKG but CMakeLists.txt project(VERSION) says $VER -- bump both"
+          cmake --install build --prefix /tmp/inst > /dev/null
+          CVF=/tmp/inst/lib/cmake/kinova_lowlevel/kinova_lowlevelConfigVersion.cmake
+          test -f "$CVF"
+
+          # The whole chain in one assertion: package.xml -> project(VERSION) ->
+          # the generated ConfigVersion file -> what actually got installed. If the
+          # derivation in CMakeLists.txt ever silently stops matching, this is
+          # where it shows, rather than in a consumer's build months later.
+          if ! grep -q "PACKAGE_VERSION \"$VER\"" "$CVF"; then
+            echo "::error::installed ConfigVersion.cmake does not declare $VER (from package.xml):"
+            grep -i "PACKAGE_VERSION" "$CVF" || true
             exit 1
           fi
-          echo "version $VER agrees across CMakeLists.txt and package.xml"
-
-          cmake --install build --prefix /tmp/inst > /dev/null
-          test -f /tmp/inst/lib/cmake/kinova_lowlevel/kinova_lowlevelConfigVersion.cmake
+          echo "package.xml $VER reached the installed ConfigVersion.cmake"
 
           mkdir -p /tmp/consumer
           cat > /tmp/consumer/CMakeLists.txt <<'EOF'
