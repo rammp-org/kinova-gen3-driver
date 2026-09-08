@@ -12,7 +12,10 @@
 # (pinocchioConfig.cmake lives at <prefix>/lib/cmake/pinocchio/.)
 
 cmake_minimum_required(VERSION 3.16)
-project(kinova_gen3_driver CXX)
+# VERSION is the single source of truth for the release number: it drives the
+# generated kinova_lowlevelConfigVersion.cmake below, and package.xml must be
+# kept in step with it by hand (ROS tooling parses that file, not this one).
+project(kinova_gen3_driver VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -124,7 +127,16 @@ install(EXPORT kinova_lowlevelTargets NAMESPACE kinova_lowlevel::
 configure_package_config_file(cmake/kinova_lowlevelConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
         INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
+# SameMajorVersion, because from 1.0 on a MINOR bump is additive by policy (see
+# "Versioning" in CONTRIBUTING.md): 1.1.0 satisfies a request for 1.0, 2.0.0
+# refuses it. Without this file a consumer CANNOT request a version at all --
+# CMake rejects a versioned find_package when the package ships no version file.
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfig.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/kinova_lowlevelConfigVersion.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/kinova_lowlevel)
 
 # --- apps ---------------------------------------------------------------------

@@ -141,11 +141,53 @@ is a human's statement that the cell is attended right now.
 
 ## Versioning
 
-The driver ships **0.x tags** while the API is still moving; a minor bump may
-break the public surface (`include/kinova_lowlevel/`, and specifically the
-interface tier's ports that front-ends implement against). Downstream repos pin
-an exact tag, never a branch.
+Semantic versioning, from **1.0.0** on. **Downstream repos pin an exact tag,
+never a branch.**
 
-The bar for 1.0 is one release cycle in which nothing downstream needs an
-adoption commit. See #37 and the [v1.0.0
-milestone](https://github.com/rammp-org/kinova-gen3-driver/milestone/1).
+- **MAJOR** — a breaking change to the public surface.
+- **MINOR** — additive: new modes, new methods with a default body, new fields.
+- **PATCH** — fixes that change no declared signature or contract.
+
+### The public surface
+
+Everything under `include/kinova_lowlevel/`, plus the behavioural guarantees the
+rest of this file states: SI/radians internally, and the RT contract (no
+allocation, lock, or blocking call in `compute()` or the executor cycle).
+
+Not covered: `src/`, tests, docs, and anything a new `ControlMode`
+*implementation* adds — a new mode is additive by construction.
+
+### The rule that is easy to get wrong
+
+**Adding a pure virtual to an interface someone else implements is a MAJOR
+change, even though adding things is usually minor.** Give the new method a
+default implementation and it stays minor.
+
+This binds hardest on `interface/ports.h`. Those ports are implemented
+downstream — `CommandSink`, `ActionServerPort`, `ArbitrationSink` and friends
+appear in the ROS2 front-end's production code *and* across several of its test
+fakes, so a new pure virtual breaks the build in more places than the one that
+is obvious from here. Both breaking changes in the gripper round were of exactly
+this shape.
+
+`ControlMode` is the milder case: it is implemented only inside this repo, so a
+new pure virtual there is a same-commit fix across the five modes. Still declare
+it, but it is not the trap.
+
+### Cutting a release
+
+1. Bump `project(... VERSION x.y.z)` in `CMakeLists.txt` **and** `<version>` in
+   `package.xml` — the generated `kinova_lowlevelConfigVersion.cmake` follows the
+   first, and ROS tooling reads the second.
+2. Merge `dev` into `main`.
+3. Tag `main` as `vx.y.z` and push the tag.
+4. Move the consuming repo's `.repos` pin to the new tag.
+
+Compatibility is `SameMajorVersion`, so a consumer asking
+`find_package(kinova_lowlevel 1.0 CONFIG REQUIRED)` accepts any 1.x and refuses
+2.0.
+
+Note that the abra bare-metal loop rsyncs a local working tree and bypasses
+`.repos` entirely, so a tag pin alone protects only the container build. The
+`find_package` version check is what protects both, because it fires at
+configure time however the source arrived.

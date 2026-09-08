@@ -66,6 +66,40 @@ jobs:
       - name: Allocation-freedom gate (RtSafety*)
         run: ./build/unit_tests --gtest_filter='RtSafety*'
 
+      # The install/export path is what downstream repos actually consume, and
+      # nothing else in CI touches it -- configure and build never run install().
+      # This installs to a temp prefix and configures a throwaway consumer
+      # against it, which is the only way to know the exported package works.
+      #
+      # It also proves the version machinery rather than asserting it: asking for
+      # 1.0 must succeed, and asking for 2.0 must FAIL. The second half is the
+      # real test -- if kinova_lowlevelConfigVersion.cmake were missing or wrong,
+      # the first would still pass by accident.
+      - name: Install, and consume the exported package
+        run: |
+          set -euo pipefail
+          cmake --install build --prefix /tmp/inst > /dev/null
+          test -f /tmp/inst/lib/cmake/kinova_lowlevel/kinova_lowlevelConfigVersion.cmake
+
+          mkdir -p /tmp/consumer
+          cat > /tmp/consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer CXX)
+          find_package(kinova_lowlevel ${WANT} CONFIG REQUIRED)
+          EOF
+
+          echo "--- a 1.0 request must be satisfied"
+          cmake -S /tmp/consumer -B /tmp/consumer/b1 -DWANT=1.0 \
+            -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null
+
+          echo "--- a 2.0 request must be refused (SameMajorVersion)"
+          if cmake -S /tmp/consumer -B /tmp/consumer/b2 -DWANT=2.0 \
+               -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null 2>&1; then
+            echo "::error::find_package(kinova_lowlevel 2.0) SUCCEEDED against a 1.x install -- the version file is not gating"
+            exit 1
+          fi
+          echo "Exported package resolves at 1.x and refuses 2.x."
+
       # End-to-end proof that the executor, transport, dynamics and telemetry
       # actually run a loop together -- the unit tests exercise the pieces. Two
       # seconds at 1 kHz; the timing numbers it prints are meaningless here (see
