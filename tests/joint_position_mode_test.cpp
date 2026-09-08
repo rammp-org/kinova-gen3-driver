@@ -575,5 +575,3 @@ TEST(JointPositionModePose, ReanchorsTheSeedOnTheTransitionBackIntoPose) {
   EXPECT_TRUE(m.last_ik().converged);
   EXPECT_LT(m.last_ik().pos_err, 1e-4);
 }
-
-
