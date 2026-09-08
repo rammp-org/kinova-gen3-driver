@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# A push to a PR branch supersedes the run already in flight. Without this
+# every rapid push stacks another four-runner matrix -- two of them arm64
+# KORTEX builds that each download an SDK -- and runs them all to completion.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Every job builds on a runner of its own architecture: ubuntu-22.04 for amd64,
 # ubuntu-22.04-arm for arm64. GitHub gives public repositories both at no cost,
 # which is why nothing here emulates -- a QEMU cross build translates every
@@ -55,29 +62,59 @@ jobs:
       # says anything about latency or jitter; those stay a Jetson job (#6).
       #
       # What it does gate is the half of the RT contract that is a property of
-      # the CODE rather than of the kernel. Every RtSafety* case asserts exactly
-      # two things -- majflt_delta == 0 and ring.dropped() == 0 -- i.e. compute()
-      # and the executor cycle touched no new page and the SPSC ring never
-      # overflowed, in steady state after a warm-up run. An allocation, a lock
-      # or a blocking call added to the RT path breaks those on ANY kernel.
+      # the CODE rather than of the kernel: majflt_delta == 0 and
+      # ring.dropped() == 0 -- compute() and the executor cycle touched no new
+      # page and the SPSC ring never overflowed, in steady state after a warm-up
+      # run. An allocation, a lock or a blocking call added to the RT path breaks
+      # those on ANY kernel.
+      #
+      # NanosleepPacingProducesSamples is excluded deliberately. It is the one
+      # case in the suite that asserts neither of those -- it asserts a
+      # throughput floor (consumed > 50 over a 300 ms window), which is a timing
+      # claim, and on an oversubscribed hosted runner it could turn this gate red
+      # for exactly the reason the step says is out of scope. It still runs in
+      # ctest above; it just does not speak for allocation-freedom.
       #
       # Called out as its own step rather than left inside ctest's summary so a
       # regression is legible from the job list without opening a log.
       - name: Allocation-freedom gate (RtSafety*)
-        run: ./build/unit_tests --gtest_filter='RtSafety*'
+        run: |
+          ./build/unit_tests \
+            --gtest_filter='RtSafety*-RtSafety.NanosleepPacingProducesSamples'
 
       # The install/export path is what downstream repos actually consume, and
       # nothing else in CI touches it -- configure and build never run install().
       # This installs to a temp prefix and configures a throwaway consumer
       # against it, which is the only way to know the exported package works.
       #
-      # It also proves the version machinery rather than asserting it: asking for
-      # 1.0 must succeed, and asking for 2.0 must FAIL. The second half is the
-      # real test -- if kinova_lowlevelConfigVersion.cmake were missing or wrong,
-      # the first would still pass by accident.
+      # It also proves the version machinery rather than asserting it: the current
+      # major.minor must be satisfied and the NEXT major must be refused. The
+      # second half is the real test -- if kinova_lowlevelConfigVersion.cmake
+      # were missing or wrong, the first would still pass by accident.
+      #
+      # Both are derived from project(VERSION), never hardcoded: a literal 1.0/2.0
+      # here would invert on the day the project legitimately reaches 2.0.0 and
+      # block the release with a misleading failure.
       - name: Install, and consume the exported package
         run: |
           set -euo pipefail
+          VER="$(sed -n 's/^project(.*VERSION \([0-9][0-9.]*\).*/\1/p' CMakeLists.txt)"
+          test -n "$VER" || { echo "::error::could not read VERSION out of project() in CMakeLists.txt"; exit 1; }
+          MAJOR="${VER%%.*}"; REST="${VER#*.}"; MINOR="${REST%%.*}"
+          WANT_OK="${MAJOR}.${MINOR}"
+          WANT_BAD="$((MAJOR + 1)).0"
+
+          # The one number CMake does NOT own. ROS tooling reads package.xml, so a
+          # bump that misses it leaves the two disagreeing with CI still green --
+          # which would be an odd hole in the job whose whole purpose is to prove
+          # the version machinery.
+          PKG="$(sed -n 's:.*<version>\(.*\)</version>.*:\1:p' package.xml)"
+          if [ "$PKG" != "$VER" ]; then
+            echo "::error::package.xml says $PKG but CMakeLists.txt project(VERSION) says $VER -- bump both"
+            exit 1
+          fi
+          echo "version $VER agrees across CMakeLists.txt and package.xml"
+
           cmake --install build --prefix /tmp/inst > /dev/null
           test -f /tmp/inst/lib/cmake/kinova_lowlevel/kinova_lowlevelConfigVersion.cmake
 
@@ -88,17 +125,17 @@ jobs:
           find_package(kinova_lowlevel ${WANT} CONFIG REQUIRED)
           EOF
 
-          echo "--- a 1.0 request must be satisfied"
-          cmake -S /tmp/consumer -B /tmp/consumer/b1 -DWANT=1.0 \
+          echo "--- a $WANT_OK request must be satisfied"
+          cmake -S /tmp/consumer -B /tmp/consumer/b1 -DWANT="$WANT_OK" \
             -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null
 
-          echo "--- a 2.0 request must be refused (SameMajorVersion)"
-          if cmake -S /tmp/consumer -B /tmp/consumer/b2 -DWANT=2.0 \
+          echo "--- a $WANT_BAD request must be refused (SameMajorVersion)"
+          if cmake -S /tmp/consumer -B /tmp/consumer/b2 -DWANT="$WANT_BAD" \
                -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > /dev/null 2>&1; then
-            echo "::error::find_package(kinova_lowlevel 2.0) SUCCEEDED against a 1.x install -- the version file is not gating"
+            echo "::error::find_package(kinova_lowlevel $WANT_BAD) SUCCEEDED against a $VER install -- the version file is not gating"
             exit 1
           fi
-          echo "Exported package resolves at 1.x and refuses 2.x."
+          echo "Exported package resolves at $WANT_OK and refuses $WANT_BAD."
 
       # End-to-end proof that the executor, transport, dynamics and telemetry
       # actually run a loop together -- the unit tests exercise the pieces. Two
@@ -139,9 +176,11 @@ jobs:
           - arch: amd64
             runner: ubuntu-22.04
             sdk_zip: linux_x86-64_gcc_5.4.zip
+            sdk_sha256: 3c5cbb273b366c5b7cc277abed29574b38b4d2c2ce02877178290adbb76d7c3c
           - arch: arm64
             runner: ubuntu-22.04-arm
             sdk_zip: linux_aarch64_gcc_7.4.zip
+            sdk_sha256: b16b184424724486664f4430fd6e43a8da703ed4b46dfdb25f5e36b8ac4732ae
     runs-on: ${{ matrix.runner }}
     env:
       KORTEX_SDK_BASE: https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0
@@ -156,6 +195,16 @@ jobs:
           sudo mkdir -p "$KORTEX_HW_DIR"
           sudo chown "$USER" "$KORTEX_HW_DIR"
           curl -fsSL "${KORTEX_SDK_BASE}/${{ matrix.sdk_zip }}" -o /tmp/kortex.zip
+
+          # The URL pins a version, but an Artifactory path is mutable: a replaced
+          # or truncated artifact would silently change what CI calls green and
+          # what gets statically linked into the binary that drives the arm.
+          # Verify before unzipping, not after.
+          echo "${{ matrix.sdk_sha256 }}  /tmp/kortex.zip" | sha256sum -c - || {
+            echo "::error::KORTEX SDK checksum mismatch -- the published artifact changed. Verify it with Kinova before updating the pin."
+            exit 1
+          }
+
           python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
             /tmp/kortex.zip "$KORTEX_HW_DIR"
           rm -f /tmp/kortex.zip

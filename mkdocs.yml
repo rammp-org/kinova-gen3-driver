@@ -4,7 +4,7 @@
 # The pages are plain Markdown under docs/ and render fine on GitHub too, so this
 # generator is swappable (Docusaurus/etc.) — it just defines the nav.
 site_name: Kinova Gen3 Low-Level Driver
-site_description: Durable C++ driver for Gen3 7-DOF 1 kHz torque control (gravity-comp + Cartesian impedance)
+site_description: Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson
 docs_dir: docs
 theme:
   name: material

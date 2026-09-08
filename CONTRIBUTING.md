@@ -78,6 +78,7 @@ green amd64 build alone would be testing a machine nobody runs.
 |---|---|
 | `ctest` | The suite passes. |
 | `unit_tests --gtest_filter='RtSafety*'` | **Allocation-freedom** — zero major page faults and zero dropped telemetry samples in steady state. |
+| Install + consume | The exported package resolves at the current major.minor, refuses the next major, and `package.xml` agrees with `project(VERSION)`. |
 | Sim smoke | The executor, transport, dynamics and telemetry run a 1 kHz loop together. |
 | **KORTEX build** | The real-arm transport still compiles and links, and the symbol is actually in the binary. The SDK is fetched from Kinova's public artifactory, per architecture. |
 | KORTEX guard | With the option on and no SDK, configure fails loudly and for the documented reason. |
@@ -100,10 +101,14 @@ The RT contract has two halves, and CI only gates one of them.
 
 CI runs on hosted runners. They are not `PREEMPT_RT`, have no isolated core,
 and cannot get `SCHED_FIFO` — `rt_system` degrades to `SCHED_OTHER` by design.
-So the half CI gates is the one that is a property of the *code*: every
-`RtSafety*` case asserts `majflt_delta == 0` and `ring.dropped() == 0` after a
-warm-up run, which is broken by an allocation, a lock, or a blocking call on the
-RT path regardless of which kernel it runs on.
+So the half CI gates is the one that is a property of the *code*: the allocation
+cases assert `majflt_delta == 0` and `ring.dropped() == 0` after a warm-up run,
+which is broken by an allocation, a lock, or a blocking call on the RT path
+regardless of which kernel it runs on.
+
+`RtSafety.NanosleepPacingProducesSamples` is the exception and is excluded from
+the gate: it asserts a throughput floor rather than either of those, which is a
+timing claim this runner cannot honestly make. It still runs under `ctest`.
 
 The other half — latency, jitter, deadline misses — is a property of the *kernel
 and the machine*, and CI says nothing about it. A green build is not evidence
