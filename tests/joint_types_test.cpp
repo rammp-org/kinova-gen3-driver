@@ -1,9 +1,12 @@
-#include <gtest/gtest.h>
 #include "kinova_lowlevel/joint_types.h"
+
+#include <gtest/gtest.h>
+
 #include "kinova_lowlevel/units.h"
 using namespace kinova;
 TEST(Units, DegRadRoundTrip) {
-  JointVec deg; deg << 0, 90, -180, 45, 30, 270, -90;
+  JointVec deg;
+  deg << 0, 90, -180, 45, 30, 270, -90;
   JointVec back = rad_to_deg(deg_to_rad(deg));
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(back[i], deg[i], 1e-9);
 }

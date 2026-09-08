@@ -1,5 +1,7 @@
-#include <gtest/gtest.h>
 #include "kinova_lowlevel/gripper_controller.h"
+
+#include <gtest/gtest.h>
+
 #include "kinova_lowlevel/sim_transport.h"
 
 using namespace kinova;
@@ -37,7 +39,7 @@ TEST(GripperController, APositionOnlyCommandCarriesTheDefaultSpeedAndForce) {
   GripperController gc(sim);
   gc.connect();
   GripperCommand g;
-  g.position = 0.3f;               // speed and force left at their defaults
+  g.position = 0.3f;  // speed and force left at their defaults
   gc.set_target(g);
   JointCommand c;
   JointFeedback fb;
@@ -59,13 +61,13 @@ TEST(GripperController, SpeedAndForceDoNotPersistBetweenCommands) {
 
   GripperCommand strong;
   strong.position = 1.0f;
-  strong.force    = 0.9f;
+  strong.force = 0.9f;
   gc.set_target(strong);
   gc.exchange(c, fb);
   ASSERT_NEAR(sim.last_command().gripper.force, 0.9f, 1e-6f);
 
   GripperCommand plain;
-  plain.position = 0.5f;           // force not set
+  plain.position = 0.5f;  // force not set
   gc.set_target(plain);
   gc.exchange(c, fb);
   EXPECT_NEAR(sim.last_command().gripper.force, 0.5f, 1e-6f);
@@ -88,7 +90,7 @@ TEST(GripperController, ReleaseStopsStampingAndDoesNotOpenTheGripper) {
 
   gc.release();
   gc.exchange(c, fb);
-  EXPECT_FALSE(sim.last_command().gripper.active);   // no longer commanded
+  EXPECT_FALSE(sim.last_command().gripper.active);  // no longer commanded
 
   // and specifically NOT commanded open: with nothing stamping, SimTransport's
   // step_gripper leaves position untouched, so the feedback holds at its pre-release
@@ -137,7 +139,7 @@ TEST(GripperController, PassesFeedbackThroughUntouched) {
   JointCommand c;
   JointFeedback fb;
   gc.exchange(c, fb);
-  EXPECT_NEAR(fb.q[0], 0.25, 1e-9);      // the decorator is transparent to arm state
+  EXPECT_NEAR(fb.q[0], 0.25, 1e-9);  // the decorator is transparent to arm state
   EXPECT_TRUE(fb.gripper.present);
 }
 
@@ -167,8 +169,8 @@ TEST(GripperController, SetTargetClampsOutOfRangeFieldsToZeroOne) {
   gc.connect();
   GripperCommand g;
   g.position = 1.7f;
-  g.speed    = -0.2f;
-  g.force    = 5.0f;
+  g.speed = -0.2f;
+  g.force = 5.0f;
   gc.set_target(g);
   JointCommand c;
   JointFeedback fb;

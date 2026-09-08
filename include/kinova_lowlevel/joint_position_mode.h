@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <limits>
+
 #include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/diff_ik.h"
@@ -74,9 +75,7 @@ struct JointPositionParams {
 //
 // Live setters publish via a single-writer (non-RT) double-buffer; compute()
 // (RT thread) reads one snapshot per cycle.
-class JointPositionMode : public ControlMode,
-                          public JointTargetSink,
-                          public PoseTargetSink {
+class JointPositionMode : public ControlMode, public JointTargetSink, public PoseTargetSink {
  public:
   JointPositionMode(Dynamics& dyn, JointPositionParams p = {});
   ActuatorModes required_modes() const override;
@@ -90,7 +89,7 @@ class JointPositionMode : public ControlMode,
   // feeds the SAME rate_limit -> leash -> wrap -> clamp pipeline a joint target
   // does, so the whole safety envelope comes along unchanged (PoseTargetSink).
   void set_target(const Pose& x_d) noexcept override;
-  using JointTargetSink::set_target;   // keep the JointVec overload visible
+  using JointTargetSink::set_target;  // keep the JointVec overload visible
   void set_params(const JointPositionParams& p) noexcept;
 
   // Set when IK has failed to converge for longer than ik_fault_s. Published for
@@ -128,8 +127,8 @@ class JointPositionMode : public ControlMode,
   // against the RT loop.
   void seed_limits(JointPositionParams& p) const noexcept;
 
-  JointVec q_lower_urdf_ = JointVec::Zero();   // cached in ctor: set_params must
-  JointVec q_upper_urdf_ = JointVec::Zero();   // not touch Dynamics off the RT thread
+  JointVec q_lower_urdf_ = JointVec::Zero();  // cached in ctor: set_params must
+  JointVec q_upper_urdf_ = JointVec::Zero();  // not touch Dynamics off the RT thread
   JointVec v_max_urdf_ = JointVec::Zero();
   // Which joints are continuous (both URDF limits infinite). The transport wraps
   // every measured angle to (-pi, pi], so on these joints a raw target-minus-
@@ -156,13 +155,13 @@ class JointPositionMode : public ControlMode,
   // reference at measured q -- is this mode's contract and lives in compute().
   CommandWatchdog wd_;
 
-  JointVec q_ref_ = JointVec::Zero();   // integrated reference configuration
+  JointVec q_ref_ = JointVec::Zero();  // integrated reference configuration
 
   Dynamics& dyn_;
   DiffIkSolver ik_;
   IkResult last_ik_{};
-  double ik_bad_s_ = 0.0;                  // RT-owned: summed dt while !converged
-  std::atomic<bool> ik_faulted_{false};    // RT writer, non-RT (sampler) reader
+  double ik_bad_s_ = 0.0;                // RT-owned: summed dt while !converged
+  std::atomic<bool> ik_faulted_{false};  // RT writer, non-RT (sampler) reader
   // PERSISTENT IK seed, refined in place and carried across cycles. Deliberately
   // NOT re-seeded from q_ref_ each cycle: q_ref_ is walked toward the IK output by
   // a separate rate limiter at max_ref_speed*dt, so re-seeding from it discards

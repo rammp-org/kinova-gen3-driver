@@ -34,15 +34,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <Eigen/Dense>
 #include <atomic>
-#include <cstring>
 #include <csignal>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <Eigen/Dense>
 
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
@@ -80,7 +80,7 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
   int n = 0;
   size_t pos = 0;
   while (true) {
-    if (n == kNumJoints) return false;            // more values than joints
+    if (n == kNumJoints) return false;  // more values than joints
     const size_t comma = s.find(',', pos);
     const std::string tok =
         (comma == std::string::npos) ? s.substr(pos) : s.substr(pos, comma - pos);
@@ -88,14 +88,14 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
     try {
       size_t used = 0;
       vals[n++] = std::stod(tok, &used);
-      if (used != tok.size()) return false;       // trailing garbage in the token
+      if (used != tok.size()) return false;  // trailing garbage in the token
     } catch (const std::exception&) {
       return false;
     }
     if (comma == std::string::npos) break;
     pos = comma + 1;
   }
-  if (n == 1) {                                   // scalar broadcasts to all joints
+  if (n == 1) {  // scalar broadcasts to all joints
     out.setConstant(vals[0]);
     return true;
   }
@@ -109,8 +109,7 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
 Pose pose_from_packet(const tp::PoseTargetPacket& p) {
   Pose x;
   x.p = Eigen::Vector3d(p.pos[0], p.pos[1], p.pos[2]);
-  x.R = Eigen::Quaterniond(p.quat_wxyz[0], p.quat_wxyz[1], p.quat_wxyz[2],
-                           p.quat_wxyz[3]);
+  x.R = Eigen::Quaterniond(p.quat_wxyz[0], p.quat_wxyz[1], p.quat_wxyz[2], p.quat_wxyz[3]);
   x.R.normalize();
   return x;
 }
@@ -142,24 +141,35 @@ int main(int argc, char** argv) {
     auto next_joint_vec = [&](const char* name, JointVec& out) {
       const std::string s = next(name);
       if (!parse_joint_vec(s, out)) {
-        std::cerr << name << " needs 1 or " << kNumJoints
-                  << " comma-separated numbers, got: " << s << "\n";
+        std::cerr << name << " needs 1 or " << kNumJoints << " comma-separated numbers, got: " << s
+                  << "\n";
         std::exit(2);
       }
     };
-    if (a == "--ip") ip = next("--ip");
-    else if (a == "--sim") use_sim = true;
-    else if (a == "--urdf") urdf = next("--urdf");
-    else if (a == "--port") port = std::stoi(next("--port"));
-    else if (a == "--rate") rate_hz = std::stod(next("--rate"));
-    else if (a == "--cpu") cpu = std::stoi(next("--cpu"));
-    else if (a == "--rt-priority") rt_priority = std::stoi(next("--rt-priority"));
+    if (a == "--ip")
+      ip = next("--ip");
+    else if (a == "--sim")
+      use_sim = true;
+    else if (a == "--urdf")
+      urdf = next("--urdf");
+    else if (a == "--port")
+      port = std::stoi(next("--port"));
+    else if (a == "--rate")
+      rate_hz = std::stod(next("--rate"));
+    else if (a == "--cpu")
+      cpu = std::stoi(next("--cpu"));
+    else if (a == "--rt-priority")
+      rt_priority = std::stoi(next("--rt-priority"));
     // --- null-space secondary objective tuning (default OFF) ------------------
-    else if (a == "--ns-kp") gains.nullspace_kp = std::stod(next("--ns-kp"));
-    else if (a == "--ns-kd") gains.nullspace_kd = std::stod(next("--ns-kd"));
-    else if (a == "--ns-fixed-rest") gains.nullspace_use_fixed_rest = true;
+    else if (a == "--ns-kp")
+      gains.nullspace_kp = std::stod(next("--ns-kp"));
+    else if (a == "--ns-kd")
+      gains.nullspace_kd = std::stod(next("--ns-kd"));
+    else if (a == "--ns-fixed-rest")
+      gains.nullspace_use_fixed_rest = true;
     // 7 comma-separated joint angles (rad), e.g. --ns-qrest 0,0.26,3.14,-2.27,0,0.96,1.57
-    else if (a == "--ns-qrest") next_joint_vec("--ns-qrest", gains.nullspace_q_rest);
+    else if (a == "--ns-qrest")
+      next_joint_vec("--ns-qrest", gains.nullspace_q_rest);
     // --manip-gain enables manipulability gradient ascent (0 disables).
     else if (a == "--manip-gain") {
       gains.manip_gain = std::stod(next("--manip-gain"));
@@ -168,24 +178,32 @@ int main(int argc, char** argv) {
     // --- joint-space impedance (IK in the loop) -------------------------------
     // Constrains ALL 7 joints instead of leaving the redundant DOF free. Use when
     // Cartesian teleop keeps wandering into awkward elbow configurations.
-    else if (a == "--joint-impedance") joint_mode = true;
-    else if (a == "--jkp") next_joint_vec("--jkp", jgains.Kq);
-    else if (a == "--zeta") jgains.zeta = std::stod(next("--zeta"));
-    else if (a == "--jtau-limit") next_joint_vec("--jtau-limit", jgains.torque_limit);
-    else if (a == "--leash") jgains.max_tracking_error = std::stod(next("--leash"));
-    else if (a == "--ref-speed") next_joint_vec("--ref-speed", jgains.max_ref_speed);
-    else if (a == "--ik-iters") jgains.ik.max_iters = std::stoi(next("--ik-iters"));
+    else if (a == "--joint-impedance")
+      joint_mode = true;
+    else if (a == "--jkp")
+      next_joint_vec("--jkp", jgains.Kq);
+    else if (a == "--zeta")
+      jgains.zeta = std::stod(next("--zeta"));
+    else if (a == "--jtau-limit")
+      next_joint_vec("--jtau-limit", jgains.torque_limit);
+    else if (a == "--leash")
+      jgains.max_tracking_error = std::stod(next("--leash"));
+    else if (a == "--ref-speed")
+      next_joint_vec("--ref-speed", jgains.max_ref_speed);
+    else if (a == "--ik-iters")
+      jgains.ik.max_iters = std::stoi(next("--ik-iters"));
     else if (a == "--ik-posture-gain")
       jgains.ik.posture_gain = std::stod(next("--ik-posture-gain"));
-    else if (a == "--ik-qrest") next_joint_vec("--ik-qrest", jgains.ik.q_rest);
+    else if (a == "--ik-qrest")
+      next_joint_vec("--ik-qrest", jgains.ik.q_rest);
     else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
   }
 
-  std::cout << "[teleop-srv] urdf=" << urdf << " rate=" << rate_hz << "Hz port="
-            << port << " sim=" << (use_sim ? "yes" : "no") << "\n";
+  std::cout << "[teleop-srv] urdf=" << urdf << " rate=" << rate_hz << "Hz port=" << port
+            << " sim=" << (use_sim ? "yes" : "no") << "\n";
 
   // Three Dynamics instances — Dynamics::fk mutates internal Pinocchio state and
   // is NOT thread-safe. Each thread that calls fk owns its own instance so no
@@ -277,8 +295,8 @@ int main(int argc, char** argv) {
     while (!g_stop.load(std::memory_order_acquire)) {
       sockaddr_in src{};
       socklen_t srclen = sizeof(src);
-      const ssize_t n = ::recvfrom(sock, buf, sizeof(buf), 0,
-                                   reinterpret_cast<sockaddr*>(&src), &srclen);
+      const ssize_t n =
+          ::recvfrom(sock, buf, sizeof(buf), 0, reinterpret_cast<sockaddr*>(&src), &srclen);
       if (n < static_cast<ssize_t>(sizeof(tp::Header))) continue;
       tp::Header h;
       std::memcpy(&h, buf, sizeof(h));
@@ -408,8 +426,7 @@ int main(int argc, char** argv) {
         pkt.fault = fb.fault ? 1 : 0;
         pkt.frame_id = fb.frame_id;
         pkt.last_control_seq = last_control_seq.load(std::memory_order_acquire);
-        ::sendto(sock, &pkt, sizeof(pkt), 0,
-                 reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+        ::sendto(sock, &pkt, sizeof(pkt), 0, reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(6));  // ~150 Hz
     }
@@ -418,8 +435,7 @@ int main(int argc, char** argv) {
   // Telemetry ring is required by RtExecutor but not consumed here (timing
   // telemetry is not part of teleop); it drops-don't-block when full.
   SampleRing ring(1 << 16);
-  RtExecutor ex(transport, ring,
-                {rate_hz, Pacing::kSleepSpin, {rt_priority, cpu, true}});
+  RtExecutor ex(transport, ring, {rate_hz, Pacing::kSleepSpin, {rt_priority, cpu, true}});
   ex.request_mode(mode);
 
   std::cout << "[teleop-srv] listening; RT loop running. Ctrl-C to stop.\n";

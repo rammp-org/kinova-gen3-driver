@@ -26,7 +26,8 @@ inline void sleep_until_ns(int64_t deadline_ns) {
     req.tv_nsec = (remaining - 100'000) % 1'000'000'000LL;
     clock_nanosleep(CLOCK_MONOTONIC, 0, &req, nullptr);
   }
-  while (ns_now() < deadline_ns) { /* spin */ }
+  while (ns_now() < deadline_ns) { /* spin */
+  }
 }
 
 // Absolute clock_nanosleep to a CLOCK_MONOTONIC deadline (lower CPU, coarser).
@@ -66,7 +67,7 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   ControlMode* active = nullptr;
 
   // Reusable stack locals; zero-initialized. No allocation in the loop body.
-  JointCommand cmd;   // benign hold: kTorque, zero torque, zero position
+  JointCommand cmd;  // benign hold: kTorque, zero torque, zero position
   JointFeedback fb;
 
   // Seed one feedback read with the benign hold command so fb is populated and

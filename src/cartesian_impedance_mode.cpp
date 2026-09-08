@@ -1,6 +1,8 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
+
 #include <algorithm>
 #include <cmath>
+
 #include "kinova_lowlevel/units.h"
 
 namespace kinova {
@@ -19,7 +21,9 @@ CartesianImpedanceMode::CartesianImpedanceMode(Dynamics& dyn, CartesianImpedance
 }
 
 ActuatorModes CartesianImpedanceMode::required_modes() const {
-  ActuatorModes modes; modes.fill(ActuatorMode::kTorque); return modes;
+  ActuatorModes modes;
+  modes.fill(ActuatorMode::kTorque);
+  return modes;
 }
 
 CartesianImpedanceParams CartesianImpedanceMode::params() const noexcept {
@@ -41,7 +45,7 @@ void CartesianImpedanceMode::set_target(const Pose& x_d) noexcept {
 
 void CartesianImpedanceMode::on_enter(const JointFeedback& fb) {
   const CartesianImpedanceParams p = params();
-  entry_pose_ = dyn_.fk(fb.q);                       // hold where we are
+  entry_pose_ = dyn_.fk(fb.q);  // hold where we are
   // Legacy: anchor posture to the entry config. Opt-in: anchor to a fixed pose
   // (e.g. elbow-up) so the null space biases "up" regardless of where we started.
   q_rest_ = p.nullspace_use_fixed_rest ? p.nullspace_q_rest : fb.q;
@@ -49,9 +53,8 @@ void CartesianImpedanceMode::on_enter(const JointFeedback& fb) {
   ramp_elapsed_ = 0.0;
 }
 
-void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
-                                     JointCommand& out) {
-  const CartesianImpedanceParams p = params();   // own a snapshot for the whole cycle
+void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
+  const CartesianImpedanceParams p = params();  // own a snapshot for the whole cycle
   const Pose target = has_ext_target_.load(std::memory_order_acquire)
                           ? ext_target_[ext_active_.load(std::memory_order_acquire)]
                           : entry_pose_;
@@ -59,8 +62,8 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   Pose x = dyn_.fk(fb.q);
   dyn_.jacobian(fb.q, J_);
   Vector6 xd = J_ * fb.qd;
-  Vector6 e  = pose_error(target, x);
-  Vector6 F  = p.Kx.cwiseProduct(e) - p.Dx.cwiseProduct(xd);
+  Vector6 e = pose_error(target, x);
+  Vector6 F = p.Kx.cwiseProduct(e) - p.Dx.cwiseProduct(xd);
 
   dyn_.gravity(fb.q, g_);
 
@@ -73,8 +76,7 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
     JJt.diagonal().array() += p.pinv_damping * p.pinv_damping;
     Eigen::Matrix<double, 6, kNumJoints> JtPinv = JJt.ldlt().solve(J_);
     Eigen::Matrix<double, kNumJoints, kNumJoints> N =
-        Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity()
-        - J_.transpose() * JtPinv;
+        Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity() - J_.transpose() * JtPinv;
     // Posture error on a CONTINUOUS joint must take the short way round: the
     // transport wraps measured angles to (-pi, pi], so a rest posture near +pi
     // against a measurement near -pi reads as ~2*pi of error and drives the joint
@@ -89,16 +91,14 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
       // Ascend Yoshikawa manipulability w(q)=√det(J Jᵀ) by forward finite
       // differences: ∂w/∂qᵢ ≈ (w(q+h·eᵢ) − w(q))/h. Costs 7 extra Jacobian evals.
       // RT-safe: fixed-size stack scratch, no heap alloc; det() of a 6x6 is alloc-free.
-      const double w0 =
-          std::sqrt(std::max(0.0, (J_ * J_.transpose()).determinant()));
+      const double w0 = std::sqrt(std::max(0.0, (J_ * J_.transpose()).determinant()));
       const double inv_h = 1.0 / p.manip_fd_step;
       Jacobian6 Jp;
       for (int i = 0; i < kNumJoints; ++i) {
         JointVec qp = fb.q;
         qp[i] += p.manip_fd_step;
         dyn_.jacobian(qp, Jp);
-        const double wi =
-            std::sqrt(std::max(0.0, (Jp * Jp.transpose()).determinant()));
+        const double wi = std::sqrt(std::max(0.0, (Jp * Jp.transpose()).determinant()));
         tau0[i] += p.manip_gain * (wi - w0) * inv_h;
       }
     }
@@ -108,9 +108,7 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
   // Ramp scales the ACTIVE wrench (task + nullspace) 0->1 over gain_ramp_s on
   // entry; gravity is ALWAYS applied in full so the arm never sags while the
   // compliance fades in. ramp uses elapsed-at-start-of-cycle, then advances.
-  const double ramp = (p.gain_ramp_s <= 0.0)
-                          ? 1.0
-                          : std::min(1.0, ramp_elapsed_ / p.gain_ramp_s);
+  const double ramp = (p.gain_ramp_s <= 0.0) ? 1.0 : std::min(1.0, ramp_elapsed_ / p.gain_ramp_s);
   tau_ = g_ + ramp * tau_active;
   ramp_elapsed_ += dt_s;
 
@@ -121,7 +119,7 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s,
 
   out.mode = ActuatorMode::kTorque;
   out.torque = tau_;
-  out.position = fb.q;                               // passthrough for following-error hold
+  out.position = fb.q;  // passthrough for following-error hold
 }
 
 }  // namespace kinova

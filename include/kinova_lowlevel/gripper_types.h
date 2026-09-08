@@ -4,17 +4,17 @@ namespace kinova {
 // What the 2F-85 accepts, normalized. KORTEX speaks percent (0..100); the single
 // conversion happens inside KortexTransport, exactly as the arm's degrees do.
 struct GripperCommand {
-  float position = 0.0f;   // 0 (open) .. 1 (closed)
-  float speed    = 1.0f;   // fraction of max closing speed
+  float position = 0.0f;  // 0 (open) .. 1 (closed)
+  float speed = 1.0f;     // fraction of max closing speed
   // A CEILING on motor current, not a force setpoint. The gripper closes at
   // `speed` toward `position` and stalls when it reaches this limit. No force
   // servo exists on this hardware -- GripperMode has no force mode at all, and
   // the high-level API that would host one needs SINGLE_LEVEL_SERVOING, which is
   // incompatible with the low-level servoing our 1 kHz torque control requires.
-  float force    = 0.5f;   // fraction of max grip force
+  float force = 0.5f;  // fraction of max grip force
   // When false, no gripper command is emitted at all. This keeps the gripper limp
   // at startup rather than actuating it from a seeded default.
-  bool  active   = false;
+  bool active = false;
 };
 
 // Normalizer for GripperFeedback::effort/current. MotorFeedback carries NO force field --
@@ -45,17 +45,17 @@ inline constexpr float kGripperMaxCurrentA = 1.0f;
 // publishing a setpoint echo into a units-bearing field such as sensor_msgs/JointState's
 // `velocity`. Differentiate `position` if a rate is genuinely needed.
 struct GripperFeedback {
-  float position = 0.0f;   // 0 (open) .. 1 (closed)
+  float position = 0.0f;  // 0 (open) .. 1 (closed)
   // 0..1, |current| / kGripperMaxCurrentA. Measured on the arm: a grasp SPIKES
   // (up to 1.0) while the fingers close on the object, then settles to a low
   // holding current -- about 0.05 A, i.e. effort ~0.05. A sustained grasp therefore
   // reports a SMALL effort, not a large one; anything keying off "high effort means
   // holding something" will be wrong.
-  float effort   = 0.0f;
-  float current  = 0.0f;   // amps, raw, exactly as reported
+  float effort = 0.0f;
+  float current = 0.0f;  // amps, raw, exactly as reported
   // False when no interconnect gripper is attached. Without this, a missing gripper
   // and a fully-open one are both position 0 -- a silent mis-mapping.
-  bool  present  = false;
+  bool present = false;
 };
 
 }  // namespace kinova

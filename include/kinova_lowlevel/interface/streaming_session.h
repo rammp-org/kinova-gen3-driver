@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+
 #include "kinova_lowlevel/interface/value_types.h"
 namespace kinova::interface {
 
@@ -21,18 +22,18 @@ bool pair_supported(SetpointKind, ControlModeKind);
 class StreamingSession {
  public:
   StreamOpenResult open(const StreamOpenRequest&, double now_s);
-  void             close();
+  void close();
   // Returns true if this setpoint may proceed. A matching setpoint also refreshes
   // the deadline; a rejected one does NOT (a client sending the wrong shape is not
   // evidence the stream is healthy).
-  bool             admit(SetpointKind, double now_s);
-  bool             expired(double now_s) const;
+  bool admit(SetpointKind, double now_s);
+  bool expired(double now_s) const;
 
-  bool            is_open()        const { return open_.load(std::memory_order_acquire); }
-  SetpointKind    kind()           const { return kind_.load(std::memory_order_relaxed); }
-  ControlModeKind control_mode()   const { return mode_.load(std::memory_order_relaxed); }
-  double          timeout_s()      const { return timeout_s_.load(std::memory_order_relaxed); }
-  uint64_t        rejected_count() const { return rejected_.load(std::memory_order_relaxed); }
+  bool is_open() const { return open_.load(std::memory_order_acquire); }
+  SetpointKind kind() const { return kind_.load(std::memory_order_relaxed); }
+  ControlModeKind control_mode() const { return mode_.load(std::memory_order_relaxed); }
+  double timeout_s() const { return timeout_s_.load(std::memory_order_relaxed); }
+  uint64_t rejected_count() const { return rejected_.load(std::memory_order_relaxed); }
 
  private:
   std::atomic<bool> open_{false};
@@ -41,10 +42,10 @@ class StreamingSession {
   // mid-expired(), and that is an unsynchronised read of a plain member: harmless
   // in practice, a genuine data race to TSan, and free to close. Relaxed is enough
   // -- open_ still carries the ordering; these just must not tear.
-  std::atomic<SetpointKind>    kind_{SetpointKind::kJointPosition};
+  std::atomic<SetpointKind> kind_{SetpointKind::kJointPosition};
   std::atomic<ControlModeKind> mode_{ControlModeKind::kPosition};
-  std::atomic<double>          timeout_s_{0.1};
-  std::atomic<double> last_s_{0.0};        // last accepted setpoint, or the open time
+  std::atomic<double> timeout_s_{0.1};
+  std::atomic<double> last_s_{0.0};  // last accepted setpoint, or the open time
   std::atomic<uint64_t> rejected_{0};
 };
 }  // namespace kinova::interface

@@ -1,15 +1,16 @@
 #include "kinova_lowlevel/dynamics.h"
+
 #include <cmath>
 #include <limits>
-#include <stdexcept>
-#include <string>
-#include <pinocchio/parsers/urdf.hpp>
-#include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/algorithm/crba.hpp>
-#include <pinocchio/algorithm/rnea.hpp>
-#include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
+#include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/parsers/urdf.hpp>
+#include <stdexcept>
+#include <string>
 namespace kinova {
 struct Dynamics::Impl {
   pinocchio::Model model;
@@ -28,8 +29,12 @@ struct Dynamics::Impl {
     for (int i = 0; i < model.nv; ++i) {
       int jid = model.getJointId(model.names[i + 1]);
       int qidx = model.idx_qs[jid];
-      if (model.nqs[jid] == 2) { qcfg[qidx] = std::cos(q[i]); qcfg[qidx + 1] = std::sin(q[i]); }
-      else { qcfg[qidx] = q[i]; }
+      if (model.nqs[jid] == 2) {
+        qcfg[qidx] = std::cos(q[i]);
+        qcfg[qidx + 1] = std::sin(q[i]);
+      } else {
+        qcfg[qidx] = q[i];
+      }
     }
   }
 };
@@ -38,9 +43,9 @@ Dynamics::Dynamics(const std::string& urdf_path, const std::string& ee_frame)
   // Guard against a wrong/mismatched URDF silently corrupting the fixed-size
   // JointVec. Hard throw (not assert) so it fires in Release too. See no-silent-footgun.
   if (impl_->model.nv != kNumJoints) {
-    throw std::runtime_error(
-        "Dynamics: URDF nv=" + std::to_string(impl_->model.nv) +
-        " != kNumJoints=" + std::to_string(kNumJoints) + " (wrong URDF for this build)");
+    throw std::runtime_error("Dynamics: URDF nv=" + std::to_string(impl_->model.nv) +
+                             " != kNumJoints=" + std::to_string(kNumJoints) +
+                             " (wrong URDF for this build)");
   }
   // Footgun guard: a typo'd/missing EE frame must fail loudly at startup, never
   // silently control the wrong point.
@@ -94,7 +99,7 @@ void Dynamics::joint_limits(JointVec& lower, JointVec& upper) const {
   for (int i = 0; i < m.nv; ++i) {
     int jid = m.getJointId(m.names[i + 1]);
     int qidx = m.idx_qs[jid];
-    if (m.nqs[jid] == 2) {   // continuous: (cos,sin) packing, no meaningful bound
+    if (m.nqs[jid] == 2) {  // continuous: (cos,sin) packing, no meaningful bound
       lower[i] = -kInf;
       upper[i] = kInf;
     } else {
@@ -108,8 +113,7 @@ void Dynamics::jacobian(const JointVec& q, Jacobian6& J_out) {
   J_out.setZero();
   // LOCAL_WORLD_ALIGNED: spatial velocity expressed in world-aligned axes at the
   // EE origin — the same frame the Cartesian stiffness gains live in.
-  pinocchio::computeFrameJacobian(impl_->model, impl_->data, impl_->qcfg,
-                                  impl_->frame_id, pinocchio::LOCAL_WORLD_ALIGNED,
-                                  J_out);
+  pinocchio::computeFrameJacobian(impl_->model, impl_->data, impl_->qcfg, impl_->frame_id,
+                                  pinocchio::LOCAL_WORLD_ALIGNED, J_out);
 }
 }  // namespace kinova

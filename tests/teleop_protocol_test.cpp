@@ -1,6 +1,8 @@
-#include <gtest/gtest.h>
-#include <cstring>
 #include "kinova_lowlevel/teleop_protocol.h"
+
+#include <gtest/gtest.h>
+
+#include <cstring>
 
 namespace tp = kinova::teleop;
 
@@ -31,9 +33,13 @@ TEST(TeleopProtocol, PoseTargetRoundTrip) {
   in.h.msg_type = static_cast<uint16_t>(tp::MsgType::kPoseTarget);
   in.h.seq = 42;
   in.h.timestamp_ns = 123456789ull;
-  in.pos[0] = 0.10; in.pos[1] = -0.20; in.pos[2] = 0.30;
-  in.quat_wxyz[0] = 1.0; in.quat_wxyz[1] = 0.0;
-  in.quat_wxyz[2] = 0.0; in.quat_wxyz[3] = 0.0;
+  in.pos[0] = 0.10;
+  in.pos[1] = -0.20;
+  in.pos[2] = 0.30;
+  in.quat_wxyz[0] = 1.0;
+  in.quat_wxyz[1] = 0.0;
+  in.quat_wxyz[2] = 0.0;
+  in.quat_wxyz[3] = 0.0;
   in.gripper = 0.5f;
   in.flags = tp::kFlagEngaged | tp::kFlagFreeze;
 
@@ -57,10 +63,18 @@ TEST(TeleopProtocol, FeedbackRoundTrip) {
   in.h.magic = tp::kMagic;
   in.h.version = tp::kVersion;
   in.h.msg_type = static_cast<uint16_t>(tp::MsgType::kFeedback);
-  for (int i = 0; i < 7; ++i) { in.q[i] = i * 0.1; in.qd[i] = -i * 0.2; in.tau[i] = i * 1.5; }
-  in.ee_pos[0] = 0.4; in.ee_pos[1] = 0.0; in.ee_pos[2] = 0.5;
-  in.ee_quat_wxyz[0] = 0.0; in.ee_quat_wxyz[1] = 1.0;
-  in.ee_quat_wxyz[2] = 0.0; in.ee_quat_wxyz[3] = 0.0;
+  for (int i = 0; i < 7; ++i) {
+    in.q[i] = i * 0.1;
+    in.qd[i] = -i * 0.2;
+    in.tau[i] = i * 1.5;
+  }
+  in.ee_pos[0] = 0.4;
+  in.ee_pos[1] = 0.0;
+  in.ee_pos[2] = 0.5;
+  in.ee_quat_wxyz[0] = 0.0;
+  in.ee_quat_wxyz[1] = 1.0;
+  in.ee_quat_wxyz[2] = 0.0;
+  in.ee_quat_wxyz[3] = 0.0;
   in.gripper_state = 0.25f;
   in.fault = 1;
   in.frame_id = 99999ull;

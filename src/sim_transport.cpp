@@ -58,10 +58,9 @@ void SimTransport::step_gripper(const GripperCommand& g) {
   // THIS IS A MODEL, not measured hardware behaviour: on the real arm a sustained
   // grasp settles to a low holding current (effort ~0.05), not the commanded force
   // cap reported here. Do not calibrate a holding-detector against this sim.
-  const bool blocked_by_object =
-      gripper_block_ >= 0.0f && g.position > gripper_block_ &&
-      std::fabs(state_.gripper.position - gripper_block_) < kSettledEps;
-  state_.gripper.effort  = blocked_by_object ? g.force : 0.0f;
+  const bool blocked_by_object = gripper_block_ >= 0.0f && g.position > gripper_block_ &&
+                                 std::fabs(state_.gripper.position - gripper_block_) < kSettledEps;
+  state_.gripper.effort = blocked_by_object ? g.force : 0.0f;
   // Use the real normalizer so current/kGripperMaxCurrentA round-trips to the same
   // effort on sim and hardware -- see GripperFeedback::current's documented units.
   state_.gripper.current = state_.gripper.effort * kGripperMaxCurrentA;
@@ -72,7 +71,8 @@ void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   step_gripper(cmd.gripper);
   if (latency_us_ > 0) {
     const int64_t deadline = ns_now() + int64_t(latency_us_) * 1000LL;
-    while (ns_now() < deadline) { /* busy-wait, off-RT friendly */ }
+    while (ns_now() < deadline) { /* busy-wait, off-RT friendly */
+    }
   }
   ++frame_;
   state_.frame_id = frame_;

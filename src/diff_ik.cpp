@@ -1,7 +1,8 @@
 #include "kinova_lowlevel/diff_ik.h"
+
+#include <Eigen/Cholesky>
 #include <algorithm>
 #include <cmath>
-#include <Eigen/Cholesky>
 namespace kinova {
 namespace {
 
@@ -24,9 +25,7 @@ double posture_error(double q_rest, double q, bool continuous) {
 
 }  // namespace
 
-DiffIkSolver::DiffIkSolver(Dynamics& dyn, DiffIkParams p) : dyn_(dyn), p_(p) {
-  J_.setZero();
-}
+DiffIkSolver::DiffIkSolver(Dynamics& dyn, DiffIkParams p) : dyn_(dyn), p_(p) { J_.setZero(); }
 
 IkResult DiffIkSolver::solve(const Pose& target, JointVec& q) {
   // With a posture bias or limit avoidance active, reaching the commanded pose is
@@ -65,14 +64,12 @@ IkResult DiffIkSolver::solve(const Pose& target, JointVec& q) {
     // singularities -- deliberate: robustness beats exactness here.
     JointVec q0;
     for (int i = 0; i < kNumJoints; ++i) {
-      const bool continuous =
-          !std::isfinite(p_.q_lower[i]) && !std::isfinite(p_.q_upper[i]);
+      const bool continuous = !std::isfinite(p_.q_lower[i]) && !std::isfinite(p_.q_upper[i]);
       q0[i] = p_.posture_gain * posture_error(p_.q_rest[i], q[i], continuous) +
-              p_.limit_gain * limit_gradient(q[i], p_.q_lower[i], p_.q_upper[i],
-                                             p_.limit_margin);
+              p_.limit_gain * limit_gradient(q[i], p_.q_lower[i], p_.q_upper[i], p_.limit_margin);
     }
     const Eigen::Matrix<double, 6, kNumJoints> AinvJ = A_ldlt.solve(J_);
-    dq += q0 - J_.transpose() * (AinvJ * q0);      // (I - Jt A^-1 J) q0
+    dq += q0 - J_.transpose() * (AinvJ * q0);  // (I - Jt A^-1 J) q0
 
     // Fixed point: task met and the secondary objectives have nothing left to
     // pull on. Stopping here is what keeps the steady-state cost low when the

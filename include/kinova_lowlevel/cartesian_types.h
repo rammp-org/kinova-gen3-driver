@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/Core>
 #include <Eigen/Geometry>
+
 #include "kinova_lowlevel/joint_types.h"
 
 namespace kinova {
@@ -13,8 +14,8 @@ using Jacobian6 = Eigen::Matrix<double, 6, kNumJoints>;
 
 // A rigid-body pose (SE(3)). Fixed-size, no heap — RT-safe to copy.
 struct Pose {
-  Eigen::Vector3d    p = Eigen::Vector3d::Zero();          // position [m]
-  Eigen::Quaterniond R = Eigen::Quaterniond::Identity();   // orientation
+  Eigen::Vector3d p = Eigen::Vector3d::Zero();            // position [m]
+  Eigen::Quaterniond R = Eigen::Quaterniond::Identity();  // orientation
 };
 
 }  // namespace kinova

@@ -1,6 +1,8 @@
-#include <gtest/gtest.h>
-#include <cmath>
 #include "kinova_lowlevel/cartesian.h"
+
+#include <gtest/gtest.h>
+
+#include <cmath>
 using namespace kinova;
 
 TEST(PoseError, IdenticalPosesGiveZero) {
@@ -26,9 +28,9 @@ TEST(PoseError, PureRotationAboutZ) {
   des.R = Eigen::Quaterniond(Eigen::AngleAxisd(ang, Eigen::Vector3d::UnitZ()));
   Vector6 e = pose_error(des, cur);
   EXPECT_NEAR(e.head<3>().norm(), 0.0, 1e-12);
-  EXPECT_NEAR(e[3], 0.0,  1e-9);
-  EXPECT_NEAR(e[4], 0.0,  1e-9);
-  EXPECT_NEAR(e[5], ang,  1e-9);
+  EXPECT_NEAR(e[3], 0.0, 1e-9);
+  EXPECT_NEAR(e[4], 0.0, 1e-9);
+  EXPECT_NEAR(e[5], ang, 1e-9);
 }
 
 TEST(PoseError, LargeRotationTakesShortestPath) {
@@ -40,8 +42,8 @@ TEST(PoseError, LargeRotationTakesShortestPath) {
   Pose cur, des;
   des.R = Eigen::Quaterniond(Eigen::AngleAxisd(1.8 * M_PI, Eigen::Vector3d::UnitX()));
   Vector6 e = pose_error(des, cur);
-  EXPECT_NEAR(e.head<3>().norm(), 0.0, 1e-12);     // pure rotation, no translation
-  EXPECT_NEAR(e[3], -0.2 * M_PI, 1e-9);            // short arc, not +1.8*pi
+  EXPECT_NEAR(e.head<3>().norm(), 0.0, 1e-12);  // pure rotation, no translation
+  EXPECT_NEAR(e[3], -0.2 * M_PI, 1e-9);         // short arc, not +1.8*pi
   EXPECT_NEAR(e[4], 0.0, 1e-9);
   EXPECT_NEAR(e[5], 0.0, 1e-9);
 }

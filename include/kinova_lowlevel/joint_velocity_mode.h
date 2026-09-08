@@ -1,8 +1,9 @@
 #pragma once
+#include <Eigen/Cholesky>
 #include <array>
 #include <atomic>
 #include <limits>
-#include <Eigen/Cholesky>
+
 #include "kinova_lowlevel/cartesian_types.h"
 #include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
@@ -40,7 +41,7 @@ struct JointVelocityParams {
   // linear and angular units, so its magnitude is scale-dependent and frame-
   // dependent: the 2F-85 gripper URDF moves the EE frame and changes w, and the
   // threshold is only meaningful relative to the w this model actually produces.
-  double w_threshold     = 0.0033;
+  double w_threshold = 0.0033;
   double dls_damping_max = 0.10;
 
   // Null-space posture bias [1/s]. Without it the redundant DOF drifts and the
@@ -53,7 +54,7 @@ struct JointVelocityParams {
   // -- over the URDF cap, which then makes limit()'s uniform scale throttle the
   // TASK velocity too. See docs/guide/streaming.md.
   double posture_gain = 0.15;
-  JointVec q_rest =   // elbow-up home; matches DiffIkParams::q_rest
+  JointVec q_rest =  // elbow-up home; matches DiffIkParams::q_rest
       (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
 
   // Staleness watchdog. 0 DISABLES it, matching every other mode's default.
@@ -107,15 +108,15 @@ class JointVelocityMode : public ControlMode {
  private:
   void seed_limits(JointVelocityParams& p) const noexcept;
   // RT: J(q) -> damped least squares -> null-space posture. Writes qd_out.
-  void solve_twist(const JointVec& q, const Vector6& V,
-                   const JointVelocityParams& p, JointVec& qd_out) noexcept;
+  void solve_twist(const JointVec& q, const Vector6& V, const JointVelocityParams& p,
+                   JointVec& qd_out) noexcept;
   // RT: uniform scale so the fastest joint just reaches its cap, then a hard
   // per-joint clamp as a backstop.
   static void limit(const JointVelocityParams& p, JointVec& qd) noexcept;
 
   Dynamics& dyn_;
-  JointVec v_max_urdf_ = JointVec::Zero();   // cached in ctor: set_params must not
-                                             // touch Dynamics off the RT thread
+  JointVec v_max_urdf_ = JointVec::Zero();  // cached in ctor: set_params must not
+                                            // touch Dynamics off the RT thread
   std::array<bool, kNumJoints> continuous_{};
 
   JointVelocityParams params_[2];
@@ -135,14 +136,14 @@ class JointVelocityMode : public ControlMode {
 
   // RT-owned adopted targets and preallocated scratch.
   JointVec qd_target_ = JointVec::Zero();
-  Vector6  twist_target_ = Vector6::Zero();
+  Vector6 twist_target_ = Vector6::Zero();
   JointVec qd_cmd_ = JointVec::Zero();
   Jacobian6 J_ = Jacobian6::Zero();
   Eigen::Matrix<double, 6, 6> A_ = Eigen::Matrix<double, 6, 6>::Zero();
   Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt_;
-  Vector6  y_ = Vector6::Zero();
+  Vector6 y_ = Vector6::Zero();
   JointVec bias_ = JointVec::Zero();
-  double   w_last_ = 0.0;
+  double w_last_ = 0.0;
 };
 
 }  // namespace kinova

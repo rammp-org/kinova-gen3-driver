@@ -8,14 +8,15 @@
 #endif
 #include "kinova_lowlevel/rt_system.h"
 
-#include <cerrno>
-#include <cstdint>
-#include <cstring>
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
 
 namespace kinova {
 
@@ -56,13 +57,12 @@ RtReport enable_rt(const RtConfig& cfg) {
   }
 
   if (cfg.priority > 0) {
-    struct sched_param p {};
+    struct sched_param p{};
     p.sched_priority = cfg.priority;
     if (sched_setscheduler(0, SCHED_FIFO, &p) != 0) {
       rep.note += "SCHED_FIFO failed: ";
       rep.note += std::strerror(errno);
-      rep.note +=
-          " (run with sudo or `setcap cap_sys_nice,cap_ipc_lock+ep`); ";
+      rep.note += " (run with sudo or `setcap cap_sys_nice,cap_ipc_lock+ep`); ";
     }
   }
 
@@ -102,7 +102,7 @@ RtReport enable_rt(const RtConfig& cfg) {
   }
 
   rep.policy = sched_getscheduler(0);
-  struct sched_param gp {};
+  struct sched_param gp{};
   if (sched_getparam(0, &gp) == 0) {
     rep.priority = gp.sched_priority;
   }
@@ -113,7 +113,7 @@ RtReport enable_rt(const RtConfig& cfg) {
 
 ResourceUsage read_usage() {
   ResourceUsage u;
-  struct rusage ru {};
+  struct rusage ru{};
   if (getrusage(RUSAGE_THREAD, &ru) == 0) {
     u.minflt = static_cast<uint64_t>(ru.ru_minflt);
     u.majflt = static_cast<uint64_t>(ru.ru_majflt);
@@ -125,7 +125,7 @@ ResourceUsage read_usage() {
 
 std::string introspect() {
   const int policy = sched_getscheduler(0);
-  struct sched_param gp {};
+  struct sched_param gp{};
   int prio = -1;
   if (sched_getparam(0, &gp) == 0) prio = gp.sched_priority;
   const int cpu = sched_getcpu();

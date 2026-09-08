@@ -5,8 +5,7 @@
 
 namespace kinova {
 
-JointTorqueMode::JointTorqueMode(Dynamics& dyn, JointTorqueParams p)
-    : dyn_(dyn), p_(p) {
+JointTorqueMode::JointTorqueMode(Dynamics& dyn, JointTorqueParams p) : dyn_(dyn), p_(p) {
   tau_ff_buf_[0].setZero();
   tau_ff_buf_[1].setZero();
   g_.setZero();
@@ -56,8 +55,7 @@ void JointTorqueMode::on_enter(const JointFeedback&) {
   wd_.reset();
 }
 
-void JointTorqueMode::compute(const JointFeedback& fb, double dt_s,
-                              JointCommand& out) {
+void JointTorqueMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
   // --- read the published feedforward and advance the staleness watchdog ----
   // The counter GATES the buffer read: adopt only on the cycle the counter
   // moves, never merely because the stream is not yet stale -- otherwise a
@@ -77,9 +75,12 @@ void JointTorqueMode::compute(const JointFeedback& fb, double dt_s,
       for (int i = 0; i < kNumJoints; ++i) {
         const double step = frac * std::abs(tau_ff_target_[i]);
         double applied = tau_ff_applied_[i];
-        if (applied > step) applied -= step;
-        else if (applied < -step) applied += step;
-        else applied = 0.0;          // within one step of zero: land exactly on it
+        if (applied > step)
+          applied -= step;
+        else if (applied < -step)
+          applied += step;
+        else
+          applied = 0.0;  // within one step of zero: land exactly on it
         tau_ff_applied_[i] = applied;
       }
     } else {

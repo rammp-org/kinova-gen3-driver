@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+
 #include "kinova_lowlevel/gripper_types.h"
 #include "kinova_lowlevel/transport.h"
 namespace kinova {
@@ -51,7 +52,9 @@ class GripperController : public Transport {
   void connect() override { inner_.connect(); }
   void set_servoing_low_level() override { inner_.set_servoing_low_level(); }
   void set_actuator_modes(const ActuatorModes& m) override { inner_.set_actuator_modes(m); }
-  void exchange(const JointCommand& c, JointFeedback& fb) override { inner_.exchange(stamp(c), fb); }
+  void exchange(const JointCommand& c, JointFeedback& fb) override {
+    inner_.exchange(stamp(c), fb);
+  }
   void send(const JointCommand& c) override { inner_.send(stamp(c)); }
   void receive(JointFeedback& fb) override { inner_.receive(fb); }
   void safe_shutdown() override { inner_.safe_shutdown(); }
