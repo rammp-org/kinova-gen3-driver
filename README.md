@@ -4,18 +4,35 @@ A durable, maintainable C++ driver for **Kinova Gen3 7-DOF low-level control**.
 
 ## Purpose
 
-This is the functional core of a low-level control stack for the Gen3, built
-**benchmarking-first**: the primary deliverable is characterizing per-cycle
-compute cost and 1 kHz loop-timing stability on the PREEMPT_RT Jetson, not a
-user-facing API.
+This is the functional core of a low-level control stack for the Gen3. It began
+**benchmarking-first** — characterizing per-cycle compute cost and 1 kHz
+loop-timing stability on the PREEMPT_RT Jetson — and that instrumentation stays,
+but the mandate has grown: this is the foundational arm driver underneath every
+higher-level stack we build.
 
-Supported control today: **gravity compensation**, **Cartesian (task-space)
-impedance**, and **joint-space impedance with in-loop IK** — see the [docs](docs/index.md) ([control-modes guide](docs/guide/control-modes.md)) for the laws,
-parameters, frames, and tuning. **High-speed velocity** and other laws slot in
-the same way as new `ControlMode` implementations. Public frontends (ROS,
-websockets, …) are deliberately deferred — they become "just another consumer" of
-this library; the impedance mode's non-RT `set_target`/`set_gains` setters are the
-seam they plug into.
+Supported control today, all as `ControlMode` implementations behind one
+interface:
+
+| Mode | Law |
+|---|---|
+| `JointTorqueMode` | Direct joint torque. Gravity compensation is this mode with `tau_ff` never set. |
+| `CartesianImpedanceMode` | Task-space impedance with null-space posture control. |
+| `JointImpedanceMode` | Joint-space impedance with in-loop differential IK. |
+| `JointPositionMode` | Joint-space position, with an EE-pose entry point. |
+| `JointVelocityMode` | Joint velocity passthrough, and EE twist via a damped-least-squares solve. |
+
+Plus a `GripperController` for the 2F-85, and an **interface tier** —
+`Supervisor`, `Arbiter`, `StreamingSession` — that gives front-ends ports for
+trajectory goals, streaming setpoints and command arbitration without letting
+ROS or any other framework into the core.
+
+See the [docs](docs/index.md) for the laws, parameters, frames and tuning, and
+the **[support matrix](docs/index.md#support-matrix)** for what each mode's
+validation and measurement status actually is — some of it is honestly thin.
+
+Front-ends are *consumers* of this library, not part of it. The reference one is
+[`kinova-gen3-ros2`](https://github.com/rammp-org/kinova-gen3-ros2), a ROS2
+Humble node built on these ports.
 
 It is a layered, instrumented, testable refactor of a validated single-file
 prototype (`grav_comp_test.cpp`), preserving the hard-won-correct KORTEX
@@ -44,7 +61,7 @@ main ──▶ │  RtExecutor   │  owns the RT thread, timing, mode-switch ha
 |---|---|
 | `joint_types` / `units` | Fixed-size SI/radian POD value types (`JointFeedback`, `JointCommand`, `ActuatorMode`, `kNumJoints=7`); deg↔rad + `wrap_to_pi`. No KORTEX/Pinocchio types leak. |
 | `Transport` (interface) | The comm boundary — the ONLY unit that includes KORTEX. Lifecycle + cyclic `exchange`/`send`/`receive`. Concretes: `SimTransport` (fake robot, CI) and `KortexTransport` (real Gen3 handshake, pimpl). |
-| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `JointTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`. Gravity compensation is not its own mode — it's `JointTorqueMode` with `tau_ff` never set. The two impedance modes also implement `PoseTargetSink` so a pose-streaming front-end can drive either. See the [control-modes guide](docs/guide/control-modes.md). |
+| `ControlMode` (interface) | The compute boundary — `required_modes()`, `on_enter`, RT-safe `compute(fb, dt, out)`, `on_exit`. Concretes: `JointTorqueMode`, `CartesianImpedanceMode`, `JointImpedanceMode`, `JointPositionMode`, `JointVelocityMode`. Gravity compensation is not its own mode — it's `JointTorqueMode` with `tau_ff` never set. The impedance and position modes also implement `PoseTargetSink` so a pose-streaming front-end can drive them. See the [control-modes guide](docs/guide/control-modes.md). |
 | `Dynamics` | The ONLY unit that includes Pinocchio. Loads the URDF once, pre-allocates `Data`; RT-safe `gravity(q)`, `fk(q)`, `jacobian(q)` (6×7, `LOCAL_WORLD_ALIGNED`), `mass_matrix(q)` (CRBA), and `joint_limits()` for a validated EE frame. Coriolis later. |
 | `Telemetry` | Lock-free SPSC `SampleRing` (drop-don't-block) drained off the RT thread into `NanoHistogram` + `TelemetrySink` (console/CSV). |
 | `rt_system` | `mlockall`, `SCHED_FIFO`, core affinity, and `getrusage` introspection. Startup/shutdown only. |
