@@ -47,6 +47,7 @@ for st in /sys/devices/system/cpu/cpu[0-9]*/cpuidle/state*/; do
   name="$(cat "${st}name" 2>/dev/null || echo '?')"
   lat="$(cat "${st}latency" 2>/dev/null || echo 0)"
   if [[ "$name" != "WFI" && "$lat" -gt 100 ]]; then
+    # shellcheck disable=SC2015  # the || branch is `true`; this is 'try, ignore failure'
     echo 1 > "${st}disable" 2>/dev/null && disabled=$((disabled+1)) || true
   fi
 done
@@ -77,6 +78,7 @@ for irq in /proc/irq/[0-9]*; do
     # (managed IRQs reject writes).
     cur="$(cat "${irq}/smp_affinity_list" 2>/dev/null || echo '')"
     if [[ ",$cur," == *",$RT_CORE,"* || "$cur" == *"-"* ]]; then
+      # shellcheck disable=SC2015  # the || branch is `true`; this is 'try, ignore failure'
       echo 0 > "${irq}/smp_affinity_list" 2>/dev/null && moved=$((moved+1)) || true
     fi
   fi
