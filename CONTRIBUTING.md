@@ -63,12 +63,25 @@ The real-robot build is opt-in and needs an aarch64 SDK:
 
 ## The gates
 
-CI runs both on every PR into `main` or `dev`:
+CI runs all of these on every PR into `main` or `dev`, on **both amd64 and
+arm64** — arm64 is the only architecture this driver actually deploys to, so a
+green amd64 build alone would be testing a machine nobody runs.
 
 | Gate | What it proves |
 |---|---|
 | `ctest` | The suite passes. |
 | `unit_tests --gtest_filter='RtSafety*'` | **Allocation-freedom** — zero major page faults and zero dropped telemetry samples in steady state. |
+| Sim smoke | The executor, transport, dynamics and telemetry run a 1 kHz loop together. |
+| **KORTEX build** | The real-arm transport still compiles and links, and the symbol is actually in the binary. The SDK is fetched from Kinova's public artifactory, per architecture. |
+| KORTEX guard | With the option on and no SDK, configure fails loudly and for the documented reason. |
+
+The KORTEX job matters more than it looks: `src/kortex_transport.cpp` compiles
+only under `-DKINOVA_ENABLE_KORTEX=ON`, and it is the only real-path consumer of
+`Transport`, `joint_types` and `units`. Without that job, a change to a shared
+type breaks it silently and you find out on the arm.
+
+**No CI job ever touches a robot.** The KORTEX job builds and runs the
+transport-agnostic suite; nothing passes an `--ip`.
 
 **A change to the RT path is not done until that gate has been run and read.**
 `compute()` and the executor cycle may not allocate, lock, or block; the gate is
