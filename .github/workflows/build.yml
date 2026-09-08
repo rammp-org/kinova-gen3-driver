@@ -1,0 +1,119 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The default build is SIM-ONLY and needs no KORTEX SDK, so the whole test
+  # suite is reachable on a hosted runner with no robot and no Jetson. Pinocchio
+  # arrives as a cmeel wheel (manylinux_2_28_x86_64), which is the same mechanism
+  # the Jetson uses -- there is no second dependency story to maintain.
+  sim:
+    name: Sim build + tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Pinocchio and GTest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pin==2.7.0"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtest-dev
+
+      # CMAKE_PREFIX_PATH must point at the cmeel prefix holding
+      # pinocchioConfig.cmake, exactly as on the Jetson. Ask the installed
+      # package where it put itself rather than hardcoding a Python version.
+      - name: Locate the cmeel prefix
+        run: |
+          PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
+          test -f "$PREFIX/lib/cmake/pinocchio/pinocchioConfig.cmake"
+          echo "CMEEL_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+
+      # The RT-safety suite is the project's stated gate, so it is called out as
+      # its own step rather than being one line inside ctest's summary: a failure
+      # here should be legible from the job list without opening the log.
+      #
+      # What a hosted runner CAN check: allocation-freedom (zero major page
+      # faults in steady state) and drop-freedom on the telemetry ring. Both are
+      # architectural properties of the code, not of the kernel it runs on.
+      #
+      # What it CANNOT check: timing. This runner is not PREEMPT_RT, has no
+      # isolated core, and cannot get SCHED_FIFO -- rt_system degrades to
+      # SCHED_OTHER by design. Latency percentiles remain a Jetson job (see #6).
+      - name: RT-safety gate
+        run: ./build/unit_tests --gtest_filter='RtSafety*'
+
+      # End-to-end proof that the executor, transport, dynamics and telemetry
+      # actually run a loop together -- the unit tests exercise the pieces. Two
+      # seconds at 1 kHz; the timing numbers it prints are meaningless here (see
+      # above) and are deliberately not asserted on.
+      - name: Sim smoke -- the loop runs end to end
+        run: |
+          ./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf \
+            --rate 1000 --duration 2
+          ./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf \
+            --rate 1000 --duration 2
+
+  # kortex_transport.cpp is compiled ONLY under -DKINOVA_ENABLE_KORTEX=ON, so
+  # nothing above ever sees it: it can break and stay broken until someone builds
+  # on abra. This job is a compile check with no SDK -- it asserts the build
+  # SYSTEM still fails loudly and for the documented reason, which is the part
+  # that regresses when the option's plumbing is edited.
+  #
+  # Actually compiling the real transport needs the proprietary aarch64 SDK and
+  # therefore a self-hosted runner; that is tracked in #36 and is not this job.
+  kortex-guard:
+    name: KORTEX option fails loudly without an SDK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Pinocchio and GTest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pin==2.7.0"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtest-dev
+
+      - name: Configure with KORTEX on and no SDK present
+        run: |
+          PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
+          if cmake -S . -B build-kortex -DCMAKE_PREFIX_PATH="$PREFIX" \
+               -DKINOVA_ENABLE_KORTEX=ON -DKORTEX_HW_DIR=/nonexistent \
+               > configure.log 2>&1; then
+            echo "::error::configure SUCCEEDED with KINOVA_ENABLE_KORTEX=ON and no SDK -- the guard in CMakeLists.txt is not firing"
+            exit 1
+          fi
+          grep -q "cannot find KORTEX API headers" configure.log || {
+            echo "::error::configure failed, but not with the documented KORTEX guard message"
+            cat configure.log
+            exit 1
+          }
+          echo "Guard fired as documented."
