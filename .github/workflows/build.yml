@@ -11,42 +11,34 @@ on:
 permissions:
   contents: read
 
+# Every job builds on a runner of its own architecture: ubuntu-22.04 for amd64,
+# ubuntu-22.04-arm for arm64. GitHub gives public repositories both at no cost,
+# which is why nothing here emulates -- a QEMU cross build translates every
+# instruction and costs many times the wall clock for the same answer.
+#
+# arm64 is not a nice-to-have for this repo: the driver's only deployment target
+# is an aarch64 Jetson, so amd64 alone would test an architecture nobody runs.
+
 jobs:
   # The default build is SIM-ONLY and needs no KORTEX SDK, so the whole test
-  # suite is reachable on a hosted runner with no robot and no Jetson. Pinocchio
-  # arrives as a cmeel wheel (manylinux_2_28_x86_64), which is the same mechanism
-  # the Jetson uses -- there is no second dependency story to maintain.
+  # suite is reachable on a hosted runner with no robot. Pinocchio arrives as a
+  # cmeel wheel, the same mechanism the Jetson uses -- there is no second
+  # dependency story to maintain.
   sim:
-    name: Sim build + tests
-    runs-on: ubuntu-22.04
+    name: Sim build + tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install Pinocchio and GTest
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pin==2.7.0"
-          sudo apt-get update
-          # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom, but
-          # NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig.cmake
-          # find_dependency()s those from the system, exactly as on the Jetson.
-          # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.
-          sudo apt-get install -y --no-install-recommends \
-            libgtest-dev libeigen3-dev liburdfdom-headers-dev libconsole-bridge-dev
-
-      # CMAKE_PREFIX_PATH must point at the cmeel prefix holding
-      # pinocchioConfig.cmake, exactly as on the Jetson. Ask the installed
-      # package where it put itself rather than hardcoding a Python version.
-      - name: Locate the cmeel prefix
-        run: |
-          PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
-          test -f "$PREFIX/lib/cmake/pinocchio/pinocchioConfig.cmake"
-          echo "CMEEL_PREFIX=$PREFIX" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/setup-cpp-deps
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX"
@@ -58,7 +50,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       # NOT a timing gate, and the step is named so it cannot be read as one.
-      # This runner is not PREEMPT_RT, has no isolated core and cannot get
+      # These runners are not PREEMPT_RT, have no isolated core and cannot get
       # SCHED_FIFO -- rt_system degrades to SCHED_OTHER by design. Nothing here
       # says anything about latency or jitter; those stay a Jetson job (#6).
       #
@@ -85,40 +77,102 @@ jobs:
           ./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf \
             --rate 1000 --duration 2
 
-  # kortex_transport.cpp is compiled ONLY under -DKINOVA_ENABLE_KORTEX=ON, so
-  # nothing above ever sees it: it can break and stay broken until someone builds
-  # on abra. This job is a compile check with no SDK -- it asserts the build
-  # SYSTEM still fails loudly and for the documented reason, which is the part
-  # that regresses when the option's plumbing is edited.
+  # The real-arm path. src/kortex_transport.cpp compiles ONLY under
+  # -DKINOVA_ENABLE_KORTEX=ON, so without this job those 358 lines sit outside
+  # every gate and a change that broke only them would reach the robot uncaught.
+  # It is the sole real-path consumer of Transport, joint_types and units, and
+  # the history shows shared-type changes rippling into it repeatedly (#43).
   #
-  # Actually compiling the real transport needs the proprietary aarch64 SDK and
-  # therefore a self-hosted runner; that is tracked in #36 and is not this job.
+  # The SDK comes from Kinova's public artifactory and needs no credentials,
+  # which is the whole reason this can be automated at all. Per-architecture:
+  #   arm64 -> linux_aarch64_gcc_7.4.zip   (the Jetson; the proven path)
+  #   amd64 -> linux_x86-64_gcc_5.4.zip    (newest x86-64 Kinova ships for 2.8.0)
+  # Note the mismatch -- aarch64 gets a gcc 7.4 build, x86-64 only gcc 5.4, which
+  # spans the C++11 ABI change. That makes LINKING, not just compiling, the part
+  # worth guarding on amd64.
+  #
+  # amd64 earns its place beyond coverage: the driver reaches the arm over IP,
+  # so an x86-64 build lets a laptop drive the robot without a Jetson.
+  #
+  # No robot is touched. This job builds; it never runs anything that opens a
+  # connection.
+  kortex:
+    name: KORTEX build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+            sdk_zip: linux_x86-64_gcc_5.4.zip
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            sdk_zip: linux_aarch64_gcc_7.4.zip
+    runs-on: ${{ matrix.runner }}
+    env:
+      KORTEX_SDK_BASE: https://artifactory.kinovaapps.com/artifactory/generic-public/kortex/API/2.8.0
+      KORTEX_HW_DIR: /opt/kortex/kortex_api_2.8.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-cpp-deps
+
+      - name: Fetch the KORTEX C++ SDK
+        run: |
+          sudo mkdir -p "$KORTEX_HW_DIR"
+          sudo chown "$USER" "$KORTEX_HW_DIR"
+          curl -fsSL "${KORTEX_SDK_BASE}/${{ matrix.sdk_zip }}" -o /tmp/kortex.zip
+          python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" \
+            /tmp/kortex.zip "$KORTEX_HW_DIR"
+          rm -f /tmp/kortex.zip
+          # Fail here, with a clear message, rather than inside CMake's guard.
+          test -f "$KORTEX_HW_DIR/lib/release/libKortexApiCpp.a"
+          test -f "$KORTEX_HW_DIR/include/client/RouterClient.h"
+
+      - name: Configure with KORTEX enabled
+        run: |
+          cmake -S . -B build-kortex \
+            -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX" \
+            -DKINOVA_ENABLE_KORTEX=ON \
+            -DKORTEX_HW_DIR="$KORTEX_HW_DIR"
+
+      - name: Build
+        run: cmake --build build-kortex -j"$(nproc)"
+
+      # A green build is not proof the real transport is IN the binary: if
+      # kortex_transport.cpp silently dropped out of the source list, or an app
+      # kept KINOVA_NO_KORTEX, everything would still compile and link -- against
+      # the sim fallback. Assert the symbol is actually there.
+      - name: The binary carries the real KortexTransport
+        run: |
+          if ! nm -C build-kortex/libkinova_lowlevel.a 2>/dev/null \
+               | grep -q 'kinova::KortexTransport::connect'; then
+            echo "::error::libkinova_lowlevel.a has no KortexTransport::connect -- the real transport did not make it into the build"
+            exit 1
+          fi
+          echo "KortexTransport is linked in."
+
+      # The tests are transport-agnostic (SimTransport only) but this proves the
+      # KORTEX-enabled binary is not merely linkable -- it runs, and the suite
+      # behaves identically with the real transport compiled in. Nothing here
+      # opens a connection: no --ip is ever passed.
+      - name: Tests, with KORTEX compiled in
+        run: ctest --test-dir build-kortex --output-on-failure
+
+  # The error path: with the option ON and no SDK, configure must fail loudly and
+  # for the documented reason. One runner is enough -- this tests CMake logic,
+  # which is architecture-independent.
   kortex-guard:
     name: KORTEX option fails loudly without an SDK
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install Pinocchio and GTest
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pin==2.7.0"
-          sudo apt-get update
-          # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom, but
-          # NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig.cmake
-          # find_dependency()s those from the system, exactly as on the Jetson.
-          # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.
-          sudo apt-get install -y --no-install-recommends \
-            libgtest-dev libeigen3-dev liburdfdom-headers-dev libconsole-bridge-dev
+      - uses: ./.github/actions/setup-cpp-deps
 
       - name: Configure with KORTEX on and no SDK present
         run: |
-          PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
-          if cmake -S . -B build-kortex -DCMAKE_PREFIX_PATH="$PREFIX" \
+          if cmake -S . -B build-guard -DCMAKE_PREFIX_PATH="$CMEEL_PREFIX" \
                -DKINOVA_ENABLE_KORTEX=ON -DKORTEX_HW_DIR=/nonexistent \
                > configure.log 2>&1; then
             echo "::error::configure SUCCEEDED with KINOVA_ENABLE_KORTEX=ON and no SDK -- the guard in CMakeLists.txt is not firing"

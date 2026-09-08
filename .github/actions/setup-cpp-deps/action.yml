@@ -1,0 +1,35 @@
+name: Set up C++ build dependencies
+description: >
+  Installs Pinocchio (cmeel wheel) plus the system packages its CMake config
+  expects, and exports CMEEL_PREFIX and LD_LIBRARY_PATH for later steps.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install Pinocchio and the system deps it expects
+      shell: bash
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install "pin==2.7.0"
+        # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom,
+        # but NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig
+        # find_dependency()s those from the system, exactly as on the Jetson.
+        # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          libgtest-dev libeigen3-dev liburdfdom-headers-dev libconsole-bridge-dev
+
+    # CMAKE_PREFIX_PATH must point at the cmeel prefix holding
+    # pinocchioConfig.cmake. Ask the installed package where it put itself
+    # rather than hardcoding a Python version.
+    - name: Locate the cmeel prefix
+      shell: bash
+      run: |
+        PREFIX="$(python -c 'import sysconfig, os; print(os.path.join(sysconfig.get_paths()["purelib"], "cmeel.prefix"))')"
+        test -f "$PREFIX/lib/cmake/pinocchio/pinocchioConfig.cmake"
+        echo "CMEEL_PREFIX=$PREFIX" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=$PREFIX/lib" >> "$GITHUB_ENV"

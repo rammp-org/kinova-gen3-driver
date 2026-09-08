@@ -23,8 +23,10 @@ repos:
 
   # GitHub Actions. The workflows are now a load-bearing artifact of this repo,
   # so they get a linter of their own.
+  # v1.7.12, not v1.6.27: the older release predates GitHub's arm64 hosted
+  # runners and rejects `ubuntu-22.04-arm` as an unknown label.
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.6.27
+    rev: v1.7.12
     hooks:
       - id: actionlint
 
