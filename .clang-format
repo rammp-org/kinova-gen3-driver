@@ -1,0 +1,14 @@
+# Google style, at 100 columns.
+#
+# 100 rather than Google's 80 because that is what the codebase already is: the
+# p99 line is 99 characters and 1660 lines exceed 80. Reflowing to 80 would have
+# rewritten far more than adopting the tool needs to.
+#
+# Everything else is stock Google on purpose. Measured over all 85 tracked C++
+# files, every attempt to preserve the old hand-aligned columns made the diff
+# BIGGER, not smaller (6199 lines -> 8251 with AlignConsecutive*), because
+# clang-format aligns every consecutive run rather than the specific places a
+# human chose to. There is no config that keeps the hand style, so this file
+# does not pretend otherwise. See #47.
+BasedOnStyle: Google
+ColumnLimit: 100
