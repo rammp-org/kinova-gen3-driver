@@ -1,8 +1,7 @@
 # Contributing
 
-This repo follows the RAMMP module workflow, matching
-[`kinova-gen3-ros2`](https://github.com/rammp-org/kinova-gen3-ros2), with the
-additions a real-time control core needs.
+This repo follows the RAMMP module workflow, with the additions a real-time
+control core needs.
 
 Read `CLAUDE.md` first — it states the architectural invariants (the seven units
 and the boundaries between them) and the RT contract. This file is about

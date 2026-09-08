@@ -31,7 +31,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "pin==2.7.0"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtest-dev
+          sudo apt-get install -y --no-install-recommends libgtest-dev libeigen3-dev
 
       # CMAKE_PREFIX_PATH must point at the cmeel prefix holding
       # pinocchioConfig.cmake, exactly as on the Jetson. Ask the installed
@@ -100,7 +100,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "pin==2.7.0"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtest-dev
+          sudo apt-get install -y --no-install-recommends libgtest-dev libeigen3-dev
 
       - name: Configure with KORTEX on and no SDK present
         run: |
