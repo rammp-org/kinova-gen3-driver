@@ -68,17 +68,26 @@ CI runs both on every PR into `main` or `dev`:
 | Gate | What it proves |
 |---|---|
 | `ctest` | The suite passes. |
-| `unit_tests --gtest_filter='RtSafety*'` | **The RT contract holds** — zero major page faults and zero dropped telemetry samples in steady state. |
+| `unit_tests --gtest_filter='RtSafety*'` | **Allocation-freedom** — zero major page faults and zero dropped telemetry samples in steady state. |
 
-**A change to the RT path is not done until the RT-safety gate has been run and
-read.** `compute()` and the executor cycle may not allocate, lock, or block; the
-gate is what catches a regression, and CI is what makes it unskippable.
+**A change to the RT path is not done until that gate has been run and read.**
+`compute()` and the executor cycle may not allocate, lock, or block; the gate is
+what catches a regression, and CI is what makes it unskippable.
 
 ### What CI cannot tell you
 
+The RT contract has two halves, and CI only gates one of them.
+
 CI runs on a hosted x86-64 runner. It is not `PREEMPT_RT`, has no isolated core,
 and cannot get `SCHED_FIFO` — `rt_system` degrades to `SCHED_OTHER` by design.
-So CI proves *allocation-freedom*, never *timing*.
+So the half CI gates is the one that is a property of the *code*: every
+`RtSafety*` case asserts `majflt_delta == 0` and `ring.dropped() == 0` after a
+warm-up run, which is broken by an allocation, a lock, or a blocking call on the
+RT path regardless of which kernel it runs on.
+
+The other half — latency, jitter, deadline misses — is a property of the *kernel
+and the machine*, and CI says nothing about it. A green build is not evidence
+that a change is fast enough.
 
 Any change that plausibly affects per-cycle cost or jitter has to be measured on
 the Jetson, on real numbers:

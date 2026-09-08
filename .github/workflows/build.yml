@@ -31,7 +31,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "pin==2.7.0"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtest-dev libeigen3-dev
+          # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom, but
+          # NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig.cmake
+          # find_dependency()s those from the system, exactly as on the Jetson.
+          # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.
+          sudo apt-get install -y --no-install-recommends \
+            libgtest-dev libeigen3-dev liburdfdom-headers-dev libconsole-bridge-dev
 
       # CMAKE_PREFIX_PATH must point at the cmeel prefix holding
       # pinocchioConfig.cmake, exactly as on the Jetson. Ask the installed
@@ -52,18 +57,21 @@ jobs:
       - name: Tests
         run: ctest --test-dir build --output-on-failure
 
-      # The RT-safety suite is the project's stated gate, so it is called out as
-      # its own step rather than being one line inside ctest's summary: a failure
-      # here should be legible from the job list without opening the log.
+      # NOT a timing gate, and the step is named so it cannot be read as one.
+      # This runner is not PREEMPT_RT, has no isolated core and cannot get
+      # SCHED_FIFO -- rt_system degrades to SCHED_OTHER by design. Nothing here
+      # says anything about latency or jitter; those stay a Jetson job (#6).
       #
-      # What a hosted runner CAN check: allocation-freedom (zero major page
-      # faults in steady state) and drop-freedom on the telemetry ring. Both are
-      # architectural properties of the code, not of the kernel it runs on.
+      # What it does gate is the half of the RT contract that is a property of
+      # the CODE rather than of the kernel. Every RtSafety* case asserts exactly
+      # two things -- majflt_delta == 0 and ring.dropped() == 0 -- i.e. compute()
+      # and the executor cycle touched no new page and the SPSC ring never
+      # overflowed, in steady state after a warm-up run. An allocation, a lock
+      # or a blocking call added to the RT path breaks those on ANY kernel.
       #
-      # What it CANNOT check: timing. This runner is not PREEMPT_RT, has no
-      # isolated core, and cannot get SCHED_FIFO -- rt_system degrades to
-      # SCHED_OTHER by design. Latency percentiles remain a Jetson job (see #6).
-      - name: RT-safety gate
+      # Called out as its own step rather than left inside ctest's summary so a
+      # regression is legible from the job list without opening a log.
+      - name: Allocation-freedom gate (RtSafety*)
         run: ./build/unit_tests --gtest_filter='RtSafety*'
 
       # End-to-end proof that the executor, transport, dynamics and telemetry
@@ -100,7 +108,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "pin==2.7.0"
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtest-dev libeigen3-dev
+          # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom, but
+          # NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig.cmake
+          # find_dependency()s those from the system, exactly as on the Jetson.
+          # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.
+          sudo apt-get install -y --no-install-recommends \
+            libgtest-dev libeigen3-dev liburdfdom-headers-dev libconsole-bridge-dev
 
       - name: Configure with KORTEX on and no SDK present
         run: |
