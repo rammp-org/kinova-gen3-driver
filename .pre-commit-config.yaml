@@ -39,8 +39,8 @@ repos:
     hooks:
       - id: actionlint
 
-  # Shell scripts -- scripts/rt_setup.sh and rt_grant_once.sh grant RT
-  # privileges, so a quoting bug there is not a style problem.
+  # Shell scripts. (The RT host-setup scripts now live in
+  # rammp-org/rammp-deployments/scripts; keep the hook for anything that remains.)
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.9.0.6
     hooks:

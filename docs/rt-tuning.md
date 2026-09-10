@@ -7,6 +7,12 @@ Jetson AGX Orin (tegra234, 12 cores; developed against kernel `5.15-rt-tegra`).
 The goal: low and *bounded* wake jitter and no missed deadlines (a missed 1 kHz
 deadline can trip the Gen3 watchdog and fault the arm).
 
+> The scripts this guide runs — `rt_grant_once.sh`, `rt_setup.sh` and the
+> `rt-setup.service` unit — live in
+> [rammp-deployments/scripts](https://github.com/rammp-org/rammp-deployments/tree/main/scripts),
+> because every RT process on the chair needs them, not just this driver. Paths
+> below are relative to wherever you cloned that repo.
+
 Throughout, the examples pin the RT loop to **core 11** — pick the
 highest-numbered core on your machine and substitute it everywhere.
 
@@ -55,7 +61,7 @@ All four are **driver-local** (done in `rt_system::enable_rt()`); they only need
 the user to *have permission*. Grant it once with:
 
 ```sh
-sudo ./scripts/rt_grant_once.sh        # creates 'realtime' group, rtprio/memlock
+sudo rammp-deployments/scripts/rt_grant_once.sh   # creates 'realtime' group, rtprio/memlock
                                         # limits, and the cpu_dma_latency udev rule
 # log out + back in (group membership), then run the driver with NO sudo.
 ```
@@ -81,7 +87,7 @@ disables deep idle, removes RT throttling, pins timers, disables THP, and nudges
 IRQs off the RT core. **These reset on reboot.**
 
 ```sh
-sudo ./scripts/rt_setup.sh 11        # 11 = the core you'll pin the loop to
+sudo rammp-deployments/scripts/rt_setup.sh 11   # 11 = the core you'll pin the loop to
 ```
 
 Verify afterward:
@@ -189,17 +195,18 @@ histograms over a 60 s run — they should agree on the order of magnitude.
 ## E. Persistence (optional)
 
 Section A resets on reboot. To make it stick, install a oneshot systemd unit
-that runs `rt_setup.sh` at boot (after `jetson_clocks`’ own service), e.g.
-`/etc/systemd/system/rt-setup.service` (point `ExecStart` at your checkout):
+that runs `rt_setup.sh` at boot (after `jetson_clocks`’ own service). One ships
+as `rammp-deployments/scripts/rt-setup.service`; copy it to `/etc/systemd/system/` and
+point `ExecStart` at your checkout:
 
 ```ini
 [Unit]
-Description=RT tunings for kinova-gen3-driver
+Description=RAMMP real-time host tunings
 After=nvpmodel.service jetson_clocks.service
 
 [Service]
 Type=oneshot
-ExecStart=/home/<user>/kinova-gen3-driver/scripts/rt_setup.sh 11
+ExecStart=/home/<user>/rammp-deployments/scripts/rt_setup.sh 11
 
 [Install]
 WantedBy=multi-user.target
@@ -212,9 +219,9 @@ in the bootloader config.)
 
 ## Quick order of operations
 
-1. `sudo ./scripts/rt_grant_once.sh` — one-time: lets the driver use FIFO / mlock
+1. `sudo rammp-deployments/scripts/rt_grant_once.sh` — one-time: lets the driver use FIFO / mlock
    / cpu_dma_latency **without sudo** (survives rebuilds). Log out + back in.
-2. `sudo ./scripts/rt_setup.sh 11` — system-global runtime tunings (governor,
+2. `sudo rammp-deployments/scripts/rt_setup.sh 11` — system-global runtime tunings (governor,
    clocks, C-states, throttling). Re-run after reboot, or enable the systemd unit.
 3. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot.
 4. `sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 1h` → record
