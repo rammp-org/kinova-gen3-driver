@@ -70,7 +70,8 @@ regression here.
 
 ## Prerequisites
 
-1. `rt_setup.sh` has been re-run since the last reboot (it does not persist).
+1. `rammp-deployments/scripts/rt_setup.sh` has been re-run since the last reboot, or its
+   `rt-setup.service` is enabled (it does not persist on its own).
 2. Built with KORTEX:
    ```sh
    cmake .. -DKINOVA_ENABLE_KORTEX=ON -DKORTEX_HW_DIR=/path/to/kortex_hardware \
