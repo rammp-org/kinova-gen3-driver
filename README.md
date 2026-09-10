@@ -177,7 +177,7 @@ they only need a **one-time** permission grant (not per-run sudo, and unlike
 `setcap` it survives rebuilds):
 
 ```sh
-sudo ./scripts/rt_grant_once.sh    # once: 'realtime' group + rtprio/memlock limits
+sudo rammp-deployments/scripts/rt_grant_once.sh    # once: 'realtime' group + rtprio/memlock limits
                                     # + udev rule for /dev/cpu_dma_latency. Re-login after.
 ```
 
@@ -191,7 +191,7 @@ The remaining knobs are CPU-/system-global (not driver-local) — they need root
 or a boot edit and mainly tighten the tail under load:
 
 ```sh
-sudo ./scripts/rt_setup.sh 11      # governor, clocks, deep-idle, RT throttling (runtime)
+sudo rammp-deployments/scripts/rt_setup.sh 11      # governor, clocks, deep-idle, RT throttling (runtime)
 ```
 
 Core **isolation** (`isolcpus=11 nohz_full=11 rcu_nocbs=11`) is a boot-time
@@ -351,7 +351,6 @@ apps/                      benchmark_grav_comp.cpp  benchmark_cartesian_impedanc
 models/                    gen3_7dof.urdf  gen3_7dof_2f85.urdf (2F-85 gripper payload)
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
-scripts/                   rt_grant_once.sh  rt_setup.sh   (one-time + runtime RT tuning)
 docs/                      index.md  getting-started.md          (hosted-docs site)
                            guide/control-modes.md  reference/api.md
                            deep-dive/impedance.md
