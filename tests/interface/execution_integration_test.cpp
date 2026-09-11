@@ -10,12 +10,15 @@
 // (exchange -> tick -> compute), minus the threading, run deterministically.
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cmath>
 
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
+#include "kinova_lowlevel/sim_transport.h"
+#include "kinova_lowlevel/units.h"
 
 using namespace kinova;
 using kinova::interface::ControlModeKind;
@@ -145,4 +148,91 @@ TEST(ExecutionIntegration, ImpedanceModeReferenceTracksTrajectory) {
   }
   EXPECT_TRUE(st.completed);
   EXPECT_NEAR((mode.reference() - q1).norm(), 0.0, 1e-9);  // reference reached the goal
+}
+
+// --- continuous-joint wrap sweep (#52) ---------------------------------------
+//
+// The end-to-end test that would have caught #52. It drives a continuous joint
+// ACROSS the +/-pi boundary with the divergence guard armed, through a real mode
+// and a real Dynamics, with the measurement wrapped exactly as both transports now
+// report it. Before the fix the guard read the wrap as ~2*pi of divergence and
+// aborted an arm that was tracking perfectly.
+//
+// Parameterised over every continuous joint rather than joint_3 alone: 1/3/5/7 are
+// all `type="continuous"` in the URDF, the arm can park near the boundary on any of
+// them, and a guard that folds only the joint we happened to debug is not a fix.
+class ContinuousJointWrapSweep : public ::testing::TestWithParam<int> {};
+
+TEST_P(ContinuousJointWrapSweep, CrossingPiIsNotDivergence) {
+  const int j = GetParam();
+  Dynamics dyn(URDF_PATH);
+
+  JointVec lower, upper;
+  dyn.joint_limits(lower, upper);
+  ASSERT_FALSE(std::isfinite(lower[j])) << "joint " << j << " is not continuous in the URDF";
+  std::array<bool, kNumJoints> continuous{};
+  for (int i = 0; i < kNumJoints; ++i)
+    continuous[i] = !std::isfinite(lower[i]) && !std::isfinite(upper[i]);
+
+  JointPositionMode mode(dyn);
+  TrajectoryExecutor exec(mode, continuous);
+
+  // Park the joint just short of -pi and walk it 0.2 rad further negative, so the
+  // trajectory crosses the boundary partway through. The plan is UNWRAPPED, which
+  // is what a planner emits; the measurement is wrapped, which is what the arm
+  // reports. Everything else is parked.
+  constexpr double kPi = 3.14159265358979323846;
+  JointVec q0 = JointVec::Zero();
+  q0[j] = -kPi + 0.1;
+  JointVec q1 = q0;
+  q1[j] = -kPi - 0.1;  // == +3.04159 once wrapped
+
+  JointFeedback fb;
+  fb.q = q0;
+  fb.qd.setZero();
+  mode.on_enter(fb);
+  ASSERT_EQ(exec.submit(line(q0, q1, 4.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+                        JointVec::Constant(0.35)),  // the guard GoToEEPose uses
+            kinova::interface::SubmitResult::kAccepted);
+
+  double t = 0.0;
+  ExecStatus st{};
+  JointCommand cmd;
+  bool crossed = false;
+  for (int step = 0; step < 6000; ++step) {
+    st = exec.tick(t, fb.q);
+    ASSERT_NE(st.error_code, ExecStatus::kPathToleranceViolated)
+        << "joint " << j << " aborted at t=" << t << " while tracking; q_meas=" << fb.q[j];
+    mode.compute(fb, kDt, cmd);
+    // Ideal position servo, reporting like the transport does: wrapped.
+    for (int i = 0; i < kNumJoints; ++i) fb.q[i] = wrap_to_pi(cmd.position[i]);
+    fb.qd.setZero();
+    if (fb.q[j] > 0.0) crossed = true;  // measurement has flipped sign at the boundary
+    t += kDt;
+    if (st.completed) break;
+  }
+  EXPECT_TRUE(st.completed) << "never completed";
+  EXPECT_EQ(st.error_code, ExecStatus::kOk);
+  EXPECT_TRUE(crossed) << "test never actually crossed the boundary -- it proves nothing";
+  EXPECT_NEAR(wrap_to_pi(fb.q[j] - q1[j]), 0.0, 1e-2) << "did not reach the goal";
+}
+
+INSTANTIATE_TEST_SUITE_P(AllContinuousJoints, ContinuousJointWrapSweep,
+                         ::testing::Values(0, 2, 4, 6));
+
+// The two transports must agree on the representation every consumer downstream
+// honours. SimTransport used not to wrap, which is what made #52 unreachable from
+// CI; this pins the parity so it cannot drift back.
+TEST(SimHardwareParity, SimTransportReportsWrappedAngles) {
+  constexpr double kPi = 3.14159265358979323846;
+  JointFeedback initial;
+  initial.q.setZero();
+  initial.q[2] = -kPi - 0.05;  // an unwrapped angle, as a planner or a test might set
+  SimTransport sim(initial);
+
+  JointFeedback fb;
+  sim.receive(fb);
+  EXPECT_NEAR(fb.q[2], kPi - 0.05, 1e-12) << "sim must report wrapped, like KortexTransport";
+  EXPECT_LE(fb.q[2], kPi);
+  EXPECT_GT(fb.q[2], -kPi);
 }

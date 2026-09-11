@@ -5,6 +5,8 @@
 #include <array>
 #include <cmath>
 
+#include "kinova_lowlevel/units.h"  // wrap_to_pi
+
 namespace kinova {
 
 namespace {
@@ -66,6 +68,18 @@ void SimTransport::step_gripper(const GripperCommand& g) {
   state_.gripper.current = state_.gripper.effort * kGripperMaxCurrentA;
 }
 
+// Report angles the way the REAL transport does: wrapped into (-pi, pi], all seven
+// joints unconditionally, mirroring kortex_transport.cpp. Without this the sim and
+// hardware paths disagree about the representation every consumer downstream has to
+// honour -- and since kortex_transport.cpp is only compiled with KINOVA_ENABLE_KORTEX,
+// the whole suite would run in a representation where a continuous joint's wrap can
+// never occur. That is how #52 reached the arm: the bug was structurally unreachable
+// from CI. Kinematically a no-op for the bounded joints, whose limits are inside +/-pi.
+static void report_wrapped(const JointFeedback& state, JointFeedback& fb) {
+  fb = state;
+  for (int i = 0; i < kNumJoints; ++i) fb.q[i] = wrap_to_pi(fb.q[i]);
+}
+
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   last_cmd_ = cmd;
   step_gripper(cmd.gripper);
@@ -76,7 +90,7 @@ void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   }
   ++frame_;
   state_.frame_id = frame_;
-  fb = state_;
+  report_wrapped(state_, fb);
 }
 
 void SimTransport::send(const JointCommand& cmd) {
@@ -86,6 +100,6 @@ void SimTransport::send(const JointCommand& cmd) {
   state_.frame_id = frame_;
 }
 
-void SimTransport::receive(JointFeedback& fb) { fb = state_; }
+void SimTransport::receive(JointFeedback& fb) { report_wrapped(state_, fb); }
 
 }  // namespace kinova
