@@ -1,6 +1,10 @@
 #include "kinova_lowlevel/interface/trajectory_executor.h"
 
 #include <gtest/gtest.h>
+
+#include <array>
+
+#include "kinova_lowlevel/units.h"
 using namespace kinova::interface;
 
 static kinova::JointVec vec7(double v) {
@@ -103,6 +107,82 @@ TEST(ExecutorDivergence, AbortsWhenErrorExceedsPathTolerance) {
   EXPECT_TRUE(s.completed);
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
   EXPECT_FALSE(ex.is_active());
+}
+
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+// joint_3 is `type="continuous"` in models/gen3_7dof.urdf, matching the arm.
+std::array<bool, kinova::kNumJoints> j3_continuous() {
+  std::array<bool, kinova::kNumJoints> c{};
+  c[2] = true;
+  return c;
+}
+// A plan walking joint_3 across -pi, unwrapped -- what a planner emits. 1 mrad
+// of travel over 1 s, everything else parked.
+kinova::interface::Trajectory across_pi() {
+  kinova::JointVec a = vec7(0.0), b = vec7(0.0);
+  a[2] = -kPi + 0.0005;
+  b[2] = -kPi - 0.0005;  // == +3.14109 once wrapped
+  return {{{a, 0.0}, {b, 1.0}}};
+}
+}  // namespace
+
+// The arm tracks the plan perfectly across the boundary. The transport reports the
+// measurement wrapped into (-pi, pi], so it comes back with the opposite sign and
+// the RAW difference is ~2*pi. Guarding on that aborted a healthy trajectory:
+// observed on the arm as joint_3 parked at -3.14154 rad and every GoToEEPose goal
+// ending kPathToleranceViolated mid-motion with a final_error of zero.
+TEST(ExecutorDivergence, ContinuousJointWrapIsNotDivergence) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink, j3_continuous());
+  using namespace kinova::interface;
+  const Trajectory tr = across_pi();
+  ex.submit(tr, ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.35));
+  ex.tick(0.0, tr.points.front().q);  // start, on-track
+
+  kinova::JointVec meas = vec7(0.0);
+  meas[2] = kPi - 0.0004;  // ~0.1 mrad from q_desired physically; ~2*pi raw
+  ExecStatus s = ex.tick(0.9, meas);
+
+  EXPECT_FALSE(s.completed) << "guard aborted a trajectory the arm was tracking";
+  EXPECT_EQ(s.error_code, ExecStatus::kOk);
+  EXPECT_TRUE(ex.is_active());
+}
+
+// The fold must not blind the guard: a continuous joint that is genuinely lost
+// still has to trip it. 0.9 rad of real divergence is 0.9 rad after wrapping.
+TEST(ExecutorDivergence, ContinuousJointStillAbortsOnRealDivergence) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink, j3_continuous());
+  using namespace kinova::interface;
+  const Trajectory tr = across_pi();
+  ex.submit(tr, ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.35));
+  ex.tick(0.0, tr.points.front().q);
+
+  kinova::JointVec meas = vec7(0.0);
+  meas[2] = kinova::wrap_to_pi(-kPi - 0.0005 + 0.9);  // 0.9 rad off, wrapped
+  ExecStatus s = ex.tick(0.9, meas);
+
+  EXPECT_TRUE(s.completed);
+  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
+}
+
+// A BOUNDED joint is never folded. joint_2 reaches +/-2.41 rad on this arm, so a
+// divergence larger than pi is reachable and must still read as a divergence
+// rather than being folded down into the tolerance.
+TEST(ExecutorDivergence, BoundedJointDivergenceIsNotFolded) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink, j3_continuous());  // joint_2 bounded
+  using namespace kinova::interface;
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.35));
+  ex.tick(0.0, vec7(0.0));
+
+  kinova::JointVec meas = vec7(0.0);
+  meas[1] = 2.0 * kPi + 0.5;  // would fold to 0.5 and slip under a blanket wrap
+  ExecStatus s = ex.tick(1.0, meas);
+
+  EXPECT_TRUE(s.completed);
+  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
 }
 
 TEST(ExecutorDivergence, AbortWithQueuedGoalClearsQueue) {

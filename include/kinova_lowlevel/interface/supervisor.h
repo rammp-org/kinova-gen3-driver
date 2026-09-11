@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <deque>
@@ -144,6 +145,10 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // Pointer, not a reference -- legitimately absent on a robot with no gripper.
   GripperController* grip_ = nullptr;
   SupervisorConfig cfg_;
+  // Which joints wrap into (-pi, pi]. Derived from the URDF in the constructor and
+  // handed to every TrajectoryExecutor this class builds, so the divergence guard
+  // can tell a boundary crossing from a real divergence.
+  std::array<bool, kinova::kNumJoints> continuous_{};
 
   std::optional<TrajectoryExecutor> traj_;  // rebuilt on mode switch
   // Which mode the EXECUTOR is running. ATOMIC because it is written by the

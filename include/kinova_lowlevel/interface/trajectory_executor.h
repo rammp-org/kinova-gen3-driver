@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <optional>
 #include <vector>
 
@@ -47,7 +48,14 @@ struct ExecStatus {
 // JointImpedanceMode implement it — so no interface-local sink is needed.
 class TrajectoryExecutor {
  public:
-  explicit TrajectoryExecutor(kinova::JointTargetSink& sink) : sink_(sink) {}
+  // `continuous` marks the joints whose measurement wraps into (-pi, pi] (the
+  // URDF's `type="continuous"`). The divergence guard needs it because q_meas
+  // arrives wrapped from the transport while a planner emits q_desired
+  // unwrapped -- see tick(). Defaults to all-false, which is the exact
+  // pre-existing behaviour for a caller that does not supply it.
+  explicit TrajectoryExecutor(kinova::JointTargetSink& sink,
+                              const std::array<bool, kinova::kNumJoints>& continuous = {})
+      : sink_(sink), continuous_(continuous) {}
   SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
                       const kinova::JointVec& path_tol);
   bool is_active() const { return active_.has_value() || queued_.has_value(); }
@@ -61,6 +69,7 @@ class TrajectoryExecutor {
     bool started = false;
   };
   kinova::JointTargetSink& sink_;
+  std::array<bool, kinova::kNumJoints> continuous_{};
   ControlModeKind mode_ = ControlModeKind::kPosition;
   std::optional<Active> active_;
   std::optional<Trajectory> queued_;

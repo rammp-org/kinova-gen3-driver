@@ -1,6 +1,7 @@
 #include "kinova_lowlevel/interface/supervisor.h"
 
 #include <chrono>
+#include <cmath>
 #include <string>
 namespace kinova::interface {
 using clock = std::chrono::steady_clock;
@@ -42,12 +43,21 @@ Supervisor::Supervisor(const SupervisorDeps& d)
       stream_(require(d.stream, "stream")),
       action_(require(d.action, "action")),
       grip_(d.grip),
-      cfg_(d.cfg) {}
+      cfg_(d.cfg) {
+  // Cache which joints wrap, once, from the same URDF source JointPositionMode
+  // reads. The executor's divergence guard needs it; see TrajectoryExecutor::tick.
+  // Dynamics is not thread-safe against the RT loop, so this is read here in the
+  // constructor rather than per mode switch.
+  kinova::JointVec lower, upper;
+  pump_dyn_.joint_limits(lower, upper);
+  for (int i = 0; i < kinova::kNumJoints; ++i)
+    continuous_[i] = !std::isfinite(lower[i]) && !std::isfinite(upper[i]);
+}
 Supervisor::~Supervisor() { stop(); }
 
 void Supervisor::start() {
-  exec_.request_mode(&pos_);  // initial mode = position
-  traj_.emplace(pos_);        // executor bound to the active mode's sink
+  exec_.request_mode(&pos_);         // initial mode = position
+  traj_.emplace(pos_, continuous_);  // executor bound to the active mode's sink
   active_mode_kind_.store(ControlModeKind::kPosition);
   traj_bound_kind_ = ControlModeKind::kPosition;
   t0_ = clock::now();  // origin for every session/expiry stamp
@@ -118,7 +128,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       // A kind with no joint sink (kTorque) still needs traj_ reset to idle; pos_ is
       // an inert placeholder there, because traj_bound_kind_ = k forces a rebind
       // before any position/impedance goal can be driven through it.
-      traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_));
+      traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_), continuous_);
       traj_bound_kind_ = k;
       have_active = false;
       have_queued = false;
@@ -171,7 +181,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         }
         const ControlModeKind k = active_mode_kind_.load();  // ONE load: see the halt path
         kinova::JointTargetSink* sink = sink_for(k);
-        traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_));
+        traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_), continuous_);
         traj_bound_kind_ = k;
         have_active = false;
         have_queued = false;
@@ -233,11 +243,11 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
             imp_.set_gains(p);
           }
           exec_.request_mode(&imp_);
-          traj_.emplace(imp_);  // no-op in the executor if already active
+          traj_.emplace(imp_, continuous_);  // no-op in the executor if already active
           active_mode_kind_.store(ControlModeKind::kImpedance);
         } else {
           exec_.request_mode(&pos_);
-          traj_.emplace(pos_);
+          traj_.emplace(pos_, continuous_);
           active_mode_kind_.store(ControlModeKind::kPosition);
         }
         traj_bound_kind_ = in.goal.control_mode;

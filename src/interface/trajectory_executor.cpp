@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+
+#include "kinova_lowlevel/units.h"  // wrap_to_pi
 namespace kinova::interface {
 
 kinova::JointVec sample(const Trajectory& tr, double t_s) {
@@ -83,9 +85,23 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   sink_.set_target(q_desired);
   const double frac = dur > 0.0 ? std::min(1.0, std::max(0.0, elapsed / dur)) : 1.0;
 
-  // Check divergence guard
+  // Check divergence guard.
+  //
+  // A continuous joint's measurement arrives wrapped into (-pi, pi] (KortexTransport
+  // wraps every feedback sample), while a planner emits q_desired unwrapped. The
+  // instant such a joint crosses the boundary the RAW difference reads ~2*pi and
+  // this guard aborts a trajectory the arm is tracking perfectly. Observed on the
+  // arm: joint_3 parked at -3.14154 rad, every GoToEEPose aborting mid-motion with
+  // kPathToleranceViolated and a final_error of zero.
+  //
+  // Only continuous joints are folded. A bounded joint's limits span more than pi
+  // on this arm (joint_2 reaches +/-2.41 rad), so wrapping its difference would
+  // fold a genuine 2*pi-sized divergence down to something inside the tolerance --
+  // the guard would stop reporting exactly the fault it exists to catch.
   for (int i = 0; i < kinova::kNumJoints; ++i) {
-    if (path_tol_[i] > 0.0 && std::abs(q_meas[i] - q_desired[i]) > path_tol_[i]) {
+    double err = q_meas[i] - q_desired[i];
+    if (continuous_[i]) err = kinova::wrap_to_pi(err);
+    if (path_tol_[i] > 0.0 && std::abs(err) > path_tol_[i]) {
       active_.reset();
       queued_.reset();  // a fault aborts the whole chain — don't strand a queued follow-on
       return ExecStatus{false, true, frac, ExecStatus::kPathToleranceViolated};
