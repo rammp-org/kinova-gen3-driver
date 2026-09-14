@@ -33,7 +33,9 @@ inline kinova::JointVec sampled_q(bool loaded, const kinova::JointVec& fresh,
 }
 
 struct SupervisorConfig {
-  double sampler_hz = 250.0;
+  // Match the 1 kHz RT loop: at 250 Hz each target was held ~4 ms and the rate
+  // limiter turned a smooth plan into a staircase.
+  double sampler_hz = 1000.0;
   double pump_hz = 100.0;
   double mode_settle_s = 0.25;
 };

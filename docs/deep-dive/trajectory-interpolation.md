@@ -87,8 +87,8 @@ rather than dividing by zero.
 
 `sample()` does **not** run on the RT thread. It is called from
 `TrajectoryExecutor::tick()`, which the supervisor drives from `sampler_loop` at
-`SupervisorConfig::sampler_hz` (250 Hz), and which `trajectory_run` drives from
-its publisher thread at the same rate. The 1 kHz thread only reads the
+`SupervisorConfig::sampler_hz` (1 kHz), and which `trajectory_run` drives from
+its publisher thread at its own `--tick-rate` (250 Hz by default). The RT thread only reads the
 double-buffered `JointTarget` those threads publish — it never interpolates.
 
 That is worth stating precisely, because it sets what this function is allowed
@@ -104,16 +104,18 @@ against a 144-point / 2.88 s plan, on the isolated core:
 | quintic | 96 ns | 160 ns | 192 ns |
 
 The worst case, quintic, costs about **32 ns more per sample than linear** —
-some 0.0008% of the sampler's 4 ms period. The math is fixed-size `JointVec`
+some 0.0032% of the sampler's 1 ms period. The math is fixed-size `JointVec`
 arithmetic on the stack: no allocation, no locks. The RT contract is unaffected
 either way, and `RtSafety` (which runs the supervisor in the loop) still reports
 zero major faults and zero dropped samples in steady state.
 
-One consequence of the 250 Hz sampler worth knowing when reading the smoothness
-claim: the reference is republished every 4 ms and then slew-limited by
-`max_ref_speed`, so the C1 continuity a velocity profile buys is real but is
-delivered through that 4 ms staircase rather than a fresh polynomial evaluation
-every millisecond.
+The sampler used to run at 250 Hz. The reference was then republished every 4 ms
+and slew-limited by `max_ref_speed`, so the C1 continuity a velocity profile buys
+arrived through a 4 ms staircase. That was measurable on the arm: a looped cuRobo
+joint tour showed ~15% less velocity ripple and ~20% less jerk at 1 kHz. The
+sampler is still a separate `sleep_for` thread, not synchronised with the RT
+cycle, so the staircase is shorter rather than gone; evaluating the trajectory
+inside the RT loop would remove it.
 
 ## Where the profile comes from
 

@@ -55,8 +55,8 @@ Nothing is left orphaned waiting for a result.
 The orchestrator controls *when* this happens. If it wants a clean handover with
 no mid-motion stop, it waits for the goal to finish before revoking.
 
-Halt takes effect within one sampler period plus one RT cycle — **≤5 ms** at the
-default `sampler_hz = 250`.
+Halt takes effect within one sampler period plus one RT cycle — about **2 ms** at
+the default `sampler_hz = 1000`.
 
 ## Emergency stop
 
