@@ -12,6 +12,15 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Changed
+
+- `SupervisorConfig::sampler_hz` defaults to 1000 (was 250). At 250 Hz each
+  trajectory target was held ~4 ms and the 1 kHz position rate limiter turned a
+  smooth plan into a staircase; on the arm, a looped cuRobo joint tour showed
+  ~15% less velocity ripple and ~20% less jerk at 1 kHz. The sampler is still a
+  separate non-RT thread and publishes action feedback every tick; evaluating the
+  trajectory inside the RT loop is the intended follow-up.
+
 ## [1.0.0] — 2026-09-08
 
 First tagged release. The driver has been in use for months; this release does
