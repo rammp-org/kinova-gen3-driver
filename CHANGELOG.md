@@ -12,6 +12,17 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-14
+
+A minor release: one additive signature change, a changed default, and a fix for
+trajectories through a continuous joint's ±π boundary.
+
+### Added
+
+- `TrajectoryExecutor` takes an optional continuous-joint mask. It defaults to
+  all-false, which is exactly the previous behaviour; `Supervisor` derives the
+  mask from the URDF, so no caller has to opt in ([#52]).
+
 ### Changed
 
 - `SupervisorConfig::sampler_hz` defaults to 1000 (was 250). At 250 Hz each
@@ -19,7 +30,25 @@ that heading to the new version and bumps `package.xml`.
   smooth plan into a staircase; on the arm, a looped cuRobo joint tour showed
   ~15% less velocity ripple and ~20% less jerk at 1 kHz. The sampler is still a
   separate non-RT thread and publishes action feedback every tick; evaluating the
-  trajectory inside the RT loop is the intended follow-up.
+  trajectory inside the RT loop is the intended follow-up ([#56]).
+- `SimTransport` reports joint positions wrapped into (-π, π], as
+  `KortexTransport` does, so CI runs in the representation the hardware reports
+  ([#52]).
+
+### Fixed
+
+- The trajectory divergence guard no longer aborts a goal when a continuous joint
+  crosses ±π. Feedback arrives wrapped while a planner emits unwrapped targets,
+  so the raw difference read ~2π; every goal through the boundary ended
+  `kPathToleranceViolated` with a final error of zero ([#52]).
+
+### Known limitations
+
+In addition to the 1.0.0 list:
+
+- An exception from the Kortex API is not caught in `KortexTransport`, so it
+  terminates the process instead of raising a fault. Seen on the arm as
+  `WRONG_SERVOING_MODE` when the base left low-level servoing ([#59]).
 
 ## [1.0.0] — 2026-09-08
 
@@ -87,7 +116,8 @@ full list, and none of these are API:
 - A KORTEX-enabled `install()` bakes the build machine's SDK path into the
   exported target, so it is not relocatable ([#50]).
 
-[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rammp-org/kinova-gen3-driver/releases/tag/v1.0.0
 [#5]: https://github.com/rammp-org/kinova-gen3-driver/issues/5
 [#6]: https://github.com/rammp-org/kinova-gen3-driver/issues/6
@@ -96,3 +126,6 @@ full list, and none of these are API:
 [#34]: https://github.com/rammp-org/kinova-gen3-driver/issues/34
 [#40]: https://github.com/rammp-org/kinova-gen3-driver/issues/40
 [#50]: https://github.com/rammp-org/kinova-gen3-driver/issues/50
+[#52]: https://github.com/rammp-org/kinova-gen3-driver/issues/52
+[#56]: https://github.com/rammp-org/kinova-gen3-driver/issues/56
+[#59]: https://github.com/rammp-org/kinova-gen3-driver/issues/59
