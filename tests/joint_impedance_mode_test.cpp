@@ -62,6 +62,91 @@ TEST(JointImpedance, ReferenceSeededAtMeasuredConfigOnEnter) {
   EXPECT_NEAR((m.reference() - fb.q).norm(), 0.0, 1e-12);
 }
 
+// Keep the default IK posture/limit objectives enabled: static_params() masks
+// the entry bug by disabling the solver entirely.
+TEST(JointImpedance, EntryHoldsMeasuredJointsUntilAnExplicitTarget) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointVec gravity;
+  dyn.gravity(fb.q, gravity);
+  JointCommand c;
+  for (int k = 0; k < 1000; ++k) {  // beyond the settle interval and gain ramp
+    m.compute(fb, 0.001, c);
+    ASSERT_NEAR((m.reference() - fb.q).norm(), 0.0, 1e-12);
+    ASSERT_NEAR((c.torque - gravity).norm(), 0.0, 1e-9);
+  }
+}
+
+TEST(JointImpedance, EntryHoldDoesNotRelatchDisplacedFeedback) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p;  // IK enabled, unlike static_params()
+  p.gain_ramp_s = 0.0;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  const JointVec entry = sample_q();
+  fb.q = entry;
+  fb.qd.setZero();
+  m.on_enter(fb);
+  fb.q[0] += 0.02;
+  JointVec gravity;
+  dyn.gravity(fb.q, gravity);
+  JointCommand c;
+  for (int k = 0; k < 250; ++k) {
+    m.compute(fb, 0.001, c);
+    ASSERT_NEAR((m.reference() - entry).norm(), 0.0, 1e-12);
+    ASSERT_NEAR(c.torque[0] - gravity[0], -p.Kq[0] * 0.02, 1e-9);
+  }
+}
+
+TEST(JointImpedance, ReentryDiscardsBothKindsOfPreviousTarget) {
+  Dynamics dyn(URDF_PATH);
+  for (bool pose_target : {false, true}) {
+    SCOPED_TRACE(pose_target);
+    JointImpedanceMode m(dyn);
+    JointFeedback fb;
+    fb.q = sample_q();
+    fb.qd.setZero();
+    m.on_enter(fb);
+    JointVec target = fb.q;
+    target[0] += 0.1;
+    if (pose_target) {
+      m.set_target(dyn.fk(target));
+    } else {
+      m.set_target(target);
+    }
+    JointCommand c;
+    for (int k = 0; k < 250; ++k) m.compute(fb, 0.001, c);
+    ASSERT_GT((m.reference() - fb.q).norm(), 1e-6);
+    m.on_exit();
+    fb.q[1] += 0.05;  // re-enter at a different configuration
+    m.on_enter(fb);
+    for (int k = 0; k < 250; ++k) {
+      m.compute(fb, 0.001, c);
+      ASSERT_NEAR((m.reference() - fb.q).norm(), 0.0, 1e-12);
+    }
+  }
+}
+
+TEST(JointImpedance, ExplicitEntryPoseStillRunsPostureIk) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  // The very same Cartesian pose is now an explicit command: secondary IK
+  // objectives must still resolve the redundant posture, as before.
+  m.set_target(dyn.fk(fb.q));
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  EXPECT_GT(m.last_ik().iters, 0);
+  EXPECT_GT((m.reference() - fb.q).norm(), 1e-6);
+}
+
 TEST(JointImpedance, MatchesIndependentlyComputedLaw) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p = static_params();
@@ -253,6 +338,7 @@ TEST(JointImpedance, ContinuousReferenceStaysBounded) {
   fb.q = sample_q();
   fb.qd.setZero();
   m.on_enter(fb);
+  m.set_target(dyn.fk(fb.q));  // explicitly exercise posture IK, not entry hold
   for (int k = 0; k < 20000; ++k) {
     JointCommand c;
     m.compute(fb, 0.001, c);

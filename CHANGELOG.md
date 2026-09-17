@@ -12,6 +12,13 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `JointImpedanceMode` holds the measured joint configuration on entry until an
+  explicit target arrives. Previously, entry-pose IK could move the redundant
+  posture before the supervisor submitted its first command. Explicit Cartesian
+  targets still run IK; joint targets, gains and limits are unchanged.
+
 ## [1.1.0] — 2026-09-14
 
 A minor release: one additive signature change, a changed default, and a fix for

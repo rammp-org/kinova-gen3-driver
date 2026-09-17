@@ -146,14 +146,59 @@ TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {
   EXPECT_EQ(ring.dropped(), 0u);
 }
 
-// Same structure as the Cartesian case above, for the joint-space mode. This is
-// the check that proves the IK running INSIDE the 1 kHz cycle does not allocate.
+namespace {
+// Test-only observation. The non-RT publisher waits for on_enter to finish so
+// its target cannot be discarded by the entry reset. Counters belong to the
+// loop thread and are inspected only after ex.run() returns.
+class ObservedJointImpedanceMode : public JointImpedanceMode {
+ public:
+  using JointImpedanceMode::JointImpedanceMode;
+  std::atomic<bool> entered{false};
+  uint64_t ik_cycles = 0;
+  uint64_t hold_cycles_after_ik = 0;
+
+  void on_enter(const JointFeedback& fb) override {
+    JointImpedanceMode::on_enter(fb);
+    ik_cycles = hold_cycles_after_ik = 0;
+    entered.store(true, std::memory_order_release);
+  }
+
+  void compute(const JointFeedback& fb, double dt_s, JointCommand& out) override {
+    JointImpedanceMode::compute(fb, dt_s, out);
+    if (last_ik().iters > 0) {
+      ++ik_cycles;
+    } else if (ik_cycles > 0) {
+      ++hold_cycles_after_ik;
+    }
+  }
+
+  bool wait_for_entry(std::atomic<bool>& stop) const {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!entered.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        stop.store(true);  // bounded failure; coverage assertions below must fail
+        return false;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+  }
+};
+}  // namespace
+
+// Exercise explicit pose IK throughout warm-up and measurement. This checks
+// zero major faults and dropped samples, not heap allocations or timing bounds.
 TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
   JointFeedback init;
   init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointImpedanceMode mode(dyn);  // defaults: IK runs every cycle
+  ObservedJointImpedanceMode mode(dyn);
+  // Compute FK before starting threads: Dynamics is not thread-safe. An
+  // unreachable pose keeps IK iterations active instead of converging to an
+  // early return, so the coverage counters identify every tracking cycle.
+  Pose away = dyn.fk(init.q);
+  away.p.x() += 3.0;
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -169,21 +214,29 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
 
   std::thread loop([&] {
     // Warm-up window: fault in all code/scratch pages before measuring.
+    mode.entered.store(false);
     ex.request_mode(&mode);
     std::atomic<bool> warm_stop{false};
     std::thread warm_watch([&] {
+      if (!mode.wait_for_entry(warm_stop)) return;
+      mode.set_target(away);
       std::this_thread::sleep_for(std::chrono::milliseconds(200));
       warm_stop.store(true);
     });
     ex.run(warm_stop);
     warm_watch.join();
+    EXPECT_GT(mode.ik_cycles, 0u) << "warm-up never exercised IK";
+    EXPECT_EQ(mode.hold_cycles_after_ik, 0u) << "IK stopped during warm-up";
 
     ResourceUsage u0 = read_usage();
     // Re-arm the mode (the warm-up run consumed the request) and measure the
     // steady-state window on this same loop thread.
+    mode.entered.store(false);
     ex.request_mode(&mode);
     std::atomic<bool> measure_stop{false};
     std::thread measure_watch([&] {
+      if (!mode.wait_for_entry(measure_stop)) return;
+      mode.set_target(away);
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
       measure_stop.store(true);
     });
@@ -191,6 +244,8 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
     measure_watch.join();
 
     ResourceUsage u1 = read_usage();
+    EXPECT_GT(mode.ik_cycles, 0u) << "measurement never exercised IK";
+    EXPECT_EQ(mode.hold_cycles_after_ik, 0u) << "IK stopped during measurement";
     majflt_delta.store(u1.majflt - u0.majflt);
     stop.store(true);
   });
@@ -216,7 +271,12 @@ TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceParams p;
   p.cmd_timeout_s = 0.05;  // armed: the freeze branch is live
-  JointImpedanceMode mode(dyn, p);
+  ObservedJointImpedanceMode mode(dyn, p);
+  // Compute FK before starting threads: Dynamics is not thread-safe. An
+  // unreachable pose keeps IK iterations active instead of converging to an
+  // early return, so the coverage counters identify every tracking cycle.
+  Pose away = dyn.fk(init.q);
+  away.p.x() += 3.0;
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -231,30 +291,37 @@ TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
   });
 
   std::thread loop([&] {
-    // Warm-up window: fault in all code/scratch pages -- INCLUDING the freeze
-    // branch, which is why the warm-up also runs long enough to go stale.
+    // Warm up BOTH explicit-pose IK and the subsequent freeze. Entry hold alone
+    // cannot warm the solver, even if the watchdog is armed.
+    mode.entered.store(false);
     ex.request_mode(&mode);
     std::atomic<bool> warm_stop{false};
     std::thread warm_watch([&] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      if (!mode.wait_for_entry(warm_stop)) return;
+      for (int i = 0; i < 10; ++i) {
+        mode.set_target(away);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(400));
       warm_stop.store(true);
     });
     ex.run(warm_stop);
     warm_watch.join();
+    EXPECT_GT(mode.ik_cycles, 0u) << "warm-up never exercised IK";
+    EXPECT_GT(mode.hold_cycles_after_ik, 0u) << "warm-up never exercised freeze";
 
     ResourceUsage u0 = read_usage();
     // Re-arm the mode (the warm-up run consumed the request) and measure the
     // steady-state window on this same loop thread.
+    mode.entered.store(false);
     ex.request_mode(&mode);
     std::atomic<bool> measure_stop{false};
     std::thread measure_watch([&] {
-      // Publish from a non-RT thread once on_enter has run -- it resets the
-      // watchdog by design. Pose targets for ~100 ms, then silence: the 50 ms
-      // deadline lapses and the mode freezes for the rest of the window.
-      const Pose away = dyn.fk(JointVec::Constant(0.2));
+      if (!mode.wait_for_entry(measure_stop)) return;
+      // Same path as warm-up: pose IK for ~100 ms, then a watchdog freeze.
       for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         mode.set_target(away);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(400));
       measure_stop.store(true);
@@ -263,6 +330,8 @@ TEST(RtSafety, JointImpedanceModeStaleFreezeNoMajorFaultsSteadyState) {
     measure_watch.join();
 
     ResourceUsage u1 = read_usage();
+    EXPECT_GT(mode.ik_cycles, 0u) << "measurement never exercised IK";
+    EXPECT_GT(mode.hold_cycles_after_ik, 0u) << "measurement never exercised freeze";
     majflt_delta.store(u1.majflt - u0.majflt);
     stop.store(true);
   });
