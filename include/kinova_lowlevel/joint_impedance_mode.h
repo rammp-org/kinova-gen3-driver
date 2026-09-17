@@ -44,7 +44,8 @@ struct JointImpedanceParams {
   DiffIkParams ik{};
 };
 
-// Joint-space impedance driven by in-loop IK:
+// Joint-space impedance; hold measured joints on entry until a target arrives.
+// Explicit Cartesian targets are driven by in-loop IK:
 //   q_d  <- DiffIk(target, warm start q_d)          (all 7 joints commanded)
 //   tau   = g(q) + ramp * ( Kq∘clamp(q_d-q, ±leash) - Dq∘qd )
 // Unlike CartesianImpedanceMode this leaves no uncommanded DOF: the redundant
@@ -111,19 +112,18 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   std::atomic<int> gains_active_{0};
 
   // Target source, selected by the most recent setter (single-writer, non-RT):
-  //   kEntryPose - hold the pose captured at on_enter (default; no external cmd)
+  //   kEntryHold - hold the joint configuration captured at on_enter (no external cmd)
   //   kPose      - external Cartesian target -> in-loop IK -> q_d
   //   kJoint     - external joint reference commanded directly (IK bypassed)
   // The RT reader loads source_ once per cycle and reads the matching buffer.
   // Each buffer keeps the same double-buffer + release-store discipline as
   // CartesianImpedanceMode, so the RT reader never observes a torn target.
-  enum class TargetSource : int { kEntryPose, kPose, kJoint };
-  Pose entry_pose_;
+  enum class TargetSource : int { kEntryHold, kPose, kJoint };
   Pose ext_target_[2];
   std::atomic<int> ext_active_{0};
   JointVec ext_q_target_[2];
   std::atomic<int> jt_active_{0};
-  std::atomic<TargetSource> source_{TargetSource::kEntryPose};
+  std::atomic<TargetSource> source_{TargetSource::kEntryHold};
 
   // Staleness detection for the streamed target -- shared by BOTH setters, so a
   // streamed pose keeps it just as fresh as a streamed joint reference. The

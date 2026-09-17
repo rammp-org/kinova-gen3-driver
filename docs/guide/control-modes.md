@@ -136,6 +136,14 @@ configuration, then runs an independent spring-damper on every joint.
   solutions stay continuous). Then per-joint stiffness pulls the measured
   configuration toward that reference and per-joint damping resists joint
   velocity. Gravity compensation is added on top, always in full.
+- **Holds the entry joint configuration by default.** `on_enter` captures all
+  seven measured joint angles. Until an explicit target arrives, the reference
+  stays at that configuration; IK does not run, so its posture and limit-avoidance
+  terms cannot move the reference during mode entry. Displaced feedback does not
+  re-capture the hold point. Re-entry discards targets from the previous session.
+  An explicit `set_target(Pose)` enables IK (including secondary objectives,
+  even for the entry pose); `set_target(JointVec)` commands joints directly.
+  The existing gain ramp, torque limits and command watchdog still apply.
 - **Damping is derived, not dialed in.** `Dq_i = 2·zeta·sqrt(Kq_i · M_ii(q))`,
   using the joint-space mass matrix. A flat damping vector cannot be right at more
   than one configuration: on this arm the effective inertia at joint 1 swings ~38x
@@ -178,7 +186,7 @@ configuration, then runs an independent spring-damper on every joint.
 | `zeta` | 0.5 | Damping **ratio**, not damping. `1.0` = critically damped; lower = livelier and more overshoot. |
 | `max_ref_speed` | URDF velocity limits | Per-joint reference rate cap. Seeded from the model so it can never sit silently below what the hardware can do. |
 | `max_tracking_error` | 0.35 rad | The leash. Lower it to make the arm gentler when it's far from the reference. |
-| `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — this is the posture the arm defaults to. |
+| `ik.q_rest` | elbow-up placeholder | **Tune on hardware** — posture bias for explicit Cartesian targets. |
 | `ik.posture_gain` | 0.15 | How strongly the elbow returns to `q_rest`. Raise if it still wanders; lower if it fights you. |
 | `ik.max_iters` | 4 | IK iterations per cycle. Per-cycle cost is **unmeasured** — see [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6). Nothing has timed this path, in sim or on hardware. |
 

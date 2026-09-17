@@ -69,12 +69,10 @@ void JointImpedanceMode::set_command_timeout(double s) noexcept {
 }
 
 void JointImpedanceMode::on_enter(const JointFeedback& fb) {
-  entry_pose_ = dyn_.fk(fb.q);  // hold where we are
-  // The reference starts exactly at the measured configuration, then integrates
-  // OPEN-LOOP. Re-seeding from fb.q every cycle would collapse the spring to zero
-  // error and degenerate this into rigid tracking, losing all compliance.
+  // Hold the measured joint configuration until an external target arrives.
+  // Re-seeding from fb.q every cycle would erase the restoring spring error.
   q_d_ = fb.q;
-  source_.store(TargetSource::kEntryPose, std::memory_order_release);
+  source_.store(TargetSource::kEntryHold, std::memory_order_release);
   ramp_elapsed_ = 0.0;
   last_ik_ = IkResult{};
   wd_.reset();
@@ -120,12 +118,16 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
     // joint command is not slammed at the arm.
     q_d_ = ext_q_target_[jt_active_.load(std::memory_order_acquire)];
     last_ik_ = IkResult{};
-  } else {
-    const Pose target = (src == TargetSource::kPose)
-                            ? ext_target_[ext_active_.load(std::memory_order_acquire)]
-                            : entry_pose_;
+  } else if (src == TargetSource::kPose) {
+    const Pose target = ext_target_[ext_active_.load(std::memory_order_acquire)];
     ik_.set_params(p.ik);                // fixed-size copy, no alloc
     last_ik_ = ik_.solve(target, q_d_);  // warm-started from last cycle
+  } else {
+    // No external target: keep the joint reference captured by on_enter. IK
+    // would move the redundant posture even with zero Cartesian error, including
+    // during the supervisor's settle interval before its first joint target.
+    // Leave the non-RT target buffers untouched.
+    last_ik_ = IkResult{};
   }
 
   // Bound reference speed so a teleported target ramps in instead of slamming.

@@ -153,7 +153,7 @@ TEST(RtSafety, JointImpedanceModeNoMajorFaultsSteadyState) {
   init.q.setZero();
   SimTransport t(init);
   Dynamics dyn(URDF_PATH);
-  JointImpedanceMode mode(dyn);  // defaults: IK runs every cycle
+  JointImpedanceMode mode(dyn);  // entry hold; pose IK is covered by the stale-freeze test
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
