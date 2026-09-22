@@ -571,14 +571,13 @@ TEST(RtSafety, GripperControllerInLoopNoMajorFaultsSteadyState) {
 // set_velocity_target) is pass-through and cheap by inspection; this is the path
 // that needed proving.
 //
-// Unlike the hold-entry-pose modes above, JointVelocityMode's default source is
-// Source::kNone: compute() returns EARLY, before ever touching solve_twist(),
-// until an external target is set. A target set before on_enter runs is also
-// dropped by design (on_enter resets source_ to kNone so a stale session can't
-// resume). So the twist target must be published from a non-RT thread AFTER
-// request_mode's on_enter has run, in BOTH the warm-up window (to fault in the
-// Jacobian/LDLT code and scratch) and the re-armed measured window (re-entry
-// drops the warm-up's target the same way).
+// JointVelocityMode's default source is Source::kNone: compute() holds the entry
+// pose and never touches solve_twist() until an external target is set. A target
+// set before on_enter runs is also dropped by design (on_enter resets source_ to
+// kNone so a stale session can't resume). So the twist target must be published
+// from a non-RT thread AFTER request_mode's on_enter has run, in BOTH the warm-up
+// window (to fault in the Jacobian/LDLT code and scratch) and the re-armed
+// measured window (re-entry drops the warm-up's target the same way).
 TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
   JointFeedback init;
   init.q.setZero();

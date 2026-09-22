@@ -265,6 +265,21 @@ else()
 endif()
 
 # TEMPORARY bring-up harness — delete this target with the app once validated.
+# velocity_hold_check answers the three hardware questions the 1.1.1 change to
+# JointVelocityMode (#34) leaves open: does a zero command hold, does a dead
+# stream freeze at measured q, does the 0.1 rad leash stay dormant while
+# tracking. --dry-run is READ-ONLY; every motion is one joint, small, ramped.
+add_executable(velocity_hold_check apps/velocity_hold_check.cpp)
+target_link_libraries(velocity_hold_check PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(velocity_hold_check PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(velocity_hold_check PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(velocity_hold_check PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(velocity_hold_check PRIVATE KINOVA_NO_KORTEX)
+endif()
+
+# TEMPORARY bring-up harness — delete this target with the app once validated.
 # joint_torque_check is the hardware validation harness for JointTorqueMode.
 # benchmark_grav_comp covers the zero-feedforward case; this covers the thing the
 # mode exists for -- a real feedforward via set_torque, and the staleness watchdog

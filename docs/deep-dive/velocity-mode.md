@@ -13,15 +13,26 @@ The canonical design record is the spec and plan under `docs/superpowers/`.
 
 ## Why velocity mode needs a different safety story
 
-Every other control law in this driver commands **torque**. A bad solve there
-still produces a *bounded* torque, clamped per joint before it reaches the
-actuator — the worst case is a hard shove, not an unbounded motion. Velocity
-mode commands `ActuatorMode::kVelocity` directly: whatever `solve_twist`
-computes goes straight to the joint servo, with no dynamics standing between
-the number and the motor. That single fact drives every design choice below —
-in particular, damping near a singularity is not a refinement here, it is what
-keeps the *solve* well-conditioned rather than returning an enormous `qd` in
-the direction the arm has just lost.
+The impedance and torque laws in this driver command **torque**. A bad solve
+there still produces a *bounded* torque, clamped per joint before it reaches
+the actuator — the worst case is a hard shove, not an unbounded motion.
+Velocity mode has no torque clamp behind it: whatever `solve_twist` computes is
+integrated straight into the position reference the actuator servo tracks,
+and the servo tracks it at full authority. That fact drives every design
+choice below — in particular, damping near a singularity is not a refinement
+here, it is what keeps the *solve* well-conditioned rather than returning an
+enormous `qd` in the direction the arm has just lost.
+
+Two things stand between the solve and the motor, and it is worth being exact
+about which does what. `limit()` (below) bounds the **velocity**, so the
+reference can move no faster than the URDF rating. The **leash** — 0.1 rad on
+every joint, a constant in `joint_velocity_mode.cpp` — bounds how far the
+reference may lead the *measured* position, so a blocked joint or a solve the
+arm cannot follow winds the reference up by at most that much. The mode
+originally commanded `ActuatorMode::kVelocity` directly; it moved to an
+integrated position reference in 1.1.1 because the actuator's velocity servo
+does not reject gravity at a zero command
+([#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)).
 
 !!! note "What actually bounds the command"
 
@@ -223,7 +234,9 @@ must never allocate, lock, or block.
   The DLS + null-space solve costs roughly **~1 µs** more per cycle at the
   median and **~4 µs** at p99 than the native pass-through path — both
   comfortably inside the 1 ms budget at 1 kHz, with no overruns, faults, or
-  dropped samples in either mode. This closes the Open Decision on measuring
+  dropped samples in either mode. These numbers predate the 1.1.1 integrator
+  (seven multiply-adds and a leash per cycle); see the 1.1.1 changelog entry
+  for the re-measurement. This closes the Open Decision on measuring
   `JointVelocityMode`'s per-cycle cost from the `docs/superpowers/` design spec
   for this plan.
 

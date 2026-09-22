@@ -12,12 +12,45 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- `velocity_hold_check`, a temporary attended harness for the three hardware
+  questions the velocity fix leaves open: hold, freeze on a dead stream, and
+  tracking at speed against the leash ([procedure](docs/integration/velocity_hold_check.md)).
+
 ### Fixed
 
 - `JointImpedanceMode` holds the measured joint configuration on entry until an
   explicit target arrives. Previously, entry-pose IK could move the redundant
   posture before the supervisor submitted its first command. Explicit Cartesian
   targets still run IK; joint targets, gains and limits are unchanged.
+- `JointVelocityMode` **holds at a zero command.** The actuator's own velocity
+  servo does not reject gravity at zero — joint 2 crept ~0.038 rad/s with zeros
+  streamed, and Kinova's own low-level example never holds a loaded joint in
+  VELOCITY mode ([#34]). The mode now integrates the limited velocity into a
+  position reference at the RT rate and requires `kPosition` on every actuator.
+  The reference is leashed to within 0.1 rad of the measured position (the
+  windup guard for contact or a blocked joint), bounded joints stop at their
+  URDF limits, and a stale stream freezes the reference at the measured
+  position before latching. The public API is unchanged; two observable
+  differences: `required_modes()` reports `kPosition`, and `JointCommand::
+  velocity` is zero as in every position-commanding mode (`commanded()` still
+  reads the limited velocity fed to the integrator). RT cost, measured A/B on the Jetson AGX Orin
+  (`benchmark_joint_velocity --sim --rate 1000 --duration 5`, pinned to core 10
+  while the live driver held core 11, so noisier than the isolated-core figures
+  in the deep dive), `compute_ns` p50 / p99 / max: joint path 128 / 512 / 1472
+  after vs 128 / 512 / 1952 before; twist path 2048 / 8192 / 18912 after vs
+  2048 / 8192 / 19680 before. Zero major faults, zero dropped samples; the full
+  suite including `RtSafety*` passes on aarch64. Verified on the arm
+  2026-09-22 with `velocity_hold_check`: 0.1 mrad of joint-2 drift over 60 s of
+  streamed zeros (was ~2.3 rad); a stream cut mid-jog stops within the 0.2 s
+  watchdog window (12 mrad at 0.054 rad/s); wrist jogs at 0.1, 0.3, 0.6 and
+  1.0 rad/s track at 100% with the leash dormant. The measured lead grows
+  linearly at about 70 ms of servo lag (0.071 rad at 1.0 rad/s), so the margin
+  to the 0.1 rad leash at the 1.22 rad/s URDF cap is thin and loaded joints are
+  uncharacterised; making the leash a parameter is a 1.2.0 follow-up. The
+  `ee_twist` path was re-validated by gamepad teleop through the ROS2 node:
+  still at zero twist, stops on release, tracks the stick.
 
 ## [1.1.0] — 2026-09-14
 

@@ -7,6 +7,14 @@
 
 **Attended procedure. One joint, tiny speed, short duration.**
 
+!!! note "Answered"
+    Run on the arm 2026-08-28: `TRACKS`. The firmware honours `kVelocity`. But
+    [#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34) then showed
+    that the actuator's velocity servo does not reject gravity at a zero
+    command, so from 1.1.1 `JointVelocityMode` no longer uses `kVelocity` at
+    all — it integrates into a position reference. The probe stays as a
+    firmware characterisation tool; nothing in the driver depends on its answer.
+
 ## Why this exists
 
 `KortexTransport` maps `ActuatorMode::kVelocity` to

@@ -240,8 +240,15 @@ JointVec commanded() const noexcept;          // RT-owned, not synchronized
 double last_manipulability() const noexcept;  // sqrt(det(J Jᵀ)) at the last twist solve
 ```
 
-Commands every actuator in `kVelocity` and lets the actuator's own servo close
-the loop. **Stiff by contract** — this mode does not yield to contact and makes
+Integrates the commanded velocity into a position reference at the RT rate and
+commands every actuator in `kPosition`; the actuator's own position servo holds
+the reference, so a zero command **holds** (the actuator's velocity servo does
+not reject gravity at zero, [#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)).
+The reference may lead the measured position by at most 0.1 rad per joint and
+never leaves the URDF position limits. `out.velocity` is zero, as in every
+position-commanding mode; `commanded()` is the limited velocity fed to the
+integrator (when the leash bites, part of it is discarded).
+**Stiff by contract** — this mode does not yield to contact and makes
 no attempt to; a compliant velocity law is a different promise and belongs in a
 different mode. Two target shapes: `set_velocity_target` is native
 (pass-through, then uniformly-scaled-then-clamped to `max_qd`);
@@ -255,8 +262,8 @@ clamp, applied unconditionally. Since `w_threshold` sits at a tenth of the
 nominal `w`, `limit()` is in practice the primary bound across the whole
 near-singular band — reach for `dls_damping_max` when the solve is
 ill-conditioned, not when the tool is merely sluggish. Staleness
-commands **zero** velocity and **latches**, exactly like `JointImpedanceMode`'s
-freeze. See the [Deep Dive](../deep-dive/velocity-mode.md) for the full
+commands **zero** velocity, freezes the reference at the measured position, and
+**latches**, exactly like `JointImpedanceMode`'s freeze. See the [Deep Dive](../deep-dive/velocity-mode.md) for the full
 derivation and the [guide](../guide/streaming.md#jointvelocitymode-specifics).
 
 ---

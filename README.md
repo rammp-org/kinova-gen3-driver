@@ -19,7 +19,7 @@ interface:
 | `CartesianImpedanceMode` | Task-space impedance with null-space posture control. |
 | `JointImpedanceMode` | Joint-space impedance with in-loop differential IK. |
 | `JointPositionMode` | Joint-space position, with an EE-pose entry point. |
-| `JointVelocityMode` | Joint velocity passthrough, and EE twist via a damped-least-squares solve. |
+| `JointVelocityMode` | Joint velocity passthrough, and EE twist via a damped-least-squares solve; integrated into a held position reference. |
 
 Plus a `GripperController` for the 2F-85, and an **interface tier** —
 `Supervisor`, `Arbiter`, `StreamingSession` — that gives front-ends ports for
