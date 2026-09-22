@@ -6,14 +6,24 @@
 #include "kinova_lowlevel/units.h"
 namespace kinova {
 
+namespace {
+// How far the reference may lead the MEASURED position, rad. This is the windup
+// guard for a blocked joint -- contact, a limit, an arm that cannot keep up:
+// without it the reference marches on while q stays put and the arm snaps across
+// the whole gap the instant it frees. Deliberately tighter than
+// JointPositionMode's 0.35 rad default: a velocity stream has no destination to
+// justify a long lead, and under contact this number IS the bound on how hard the
+// position servo pushes.
+constexpr double kMaxLead = 0.1;
+}  // namespace
+
 JointVelocityMode::JointVelocityMode(Dynamics& dyn, JointVelocityParams p) : dyn_(dyn) {
   // Cache the URDF limits once. set_params runs on a non-RT thread and must never
   // touch Dynamics -- it is not thread-safe against the RT loop.
-  JointVec lo, hi;
-  dyn.joint_limits(lo, hi);
+  dyn.joint_limits(q_lower_urdf_, q_upper_urdf_);
   dyn.velocity_limits(v_max_urdf_);
   for (int i = 0; i < kNumJoints; ++i)
-    continuous_[i] = !std::isfinite(lo[i]) && !std::isfinite(hi[i]);
+    continuous_[i] = !std::isfinite(q_lower_urdf_[i]) && !std::isfinite(q_upper_urdf_[i]);
   seed_limits(p);
   params_[0] = p;
   params_[1] = p;
@@ -36,7 +46,7 @@ void JointVelocityMode::seed_limits(JointVelocityParams& p) const noexcept {
 
 ActuatorModes JointVelocityMode::required_modes() const {
   ActuatorModes modes;
-  modes.fill(ActuatorMode::kVelocity);
+  modes.fill(ActuatorMode::kPosition);
   return modes;
 }
 
@@ -71,13 +81,14 @@ void JointVelocityMode::set_command_timeout(double s) noexcept {
   wd_.arm(s >= 0.0 ? s : params().cmd_timeout_s);
 }
 
-void JointVelocityMode::on_enter(const JointFeedback&) {
+void JointVelocityMode::on_enter(const JointFeedback& fb) {
   // Drop any target from a previous session: re-entering must not resume a motion
   // someone asked for minutes ago.
   source_.store(Source::kNone, std::memory_order_release);
   qd_target_.setZero();
   twist_target_.setZero();
   qd_cmd_.setZero();
+  q_ref_ = fb.q;  // hold where we are until a target arrives
   frozen_ = false;
   w_last_ = 0.0;
   wd_.reset();
@@ -100,11 +111,10 @@ void JointVelocityMode::limit(const JointVelocityParams& p, JointVec& qd) noexce
 
 void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
   const JointVelocityParams p = params();  // own a snapshot for the whole cycle
-  out.mode = ActuatorMode::kVelocity;
 
-  // Staleness: the stream stopped, so stop moving. Zero is the only safe command
-  // for a stiff velocity mode -- holding the last velocity would keep the arm
-  // travelling toward nothing. LATCHED, so disarming cannot un-freeze it.
+  // Staleness: the stream stopped, so stop moving. Zero velocity is the only safe
+  // command for a stiff velocity mode -- holding the last velocity would keep the
+  // arm travelling toward nothing. LATCHED, so disarming cannot un-freeze it.
   const bool stale = wd_.tick(dt_s);
   if (stale)
     frozen_ = true;
@@ -114,37 +124,51 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointComma
   const Source src = source_.load(std::memory_order_acquire);
   if (frozen_ || src == Source::kNone) {
     qd_cmd_.setZero();
-    out.velocity = qd_cmd_;
-    // RtExecutor reuses one JointCommand across mode changes, so a position or
-    // torque left by a previous mode would still be sitting in these fields --
-    // don't leave a previous mode's setpoint lying around. ECHO the measured
-    // position, exactly as every other mode does (joint_torque_mode.cpp,
-    // joint_impedance_mode.cpp, cartesian_impedance_mode.cpp,
-    // joint_position_mode.cpp), rather than writing zero: zero is not "unset", it
-    // is "all joints at 0 rad", a meaningful and wrong command that is harmless
-    // only because KortexTransport happens to overwrite the field.
-    out.position = fb.q;
-    out.torque.setZero();
-    return;
-  }
-
-  // Adopt the payload exactly when the counter moves, never merely because the
-  // stream is not yet stale -- otherwise a target published before on_enter would
-  // be picked up after it.
-  if (src == Source::kJoint) {
-    if (wd_.fresh()) qd_target_ = ext_qd_[qd_active_.load(std::memory_order_acquire)];
-    qd_cmd_ = qd_target_;
+    // Frozen: freeze where the arm actually IS, not at the reference. A dead
+    // client must not leave a leash's worth of travel still to finish. Before any
+    // target the reference is the entry pose already (on_enter), so it is held.
+    if (frozen_) q_ref_ = fb.q;
   } else {
-    if (wd_.fresh()) twist_target_ = ext_twist_[tw_active_.load(std::memory_order_acquire)];
-    solve_twist(fb.q, twist_target_, p, qd_cmd_);
+    // Adopt the payload exactly when the counter moves, never merely because the
+    // stream is not yet stale -- otherwise a target published before on_enter
+    // would be picked up after it.
+    if (src == Source::kJoint) {
+      if (wd_.fresh()) qd_target_ = ext_qd_[qd_active_.load(std::memory_order_acquire)];
+      qd_cmd_ = qd_target_;
+    } else {
+      if (wd_.fresh()) twist_target_ = ext_twist_[tw_active_.load(std::memory_order_acquire)];
+      solve_twist(fb.q, twist_target_, p, qd_cmd_);
+    }
+    limit(p, qd_cmd_);
   }
 
-  limit(p, qd_cmd_);
-  out.velocity = qd_cmd_;
-  // Same as the frozen path above: echo the measured position rather than zeroing
-  // it, so a previous mode's setpoint cannot survive here and the field still
-  // carries the value every other mode puts there.
-  out.position = fb.q;
+  // Integrate the (limited) velocity into the position reference, then the same
+  // tail JointPositionMode runs: leash to the measurement, keep continuous joints
+  // in the transport's (-pi, pi] representation, never command past a limit.
+  for (int i = 0; i < kNumJoints; ++i) {
+    q_ref_[i] += qd_cmd_[i] * dt_s;
+
+    // Leash the reference to the MEASURED position. A no-op whenever the arm is
+    // tracking; it only bites when the arm cannot follow. Continuous joints take
+    // the short way, or a reference just across the wrap reads as a 2*pi lead.
+    double lead = q_ref_[i] - fb.q[i];
+    if (continuous_[i]) lead = wrap_to_pi(lead);
+    q_ref_[i] = fb.q[i] + std::clamp(lead, -kMaxLead, kMaxLead);
+
+    if (continuous_[i])
+      q_ref_[i] = wrap_to_pi(q_ref_[i]);
+    else
+      q_ref_[i] = std::clamp(q_ref_[i], q_lower_urdf_[i], q_upper_urdf_[i]);
+  }
+
+  out.mode = ActuatorMode::kPosition;
+  out.position = q_ref_;
+  // RtExecutor reuses one JointCommand across mode changes, so a torque or
+  // velocity left by a previous mode would still be sitting in these fields.
+  // The transport ignores them in kPosition today; that is not a reason to leave
+  // stale setpoints where something later could act on them. The velocity this
+  // mode integrates is readable through commanded().
+  out.velocity.setZero();
   out.torque.setZero();
 }
 

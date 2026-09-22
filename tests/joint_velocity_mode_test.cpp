@@ -2,7 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdio>
+
+#include "kinova_lowlevel/units.h"
 
 using namespace kinova;
 
@@ -14,32 +17,118 @@ JointFeedback fb_at(const JointVec& q) {
 }
 }  // namespace
 
-TEST(JointVelocityMode, RequiresVelocityOnEveryActuator) {
+TEST(JointVelocityMode, RequiresPositionOnEveryActuator) {
+  // The actuator's own VELOCITY servo does not reject gravity at a zero command
+  // (#34: joint 2 creeps). So this mode integrates its velocity into a position
+  // reference and lets the POSITION servo hold it.
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
-  for (auto mode : m.required_modes()) EXPECT_EQ(mode, ActuatorMode::kVelocity);
+  for (auto mode : m.required_modes()) EXPECT_EQ(mode, ActuatorMode::kPosition);
 }
 
-TEST(JointVelocityMode, CommandsZeroBeforeAnyTarget) {
+TEST(JointVelocityMode, HoldsTheEntryPoseBeforeAnyTarget) {
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
-  m.on_enter(fb_at(JointVec::Zero()));
+  const JointVec q = JointVec::Constant(0.3);
+  m.on_enter(fb_at(q));
   JointCommand out;
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_EQ(out.mode, ActuatorMode::kVelocity);
+  m.compute(fb_at(q), 0.001, out);
+  EXPECT_EQ(out.mode, ActuatorMode::kPosition);
+  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
   EXPECT_TRUE(out.velocity.isZero());
 }
 
-TEST(JointVelocityMode, TracksJointVelocityTargetExactly) {
+TEST(JointVelocityMode, IntegratesTheJointVelocityTargetIntoThePositionCommand) {
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
-  m.on_enter(fb_at(JointVec::Zero()));
-  JointVec qd = JointVec::Constant(0.2);
+  JointFeedback fb = fb_at(JointVec::Zero());
+  m.on_enter(fb);
+  const JointVec qd = JointVec::Constant(0.2);
   m.set_velocity_target(qd);
   JointCommand out;
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  // Stiff mode: what was asked for is what is commanded, no shaping.
-  EXPECT_TRUE(out.velocity.isApprox(qd, 1e-12));
+  for (int i = 0; i < 100; ++i) {
+    m.compute(fb, 0.001, out);
+    fb.q = out.position;  // an arm that tracks perfectly
+  }
+  // Stiff mode: what was asked for is what is integrated, no shaping.
+  EXPECT_TRUE(m.commanded().isApprox(qd, 1e-12));
+  EXPECT_TRUE(out.position.isApprox(JointVec::Constant(0.02), 1e-9));
+}
+
+TEST(JointVelocityMode, AZeroCommandHoldsThePositionExactly) {
+  // The bug in #34: a zero velocity command let joint 2 sink under gravity. A
+  // held POSITION reference is what makes zero mean "stay put".
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode m(dyn);
+  const JointVec q = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  m.on_enter(fb_at(q));
+  m.set_velocity_target(JointVec::Zero());
+  JointCommand out;
+  for (int i = 0; i < 5000; ++i) m.compute(fb_at(q), 0.001, out);
+  EXPECT_EQ(out.mode, ActuatorMode::kPosition);
+  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
+}
+
+TEST(JointVelocityMode, LeashesTheReferenceToTheMeasuredPositionWhenBlocked) {
+  // Contact, or a joint that cannot follow: the reference must not wind up ahead
+  // of the arm, or the arm snaps across the gap the instant it frees.
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode m(dyn);
+  const JointVec q = JointVec::Zero();  // the arm never moves
+  m.on_enter(fb_at(q));
+  m.set_velocity_target(JointVec::Constant(1.0));
+  JointCommand out;
+  for (int i = 0; i < 1000; ++i) m.compute(fb_at(q), 0.001, out);
+  // 1 rad was asked for; the leash (0.1 rad, joint_velocity_mode.cpp) is what
+  // reaches the actuator.
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(out.position[i] - q[i], 0.1, 1e-9);
+}
+
+TEST(JointVelocityMode, StopsIntegratingAtAJointLimit) {
+  Dynamics dyn(URDF_PATH);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
+  const int j = 1;  // a bounded joint: the shoulder
+  ASSERT_TRUE(std::isfinite(hi[j]));
+  JointVelocityMode m(dyn);
+  JointFeedback fb = fb_at(JointVec::Zero());
+  fb.q[j] = hi[j] - 0.01;
+  m.on_enter(fb);
+  JointVec qd = JointVec::Zero();
+  qd[j] = 0.5;
+  m.set_velocity_target(qd);
+  JointCommand out;
+  for (int i = 0; i < 200; ++i) {  // 0.1 rad asked for, 0.01 available
+    m.compute(fb, 0.001, out);
+    fb.q = out.position;
+  }
+  EXPECT_DOUBLE_EQ(out.position[j], hi[j]);
+}
+
+TEST(JointVelocityMode, IntegratesAContinuousJointAcrossTheWrap) {
+  // Feedback arrives wrapped to (-pi, pi]. The reference must cross +pi cleanly,
+  // stay in that representation, and never read the far side as a 2*pi lead.
+  Dynamics dyn(URDF_PATH);
+  JointVec lo, hi;
+  dyn.joint_limits(lo, hi);
+  const int j = 0;  // continuous
+  ASSERT_FALSE(std::isfinite(hi[j]));
+  JointVelocityMode m(dyn);
+  JointFeedback fb = fb_at(JointVec::Zero());
+  const double q0 = M_PI - 0.005;
+  fb.q[j] = q0;
+  m.on_enter(fb);
+  JointVec qd = JointVec::Zero();
+  qd[j] = 1.0;
+  m.set_velocity_target(qd);
+  JointCommand out;
+  for (int i = 0; i < 10; ++i) {  // 0.010 rad of travel, through +pi
+    m.compute(fb, 0.001, out);
+    fb.q = out.position;
+  }
+  EXPECT_GT(out.position[j], -M_PI);
+  EXPECT_LE(out.position[j], M_PI);
+  EXPECT_NEAR(wrap_to_pi(out.position[j] - q0), 0.010, 1e-9);
 }
 
 TEST(JointVelocityMode, SeedsMaxQdFromUrdfWhenLeftNonFinite) {
@@ -58,7 +147,8 @@ TEST(JointVelocityMode, ClampsARequestAboveTheUrdfLimitDownToIt) {
   JointVelocityParams p;
   p.max_qd = JointVec::Constant(1e3);  // absurd request
   JointVelocityMode m(dyn, p);
-  for (int i = 0; i < kNumJoints; ++i) EXPECT_DOUBLE_EQ(m.params().max_qd[i], v_max[i]);
+  const JointVelocityParams active = m.params();
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_DOUBLE_EQ(active.max_qd[i], v_max[i]);
 }
 
 TEST(JointVelocityMode, ScalesUniformlySoDirectionSurvivesSaturation) {
@@ -68,17 +158,18 @@ TEST(JointVelocityMode, ScalesUniformlySoDirectionSurvivesSaturation) {
   JointVelocityMode m(dyn, p);
   m.on_enter(fb_at(JointVec::Zero()));
   JointVec qd = JointVec::Zero();
-  qd[0] = 1.0;
-  qd[1] = 0.5;  // 2:1 ratio, both over the cap
+  qd[0] = 0.2;  // 2x over the cap
+  qd[1] = 0.1;  // exactly at the cap
   m.set_velocity_target(qd);
   JointCommand out;
   m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_NEAR(out.velocity[0], 0.1, 1e-12);
-  EXPECT_NEAR(out.velocity[1], 0.05, 1e-12);  // ratio preserved, not clamped to 0.1
-  EXPECT_LE(out.velocity.cwiseAbs().maxCoeff(), 0.1 + 1e-12);
+  const JointVec cmd = m.commanded();
+  EXPECT_NEAR(cmd[0], 0.1, 1e-12);
+  EXPECT_NEAR(cmd[1], 0.05, 1e-12);  // ratio preserved, not clamped to 0.1
+  EXPECT_LE(cmd.cwiseAbs().maxCoeff(), 0.1 + 1e-12);
 }
 
-TEST(JointVelocityMode, CommandsZeroWhenTheStreamGoesStale) {
+TEST(JointVelocityMode, FreezesAtTheMeasuredPositionWhenTheStreamGoesStale) {
   Dynamics dyn(URDF_PATH);
   JointVelocityParams p;
   p.cmd_timeout_s = 0.1;
@@ -87,9 +178,13 @@ TEST(JointVelocityMode, CommandsZeroWhenTheStreamGoesStale) {
   m.set_velocity_target(JointVec::Constant(0.2));
   JointCommand out;
   m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  ASSERT_FALSE(out.velocity.isZero());
-  for (int i = 0; i < 150; ++i) m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_TRUE(out.velocity.isZero());  // stale -> zero, per decision 6
+  ASSERT_FALSE(out.position.isZero());  // integrating
+  // The arm is somewhere behind the reference when the stream dies. Freeze THERE,
+  // not at the reference, so a dead client leaves no travel still to finish.
+  const JointVec q_meas = JointVec::Constant(0.0001);
+  for (int i = 0; i < 150; ++i) m.compute(fb_at(q_meas), 0.001, out);
+  EXPECT_TRUE(out.position.isApprox(q_meas, 1e-12));  // stale -> hold measured, per decision 6
+  EXPECT_TRUE(m.commanded().isZero());
 }
 
 TEST(JointVelocityMode, DisarmingTheWatchdogDoesNotResurrectAStaleTarget) {
@@ -100,11 +195,13 @@ TEST(JointVelocityMode, DisarmingTheWatchdogDoesNotResurrectAStaleTarget) {
   m.on_enter(fb_at(JointVec::Zero()));
   m.set_velocity_target(JointVec::Constant(0.2));
   JointCommand out;
-  for (int i = 0; i < 150; ++i) m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  ASSERT_TRUE(out.velocity.isZero());
+  const JointVec q_meas = JointVec::Constant(0.0001);
+  for (int i = 0; i < 150; ++i) m.compute(fb_at(q_meas), 0.001, out);
+  ASSERT_TRUE(m.commanded().isZero());
   m.set_command_timeout(0.0);  // disarm
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_TRUE(out.velocity.isZero());  // the freeze is LATCHED
+  m.compute(fb_at(q_meas), 0.001, out);
+  EXPECT_TRUE(m.commanded().isZero());  // the freeze is LATCHED
+  EXPECT_TRUE(out.position.isApprox(q_meas, 1e-12));
 }
 
 TEST(JointVelocityMode, AFreshTargetReleasesTheFreeze) {
@@ -116,51 +213,54 @@ TEST(JointVelocityMode, AFreshTargetReleasesTheFreeze) {
   m.set_velocity_target(JointVec::Constant(0.2));
   JointCommand out;
   for (int i = 0; i < 150; ++i) m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  ASSERT_TRUE(out.velocity.isZero());
+  ASSERT_TRUE(m.commanded().isZero());
   m.set_velocity_target(JointVec::Constant(0.15));
   m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_NEAR(out.velocity[0], 0.15, 1e-12);
+  EXPECT_NEAR(m.commanded()[0], 0.15, 1e-12);
+  EXPECT_NEAR(out.position[0], 0.15 * 0.001, 1e-12);  // and it integrates again
 }
 
 TEST(JointVelocityMode, OnEnterDropsATargetSentBeforeEntry) {
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
   m.set_velocity_target(JointVec::Constant(0.3));  // sent BEFORE entry
-  m.on_enter(fb_at(JointVec::Zero()));
+  const JointVec q = JointVec::Constant(0.3);
+  m.on_enter(fb_at(q));
   JointCommand out;
-  m.compute(fb_at(JointVec::Zero()), 0.001, out);
-  EXPECT_TRUE(out.velocity.isZero());
+  m.compute(fb_at(q), 0.001, out);
+  EXPECT_TRUE(m.commanded().isZero());
+  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
 }
 
-TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheFrozenPath) {
+TEST(JointVelocityMode, ClearsStaleVelocityAndTorqueOnTheHoldPath) {
   // RtExecutor reuses one JointCommand across mode switches. A prior mode may
-  // have left non-zero position/torque in it; this mode owns velocity and must
-  // not let those fields survive, even on the early-return no-target path. The
-  // position field ECHOES the measurement, as every other mode does -- zero there
-  // is not "unset", it is "all joints at 0 rad".
+  // have left non-zero velocity/torque in it; this mode owns position and must
+  // not let those fields survive, even on the no-target path.
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
   const JointVec q = JointVec::Constant(0.3);
   m.on_enter(fb_at(q));
   JointCommand out;
-  out.position = JointVec::Constant(1.0);
+  out.velocity = JointVec::Constant(1.0);
   out.torque = JointVec::Constant(1.0);
-  m.compute(fb_at(q), 0.001, out);  // no target -> frozen/no-target path
+  m.compute(fb_at(q), 0.001, out);  // no target -> hold path
   EXPECT_TRUE(out.position.isApprox(q, 1e-12));
+  EXPECT_TRUE(out.velocity.isZero());
   EXPECT_TRUE(out.torque.isZero());
 }
 
-TEST(JointVelocityMode, ClearsStalePositionAndTorqueOnTheTrackingPath) {
+TEST(JointVelocityMode, ClearsStaleVelocityAndTorqueOnTheTrackingPath) {
   Dynamics dyn(URDF_PATH);
   JointVelocityMode m(dyn);
   const JointVec q = JointVec::Constant(0.3);
   m.on_enter(fb_at(q));
   m.set_velocity_target(JointVec::Constant(0.2));
   JointCommand out;
-  out.position = JointVec::Constant(1.0);
+  out.velocity = JointVec::Constant(1.0);
   out.torque = JointVec::Constant(1.0);
   m.compute(fb_at(q), 0.001, out);
-  EXPECT_TRUE(out.position.isApprox(q, 1e-12));
+  EXPECT_TRUE(out.position.isApprox(JointVec::Constant(0.3 + 0.2 * 0.001), 1e-12));
+  EXPECT_TRUE(out.velocity.isZero());
   EXPECT_TRUE(out.torque.isZero());
 }
 
@@ -188,7 +288,7 @@ TEST(JointVelocityModeTwist, ReproducesTheCommandedTwistAwayFromSingularities) {
 
   Jacobian6 J;
   dyn.jacobian(q, J);
-  const Vector6 achieved = J * out.velocity;
+  const Vector6 achieved = J * m.commanded();
   // Light damping means near-exact reproduction, not exact.
   EXPECT_NEAR((achieved - V).norm(), 0.0, 1e-3);
 }
@@ -207,10 +307,10 @@ TEST(JointVelocityModeTwist, StaysBoundedAtAStraightArmSingularity) {
   JointCommand out;
   m.compute(fb_at(q), 0.001, out);
 
-  EXPECT_TRUE(out.velocity.allFinite());
+  EXPECT_TRUE(m.commanded().allFinite());
   JointVec v_max;
   dyn.velocity_limits(v_max);
-  for (int i = 0; i < kNumJoints; ++i) EXPECT_LE(std::abs(out.velocity[i]), v_max[i] + 1e-12);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_LE(std::abs(m.commanded()[i]), v_max[i] + 1e-12);
 }
 
 TEST(JointVelocityModeTwist, ManipulabilityIsLowerAtTheSingularity) {
@@ -245,7 +345,7 @@ TEST(JointVelocityModeTwist, AZeroTwistCommandsZero) {
   m.set_twist_target(Vector6::Zero());
   JointCommand out;
   m.compute(fb_at(nominal_q()), 0.001, out);
-  EXPECT_NEAR(out.velocity.norm(), 0.0, 1e-9);
+  EXPECT_NEAR(m.commanded().norm(), 0.0, 1e-9);
 }
 
 TEST(JointVelocityModePosture, DrivesTheRedundantDofTowardQRestUnderAZeroTwist) {
@@ -263,8 +363,8 @@ TEST(JointVelocityModePosture, DrivesTheRedundantDofTowardQRestUnderAZeroTwist) 
   JointCommand out;
   m.compute(fb_at(q), 0.001, out);
   // The posture term must push joint 2 back DOWN toward q_rest.
-  EXPECT_LT(out.velocity[2], 0.0);
-  EXPECT_GT(out.velocity.norm(), 1e-6);  // it is not simply doing nothing
+  EXPECT_LT(m.commanded()[2], 0.0);
+  EXPECT_GT(m.commanded().norm(), 1e-6);  // it is not simply doing nothing
 }
 
 TEST(JointVelocityModePosture, DoesNotDisturbTheCommandedTwist) {
@@ -285,7 +385,7 @@ TEST(JointVelocityModePosture, DoesNotDisturbTheCommandedTwist) {
 
   Jacobian6 J;
   dyn.jacobian(q, J);
-  const Vector6 achieved = J * out.velocity;
+  const Vector6 achieved = J * m.commanded();
   // The whole point of a NULL-space term: posture correction lives where it
   // cannot show up in the task velocity.
   EXPECT_NEAR((achieved - V).norm(), 0.0, 1e-3);
@@ -307,7 +407,7 @@ TEST(JointVelocityModePosture, ConvergesTowardQRestOverRepeatedCycles) {
   for (int i = 0; i < 500; ++i) {  // integrate the commanded velocity forward
     m.set_twist_target(Vector6::Zero());
     m.compute(fb_at(q), 0.001, out);
-    q += out.velocity * 0.001;
+    q += m.commanded() * 0.001;
   }
   EXPECT_LT(std::abs(q[2] - p.q_rest[2]), err0);
 }
@@ -334,8 +434,8 @@ TEST(JointVelocityModePosture, TakesTheShortWayOnAContinuousJointAcrossTheWrap) 
   JointCommand out;
   m.compute(fb_at(q), 0.001, out);
   // Short way is -0.30 rad; the long way is +5.98 and saturates the limiter.
-  EXPECT_LT(out.velocity[2], 0.0);
-  EXPECT_LT(std::abs(out.velocity[2]), 1.0);
+  EXPECT_LT(m.commanded()[2], 0.0);
+  EXPECT_LT(std::abs(m.commanded()[2]), 1.0);
 }
 
 // A NEAR-singular configuration: the shoulder is 0.10 rad off straight, which puts
@@ -376,12 +476,12 @@ TEST(JointVelocityModeTwist, DampingNotTheLimiterIsWhatBoundsTheSolveNearASingul
   Jacobian6 J;
   dyn.jacobian(q, J);
   // Damping deliberately gives up tracking rather than producing an enormous qd.
-  EXPECT_GT((J * out.velocity - V).norm(), 0.05);
+  EXPECT_GT((J * m.commanded() - V).norm(), 0.05);
   // And the result is small on its own account -- nowhere near the cap the limiter
   // would have applied (measured: max|qd| 0.31 rad/s against a 1.22 rad/s cap).
   JointVec v_max;
   dyn.velocity_limits(v_max);
-  EXPECT_LT(out.velocity.cwiseAbs().maxCoeff(), 0.5 * v_max.minCoeff());
+  EXPECT_LT(m.commanded().cwiseAbs().maxCoeff(), 0.5 * v_max.minCoeff());
 }
 
 // Pins the schedule directly, and records the measurement behind the docs' claim
@@ -404,7 +504,7 @@ TEST(JointVelocityModeTwist, TheDampingRampIsWhatSeparatesTheseTwoSolves) {
     m.set_twist_target(V);
     JointCommand out;
     m.compute(fb_at(q), 0.001, out);
-    return out.velocity;
+    return m.commanded();
   };
 
   JointVelocityParams def;

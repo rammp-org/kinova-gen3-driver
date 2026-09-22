@@ -61,8 +61,15 @@ struct JointVelocityParams {
   double cmd_timeout_s = 0.0;
 };
 
-// Joint-space velocity control. Commands every actuator in kVelocity and lets the
-// actuator's own servo close the loop.
+// Joint-space velocity control. The commanded velocity is integrated into a
+// position reference at the RT rate and every actuator runs in kPosition: the
+// actuator's own POSITION servo holds the reference.
+//
+// Why not kVelocity: the actuator's velocity servo does not reject gravity at a
+// zero command -- joint 2 creeps under its own load (#34; Kinova's own low-level
+// example integrates position for the loaded joints for the same reason). A
+// zero velocity command here therefore HOLDS. The reference is leashed to the
+// measured position so a blocked joint cannot wind it up; see compute().
 //
 // STIFF BY CONTRACT. This mode does not yield to contact and makes no attempt to.
 // A compliant velocity law is a DIFFERENT promise and belongs in a different mode
@@ -74,7 +81,8 @@ struct JointVelocityParams {
 //   set_twist_target(V)      - EE twist [linear; angular] in the base frame,
 //                              mapped by damped least squares + null-space posture
 //
-// Staleness commands ZERO velocity and LATCHES until a fresh target arrives.
+// Staleness zeroes the velocity, freezes the reference at the MEASURED position,
+// and LATCHES until a fresh target arrives.
 //
 // Live setters publish via a single-writer (non-RT) double-buffer; compute()
 // (RT thread) reads one snapshot per cycle.
@@ -115,8 +123,10 @@ class JointVelocityMode : public ControlMode {
   static void limit(const JointVelocityParams& p, JointVec& qd) noexcept;
 
   Dynamics& dyn_;
-  JointVec v_max_urdf_ = JointVec::Zero();  // cached in ctor: set_params must not
-                                            // touch Dynamics off the RT thread
+  JointVec q_lower_urdf_ = JointVec::Zero();  // cached in ctor: set_params must not
+  JointVec q_upper_urdf_ = JointVec::Zero();  // touch Dynamics off the RT thread
+  JointVec v_max_urdf_ = JointVec::Zero();
+  // touch Dynamics off the RT thread
   std::array<bool, kNumJoints> continuous_{};
 
   JointVelocityParams params_[2];
@@ -138,6 +148,7 @@ class JointVelocityMode : public ControlMode {
   JointVec qd_target_ = JointVec::Zero();
   Vector6 twist_target_ = Vector6::Zero();
   JointVec qd_cmd_ = JointVec::Zero();
+  JointVec q_ref_ = JointVec::Zero();  // integrated reference configuration
   Jacobian6 J_ = Jacobian6::Zero();
   Eigen::Matrix<double, 6, 6> A_ = Eigen::Matrix<double, 6, 6>::Zero();
   Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt_;
