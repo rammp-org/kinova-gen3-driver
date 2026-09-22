@@ -12,6 +12,12 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-09-22
+
+A patch release: `JointVelocityMode` holds at a zero command. No signature or
+field under `include/` changes, and `kinova-gen3-ros2` needed no adoption
+commit.
+
 ### Added
 
 - `velocity_hold_check`, a temporary attended harness for the three hardware
@@ -156,7 +162,8 @@ full list, and none of these are API:
 - A KORTEX-enabled `install()` bakes the build machine's SDK path into the
   exported target, so it is not relocatable ([#50]).
 
-[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rammp-org/kinova-gen3-driver/releases/tag/v1.0.0
 [#5]: https://github.com/rammp-org/kinova-gen3-driver/issues/5
