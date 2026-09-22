@@ -67,18 +67,21 @@ is the single source of truth for exactly which combinations those are.
 Streaming into velocity mode inherits two things worth knowing before you rely
 on it:
 
-- **It is stiff and does not yield to contact.** `JointVelocityMode` commands
-  every actuator in `kVelocity` and lets the actuator's own servo close the
-  loop — there is no compliance term, and none is planned for this mode. Push
-  on the arm while it tracks a stream and it will not spring back or soften; it
-  keeps commanding the velocity you asked for. Want compliance, stream into an
-  impedance mode instead.
+- **It is stiff and does not yield to contact.** `JointVelocityMode`
+  integrates the commanded velocity into a position reference and commands
+  every actuator in `kPosition` — there is no compliance term, and none is
+  planned for this mode. Push on the arm while it tracks a stream and it will
+  not spring back or soften; it keeps integrating the velocity you asked for,
+  up to a 0.1 rad leash on how far the reference may lead the measured
+  position. Want compliance, stream into an impedance mode instead. A zero
+  velocity **holds**: the reference stops and the position servo keeps it.
 - **A stale stream commands zero, not the last-known velocity.** Holding the
   last velocity while the stream is silent would keep the arm travelling
   toward nothing. So staleness (per the deadline mechanics
   [above](#the-deadline-one-value-two-enforcement-levels)) zeros the commanded
-  velocity and **latches** — exactly like `JointImpedanceMode`'s freeze,
-  disarming the watchdog cannot resurrect a target nobody is maintaining.
+  velocity, freezes the reference at the measured position, and **latches** —
+  exactly like `JointImpedanceMode`'s freeze, disarming the watchdog cannot
+  resurrect a target nobody is maintaining.
 
 ### The first twist setpoint can swing the elbow
 
@@ -153,7 +156,7 @@ watch it, at two different rates, and each owns a different job:
   | `JointTorqueMode` | ramps `tau_ff` to zero over `cmd_decay_s`, reverting to gravity-compensation hold |
   | `JointPositionMode` | freezes the reference at measured q |
   | `JointImpedanceMode` | freezes the reference at measured q, **latched** until a fresh command arrives (disarming the watchdog cannot resurrect a target nobody is maintaining) |
-  | `JointVelocityMode` | commands **zero** velocity, **latched** — holding the last velocity would keep the arm travelling toward nothing |
+  | `JointVelocityMode` | commands **zero** velocity and freezes the reference at measured q, **latched** — holding the last velocity would keep the arm travelling toward nothing |
 
   So the arm is never left chasing a stale target for longer than one control
   cycle, even though the session that requested the stream may not tear down

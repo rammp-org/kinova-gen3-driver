@@ -18,6 +18,19 @@ that heading to the new version and bumps `package.xml`.
   explicit target arrives. Previously, entry-pose IK could move the redundant
   posture before the supervisor submitted its first command. Explicit Cartesian
   targets still run IK; joint targets, gains and limits are unchanged.
+- `JointVelocityMode` **holds at a zero command.** The actuator's own velocity
+  servo does not reject gravity at zero — joint 2 crept ~0.038 rad/s with zeros
+  streamed, and Kinova's own low-level example never holds a loaded joint in
+  VELOCITY mode ([#34]). The mode now integrates the limited velocity into a
+  position reference at the RT rate and requires `kPosition` on every actuator.
+  The reference is leashed to within 0.1 rad of the measured position (the
+  windup guard for contact or a blocked joint), bounded joints stop at their
+  URDF limits, and a stale stream freezes the reference at the measured
+  position before latching. The public API is unchanged; two observable
+  differences: `required_modes()` reports `kPosition`, and `JointCommand::
+  velocity` is zero as in every position-commanding mode (`commanded()` still
+  reads the integrated velocity). Verified in sim; the hardware hold check is
+  the release gate.
 
 ## [1.1.0] — 2026-09-14
 

@@ -38,7 +38,7 @@ feature list. This table is the honest version.
 | `CartesianImpedanceMode` | Yes, via teleop | Yes — `benchmark_cartesian_impedance` | Gains tuned by feel, not characterised |
 | `JointImpedanceMode` | Yes, via teleop | **No** — no benchmark harness exists | Compute budget and closed-loop behaviour both unvalidated ([#6](https://github.com/rammp-org/kinova-gen3-driver/issues/6)) |
 | `JointPositionMode` | Yes, [procedure](integration/joint_position_hardware_check.md) | Not separately benchmarked | — |
-| `JointVelocityMode` | Yes, [probe](integration/velocity_mode_probe.md) | Yes — `benchmark_joint_velocity` | **A zero command does not hold**: joint 2 creeps ~0.038 rad/s under gravity. The actuator's own servo, not this driver ([#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)). Do not park an arm here and stream zeros |
+| `JointVelocityMode` | Yes, [probe](integration/velocity_mode_probe.md) | Yes — `benchmark_joint_velocity` | Before 1.1.1 a zero command did not hold: joint 2 crept ~0.038 rad/s under gravity in the actuator's own velocity servo ([#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)). Since 1.1.1 the mode integrates into a held position reference; the hold has been verified in sim, **not yet on the arm** |
 | `GripperController` | Yes — measured on the arm | In-loop RT-safety case only | Commanded/measured force maxima are independently guessed |
 | Interface tier | Yes — [stream check](integration/stream_check.md), and `ExecuteJointTrajectory` end to end | RT-safety cases in loop | Goals complete on elapsed time, not arrival ([#17](https://github.com/rammp-org/kinova-gen3-driver/issues/17)); `joint_names` ignored ([#16](https://github.com/rammp-org/kinova-gen3-driver/issues/16)) |
 

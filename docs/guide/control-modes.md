@@ -251,9 +251,18 @@ Hardware validation procedure:
 
 ## Joint Velocity — `JointVelocityMode`
 
-Commands every actuator in `kVelocity` and lets the actuator's own servo close
-the loop. This is the mode for jogging: a policy, a jog panel, or a spacemouse
-that wants to say "move *this way, this fast*" rather than "be *here*".
+Integrates the commanded velocity into a position reference at the RT rate and
+commands every actuator in `kPosition`, so the actuator's own position servo
+holds the reference. This is the mode for jogging: a policy, a jog panel, or a
+spacemouse that wants to say "move *this way, this fast*" rather than "be
+*here*".
+
+**Why not the actuator's velocity servo.** It does not reject gravity at a zero
+command: joint 2 crept at ~0.038 rad/s with `qd = 0` streamed
+([#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)), and
+Kinova's own low-level example holds its loaded joints in position mode for
+the same reason. Integrating into a held position reference is what makes a
+zero command mean *stay put*.
 
 **Stiff by contract.** It does not yield to contact and makes no attempt to. A
 compliant velocity law is a different promise and belongs in a different mode —
@@ -281,9 +290,21 @@ well-conditioned near a singularity, but `limit()` is what bounds the number
 that reaches the actuator. Near a singularity what you observe is the tool
 **slowing down**, not veering.
 
-**A stale stream commands zero, and latches.** Holding the last velocity while
-the stream is silent would keep the arm travelling toward nothing. Disarming the
-watchdog cannot un-freeze it; only a fresh target can.
+**What bounds the reference.** The integrated reference is leashed to within
+**0.1 rad** of the measured position on every joint (a constant in
+`joint_velocity_mode.cpp`, deliberately tighter than the position mode's
+0.35 rad default). A joint that cannot follow — contact, a limit, an arm that
+cannot keep up — stops winding the reference up at that lead, so it never snaps
+across an accumulated gap when it frees, and under contact the leash is the
+bound on how hard the position servo pushes. Bounded joints are clamped to
+their URDF position limits; continuous joints stay in the transport's
+`(-π, π]` representation.
+
+**A stale stream commands zero, freezes at the measured position, and
+latches.** Holding the last velocity while the stream is silent would keep the
+arm travelling toward nothing, and freezing at the *reference* would leave up
+to a leash's worth of travel still to finish. Disarming the watchdog cannot
+un-freeze it; only a fresh target can.
 
 **No entry ramp.** Unlike the torque and impedance modes, the posture bias lands
 as a step on the first setpoint of a session — see

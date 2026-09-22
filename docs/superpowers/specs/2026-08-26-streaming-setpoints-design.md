@@ -135,6 +135,16 @@ per-joint velocity clamp (seeded from the URDF, as `JointPositionParams` already
 does) and damped least squares that stiffens near singularities are **required
 parts of the design**, not refinements.
 
+> **Superseded in part, 2026-09-22 (1.1.1).** The mode is still stiff, and the
+> clamp and DLS damping still stand. But it no longer commands
+> `ActuatorMode::kVelocity`: the actuator's velocity servo does not reject
+> gravity at a zero command (joint 2 crept ~0.038 rad/s,
+> [#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)), so the
+> mode integrates the limited velocity into a position reference at the RT rate
+> and runs the actuators in `kPosition`, with a 0.1 rad leash on the reference.
+> "No integration anywhere" (Component 3) is therefore no longer true for this
+> mode; the twist map is still solved at 1 kHz against the measured `q`.
+
 ### 6. One deadline, two enforcement levels, per-mode safe-stop
 
 **Decision.** The client declares one `timeout_s` at open. It is pushed into the
