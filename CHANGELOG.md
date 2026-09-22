@@ -48,7 +48,9 @@ that heading to the new version and bumps `package.xml`.
   1.0 rad/s track at 100% with the leash dormant. The measured lead grows
   linearly at about 70 ms of servo lag (0.071 rad at 1.0 rad/s), so the margin
   to the 0.1 rad leash at the 1.22 rad/s URDF cap is thin and loaded joints are
-  uncharacterised; making the leash a parameter is a 1.2.0 follow-up.
+  uncharacterised; making the leash a parameter is a 1.2.0 follow-up. The
+  `ee_twist` path was re-validated by gamepad teleop through the ROS2 node:
+  still at zero twist, stops on release, tracks the stick.
 
 ## [1.1.0] — 2026-09-14
 

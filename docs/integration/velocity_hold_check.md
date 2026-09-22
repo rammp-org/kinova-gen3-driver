@@ -107,8 +107,11 @@ passed. Same class as
 [#59](https://github.com/rammp-org/kinova-gen3-driver/issues/59) /
 [#65](https://github.com/rammp-org/kinova-gen3-driver/issues/65).
 
-Not covered here: twist streaming. The DLS map is unchanged by 1.1.1, but a
-twist session on the arm should confirm the integrated path feels right.
+Twist streaming was covered the same day through the ROS2 node built on the
+branch and `rammp-teleop`'s Xbox launch on the `ee_twist` controller: the arm
+sits still at zero twist, stops where it is when the stick is released, and
+follows the stick at full deflection with no slowing or veering. Qualitative,
+operator-judged; the numbers above are the quantitative record.
 
 ## Note on `--sim`
 
