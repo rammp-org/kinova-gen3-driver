@@ -41,8 +41,14 @@ that heading to the new version and bumps `package.xml`.
   in the deep dive), `compute_ns` p50 / p99 / max: joint path 128 / 512 / 1472
   after vs 128 / 512 / 1952 before; twist path 2048 / 8192 / 18912 after vs
   2048 / 8192 / 19680 before. Zero major faults, zero dropped samples; the full
-  suite including `RtSafety*` passes on aarch64. Verified in sim; the hardware
-  hold check is the release gate.
+  suite including `RtSafety*` passes on aarch64. Verified on the arm
+  2026-09-22 with `velocity_hold_check`: 0.1 mrad of joint-2 drift over 60 s of
+  streamed zeros (was ~2.3 rad); a stream cut mid-jog stops within the 0.2 s
+  watchdog window (12 mrad at 0.054 rad/s); wrist jogs at 0.1, 0.3, 0.6 and
+  1.0 rad/s track at 100% with the leash dormant. The measured lead grows
+  linearly at about 70 ms of servo lag (0.071 rad at 1.0 rad/s), so the margin
+  to the 0.1 rad leash at the 1.22 rad/s URDF cap is thin and loaded joints are
+  uncharacterised; making the leash a parameter is a 1.2.0 follow-up.
 
 ## [1.1.0] — 2026-09-14
 

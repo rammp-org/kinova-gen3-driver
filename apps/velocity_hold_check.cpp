@@ -91,6 +91,7 @@ void print_vec(const char* label, const JointVec& v) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  std::setvbuf(stdout, nullptr, _IOLBF, 0);  // keep the record if the process aborts
   std::string ip, urdf = "../models/gen3_7dof_2f85.urdf", pacing_str = "sleepspin";
   std::string phase;
   bool use_sim = false, dry_run = false;

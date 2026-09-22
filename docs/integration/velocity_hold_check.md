@@ -80,6 +80,36 @@ the command and the estimated lead (integral of the command minus the travel)
 stays under 0.08 rad. `LEASHED` means the reference hit the leash while
 tracking: the leash needs to become a parameter before 1.1.1 ships.
 
+## Results, 2026-09-22 (Gen3 7-DOF + 2F-85, Jetson AGX Orin, RT core 11)
+
+Arm at `q_rest`, wrist joint, 100 Hz setpoints, 0.2 s watchdog.
+
+| Phase | Result | Verdict |
+|---|---|---|
+| hold, 10 s | peak excursion 0.2 mrad (joint 2); rate 0.00001 rad/s | HOLDS |
+| hold, 60 s | joint-2 drift 0.1 mrad; every other joint 0.0 | HOLDS |
+| stale, 0.05 rad/s | tracking at 0.054 rad/s at the cut; 12.2 mrad of travel after the last setpoint, i.e. the 0.2 s watchdog window | FREEZES |
+| track, 0.1 rad/s | measured 100% / 100%; lead 0.007 / 0.002 rad | TRACKS |
+| track, 0.3 rad/s | measured 100% / 100%; lead 0.019 / 0.006 rad | TRACKS |
+| track, 0.6 rad/s | measured 100% / 100%; lead 0.038 / 0.012 rad | TRACKS |
+| track, 1.0 rad/s | measured 100% / 100%; lead 0.071 / 0.022 rad | TRACKS |
+
+The lead on the outbound leg grows linearly with speed at roughly **70 ms** of
+following lag. Extrapolated to the 1.22 rad/s URDF cap that is ~0.087 rad,
+inside the 0.1 rad leash but with little margin, and only the unloaded wrist
+was measured. A loaded joint near its cap may leash; that is the case for
+making the leash a `JointVelocityParams` field in 1.2.0.
+
+One run (the first 1.0 rad/s attempt) aborted before entering servoing with an
+uncaught `timeout detected: BaseClient::SetServoingMode`, started about one
+second after the previous run's shutdown. The arm did not move; the retry
+passed. Same class as
+[#59](https://github.com/rammp-org/kinova-gen3-driver/issues/59) /
+[#65](https://github.com/rammp-org/kinova-gen3-driver/issues/65).
+
+Not covered here: twist streaming. The DLS map is unchanged by 1.1.1, but a
+twist session on the arm should confirm the integrated path feels right.
+
 ## Note on `--sim`
 
 Running with `--sim` exercises the plumbing only. The sim transport has no
