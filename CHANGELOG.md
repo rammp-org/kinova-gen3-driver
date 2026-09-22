@@ -12,6 +12,12 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- `velocity_hold_check`, a temporary attended harness for the three hardware
+  questions the velocity fix leaves open: hold, freeze on a dead stream, and
+  tracking at speed against the leash ([procedure](docs/integration/velocity_hold_check.md)).
+
 ### Fixed
 
 - `JointImpedanceMode` holds the measured joint configuration on entry until an
