@@ -29,8 +29,14 @@ that heading to the new version and bumps `package.xml`.
   position before latching. The public API is unchanged; two observable
   differences: `required_modes()` reports `kPosition`, and `JointCommand::
   velocity` is zero as in every position-commanding mode (`commanded()` still
-  reads the integrated velocity). Verified in sim; the hardware hold check is
-  the release gate.
+  reads the integrated velocity). RT cost, measured A/B on the Jetson AGX Orin
+  (`benchmark_joint_velocity --sim --rate 1000 --duration 5`, pinned to core 10
+  while the live driver held core 11, so noisier than the isolated-core figures
+  in the deep dive), `compute_ns` p50 / p99 / max: joint path 128 / 512 / 1472
+  after vs 128 / 512 / 1952 before; twist path 2048 / 8192 / 18912 after vs
+  2048 / 8192 / 19680 before. Zero major faults, zero dropped samples; the full
+  suite including `RtSafety*` passes on aarch64. Verified in sim; the hardware
+  hold check is the release gate.
 
 ## [1.1.0] — 2026-09-14
 
