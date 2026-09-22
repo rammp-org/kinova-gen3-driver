@@ -246,7 +246,8 @@ the reference, so a zero command **holds** (the actuator's velocity servo does
 not reject gravity at zero, [#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34)).
 The reference may lead the measured position by at most 0.1 rad per joint and
 never leaves the URDF position limits. `out.velocity` is zero, as in every
-position-commanding mode; the integrated velocity is `commanded()`.
+position-commanding mode; `commanded()` is the limited velocity fed to the
+integrator (when the leash bites, part of it is discarded).
 **Stiff by contract** — this mode does not yield to contact and makes
 no attempt to; a compliant velocity law is a different promise and belongs in a
 different mode. Two target shapes: `set_velocity_target` is native

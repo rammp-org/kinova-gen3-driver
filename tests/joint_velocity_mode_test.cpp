@@ -158,8 +158,8 @@ TEST(JointVelocityMode, ScalesUniformlySoDirectionSurvivesSaturation) {
   JointVelocityMode m(dyn, p);
   m.on_enter(fb_at(JointVec::Zero()));
   JointVec qd = JointVec::Zero();
-  qd[0] = 0.2;  // 2x over the cap
-  qd[1] = 0.1;  // exactly at the cap
+  qd[0] = 1.0;
+  qd[1] = 0.5;  // 2:1 ratio, both over the cap
   m.set_velocity_target(qd);
   JointCommand out;
   m.compute(fb_at(JointVec::Zero()), 0.001, out);

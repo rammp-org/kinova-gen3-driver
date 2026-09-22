@@ -123,10 +123,11 @@ class JointVelocityMode : public ControlMode {
   static void limit(const JointVelocityParams& p, JointVec& qd) noexcept;
 
   Dynamics& dyn_;
-  JointVec q_lower_urdf_ = JointVec::Zero();  // cached in ctor: set_params must not
-  JointVec q_upper_urdf_ = JointVec::Zero();  // touch Dynamics off the RT thread
+  // URDF limits, cached in the ctor: set_params must not touch Dynamics off the
+  // RT thread.
+  JointVec q_lower_urdf_ = JointVec::Zero();
+  JointVec q_upper_urdf_ = JointVec::Zero();
   JointVec v_max_urdf_ = JointVec::Zero();
-  // touch Dynamics off the RT thread
   std::array<bool, kNumJoints> continuous_{};
 
   JointVelocityParams params_[2];

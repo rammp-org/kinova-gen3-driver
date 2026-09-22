@@ -17,8 +17,11 @@
 // That comment is about the velocity field in POSITION servoing, which is a
 // different path, but it means velocity commands in the KORTEX API are a known
 // trouble spot. The streaming-setpoint design
-// (docs/superpowers/specs/2026-08-26-streaming-setpoints-design.md) puts a whole
-// control mode on top of kVelocity, so this probe runs BEFORE that is written.
+// (docs/superpowers/specs/2026-08-26-streaming-setpoints-design.md) originally put
+// a whole control mode on top of kVelocity, so this probe ran BEFORE that was
+// written. Since 1.1.1 JointVelocityMode integrates into a position reference
+// (#34) and nothing in the driver depends on kVelocity; the probe remains a
+// firmware characterisation tool.
 //
 // The outcome is one of exactly three, and the report names which:
 //   TRACKS  - measured qd follows the command and q moves

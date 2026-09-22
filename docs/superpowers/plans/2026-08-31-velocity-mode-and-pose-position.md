@@ -1,5 +1,10 @@
 # JointVelocityMode + JointPositionMode Pose Path — Implementation Plan (Plan 2)
 
+> **Reconciled 2026-09-22.** Every `kVelocity` below describes the mode as first
+> shipped. From 1.1.1 `JointVelocityMode` integrates into a position reference
+> and requires `kPosition` ([#34](https://github.com/rammp-org/kinova-gen3-driver/issues/34));
+> see the superseded note under decision 5 of the streaming spec.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Land the two remaining mode capabilities the streaming tier refuses today — a stiff `JointVelocityMode` (joint-velocity native, EE twist via damped least squares) and an EE-pose path into `JointPositionMode` — then flip the three `pair_supported` rows that gate them.

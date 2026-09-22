@@ -286,8 +286,9 @@ cap, then a hard per-joint clamp as a backstop. Scaling rather than clamping is
 what keeps the achieved EE twist pointing the same direction as the commanded
 one — a bare per-joint clamp would silently *rotate* the twist the moment one
 joint saturated. The DLS damping is a separate concern: it keeps the *solve*
-well-conditioned near a singularity, but `limit()` is what bounds the number
-that reaches the actuator. Near a singularity what you observe is the tool
+well-conditioned near a singularity, but `limit()` is what bounds the velocity
+that is integrated into the reference (and the leash, next, bounds the
+reference itself). Near a singularity what you observe is the tool
 **slowing down**, not veering.
 
 **What bounds the reference.** The integrated reference is leashed to within
@@ -298,7 +299,10 @@ cannot keep up — stops winding the reference up at that lead, so it never snap
 across an accumulated gap when it frees, and under contact the leash is the
 bound on how hard the position servo pushes. Bounded joints are clamped to
 their URDF position limits; continuous joints stay in the transport's
-`(-π, π]` representation.
+`(-π, π]` representation. The leash is per joint, so if it ever bites during
+nominal tracking (the actuator's following lag at full speed is not yet
+characterised) it caps that joint alone and the achieved twist rotates — compare
+measured `qd` against `commanded()` on the arm before trusting a full-speed jog.
 
 **A stale stream commands zero, freezes at the measured position, and
 latches.** Holding the last velocity while the stream is silent would keep the

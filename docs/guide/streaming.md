@@ -81,7 +81,9 @@ on it:
   [above](#the-deadline-one-value-two-enforcement-levels)) zeros the commanded
   velocity, freezes the reference at the measured position, and **latches** —
   exactly like `JointImpedanceMode`'s freeze, disarming the watchdog cannot
-  resurrect a target nobody is maintaining.
+  resurrect a target nobody is maintaining. (A session *close* is the milder
+  case: its zero target holds the reference where it is, up to a leash's lead
+  ahead of the arm if it was lagging.)
 
 ### The first twist setpoint can swing the elbow
 
