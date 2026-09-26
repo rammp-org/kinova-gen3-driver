@@ -478,9 +478,13 @@ target at the last-good **measured** q.
 
 ### Gating
 
-Every `CommandSink` method is gated except `on_query_state()` (reads are always
-open) and `on_set_speed_override()` (see above — it can only slow the arm
-down). `on_trajectory_accepted()` re-checks the token on the goal rather than
+Every `CommandSink` method is gated except three: `on_query_state()` (reads
+are always open), `on_set_speed_override()` (see above — it can only slow the
+arm down), and `on_halt()` (a bare forward to the downstream `Supervisor` —
+`Arbiter::on_halt` takes no lock and never calls `admit()`). Halting is a
+safety action, one step stronger than the speed-override reasoning: gating it
+would mean the arm could not be stopped by whoever does not currently hold the
+token. `on_trajectory_accepted()` re-checks the token on the goal rather than
 trusting that a matching `on_trajectory_goal()` preceded it. `CancelRequest`
 exists so that cancel carries a token too.
 
