@@ -517,3 +517,44 @@ TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
   EXPECT_NEAR(s.fraction, 0.25, 1e-9)
       << "the replacement starts from zero, not from the old elapsed time";
 }
+
+TEST(ExecutorSpeedScale, StaleQueuedScaleDoesNotLeakForward) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);  // A, scale 1.0
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 0.5);  // B, scale 0.5
+
+  double t = 0.0;
+  ex.tick(t, vec7(0.0));  // start A
+
+  ExecStatus s{};
+  bool promoted = false;
+  for (int i = 0; i < 1000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "B must be promoted before testing the leak";
+
+  // Queue C without specifying a scale (defaults to full speed).
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0));
+
+  promoted = false;
+  for (int i = 0; i < 1000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "C must be promoted before testing its scale";
+
+  // Let the slew settle onto C's steady-state scale.
+  for (int i = 0; i < 200; ++i) {
+    t += 0.01;
+    ex.tick(t, vec7(0.0));
+  }
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-6)
+      << "C must run at full speed, not inherit B's stale 0.5 scale";
+}
