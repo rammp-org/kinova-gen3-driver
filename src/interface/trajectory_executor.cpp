@@ -47,39 +47,49 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
 }
 
 SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
-                                        const kinova::JointVec& path_tol) {
+                                        const kinova::JointVec& path_tol, double speed_scale) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
   if (!is_active()) {  // idle -> adopt immediately
     mode_ = mode;
-    active_ = Active{tr, 0.0, false};
+    active_ = Active{tr, 0.0, 0.0, false};
     path_tol_ = path_tol;  // tolerance guards the adopted trajectory
+    scale_ = speed_scale;
     queued_.reset();
     return SubmitResult::kAccepted;
   }
   // active, same mode: preempt per the caller's policy.
   if (p == Preemption::kLatestWins) {
-    active_ = Active{tr, 0.0, false};  // replace + reset clock (started=false)
-    path_tol_ = path_tol;              // new trajectory's tolerance takes over
+    active_ = Active{tr, 0.0, 0.0, false};  // replace + reset clock (started=false)
+    path_tol_ = path_tol;                   // new trajectory's tolerance takes over
+    scale_ = speed_scale;
     queued_.reset();
     return SubmitResult::kAccepted;
   }
   // kQueue: store trajectory + its tolerance for gapless promotion on completion
-  // (promotion in Task 6). Do NOT touch path_tol_: the active trajectory keeps its
-  // own divergence guard until the queued goal is actually promoted.
+  // (promotion in Task 6). Do NOT touch path_tol_/scale_: the active trajectory
+  // keeps its own divergence guard and clock scale until the queued goal is
+  // actually promoted.
   queued_ = tr;
   queued_tol_ = path_tol;
+  queued_scale_ = speed_scale;
   return SubmitResult::kAccepted;
 }
 
-ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas) {
+ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas,
+                                    double override_scale) {
   if (!active_) return ExecStatus{false, false, 0.0, ExecStatus::kOk};
   Active& a = *active_;
   if (!a.started) {
-    a.start_time = now_s;
+    a.last_now_s = now_s;
+    a.traj_t = 0.0;
     a.started = true;
   }
-  const double elapsed = now_s - a.start_time;
+  const double dt_wall = now_s - a.last_now_s;
+  a.last_now_s = now_s;
+  applied_ = effective_scale(scale_, override_scale);
+  a.traj_t += dt_wall * applied_;
+  const double elapsed = a.traj_t;
   const double dur = a.tr.duration_s();
   const kinova::JointVec q_desired = sample(a.tr, elapsed);
   sink_.set_target(q_desired);
@@ -109,9 +119,11 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   }
 
   if (elapsed >= dur) {
-    if (queued_) {                              // gapless promotion — no idle gap
-      active_ = Active{*queued_, now_s, true};  // latch start to NOW (started=true)
-      path_tol_ = queued_tol_;                  // adopt the promoted goal's divergence guard
+    if (queued_) {  // gapless promotion — no idle gap
+      active_ = Active{*queued_, 0.0, now_s, true};  // traj_t=0, last_now_s=now
+      path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
+      scale_ = queued_scale_;
+      queued_scale_ = 1.0;
       queued_.reset();
       return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};  // promoted this tick
     }

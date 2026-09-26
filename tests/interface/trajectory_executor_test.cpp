@@ -40,7 +40,11 @@ TEST(TrajectorySample, HandlesEmptyAndSingleWaypoint) {
 namespace {
 struct RecordingSink : kinova::JointTargetSink {
   std::vector<kinova::JointVec> calls;
-  void set_target(const kinova::JointVec& q) noexcept override { calls.push_back(q); }
+  kinova::JointVec last = kinova::JointVec::Zero();
+  void set_target(const kinova::JointVec& q) noexcept override {
+    calls.push_back(q);
+    last = q;
+  }
 };
 kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
   return {{{vec7(0.0), 0.0}, {vec7(1.0), dur}}};
@@ -450,4 +454,32 @@ TEST(EffectiveScale, NonFiniteFallsBackToFullSpeed) {
   const double nan = std::numeric_limits<double>::quiet_NaN();
   EXPECT_DOUBLE_EQ(effective_scale(nan, 1.0), 1.0);
   EXPECT_DOUBLE_EQ(effective_scale(1.0, nan), 1.0);
+}
+
+TEST(ExecutorSpeedScale, HalfScaleTakesTwiceAsLongInWallTime) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.5);
+
+  ex.tick(0.0, vec7(0.0));               // latch the clock
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));   // 2 s wall = 1 s trajectory time
+  EXPECT_TRUE(mid.active);
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9) << "fraction must track the SCALED clock";
+  EXPECT_NEAR(sink.last[0], 0.5, 1e-9) << "halfway along a 0->1 ramp";
+
+  ExecStatus end = ex.tick(4.0, vec7(1.0));   // 4 s wall = 2 s trajectory time
+  EXPECT_TRUE(end.completed);
+  EXPECT_NEAR(end.fraction, 1.0, 1e-9);
+}
+
+TEST(ExecutorSpeedScale, FullScaleIsIdenticalToBeforeTheFeature) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0));  // default scale
+  ex.tick(10.0, vec7(0.0));
+  ExecStatus mid = ex.tick(11.0, vec7(0.0));
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9);
+  EXPECT_NEAR(sink.last[0], 0.5, 1e-9);
 }

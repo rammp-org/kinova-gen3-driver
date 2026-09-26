@@ -75,15 +75,19 @@ class TrajectoryExecutor {
                               const std::array<bool, kinova::kNumJoints>& continuous = {})
       : sink_(sink), continuous_(continuous) {}
   SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
-                      const kinova::JointVec& path_tol);
+                      const kinova::JointVec& path_tol, double speed_scale = 1.0);
   bool is_active() const { return active_.has_value() || queued_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
-  ExecStatus tick(double now_s, const kinova::JointVec& q_meas);
+  ExecStatus tick(double now_s, const kinova::JointVec& q_meas, double override_scale = 1.0);
+  double applied_scale() const { return applied_; }
 
  private:
   struct Active {
     Trajectory tr;
-    double start_time = 0.0;
+    // Trajectory time, ACCUMULATED at dt * scale — not a difference of wall
+    // stamps. That is what lets the scale change while a goal is running.
+    double traj_t = 0.0;
+    double last_now_s = 0.0;
     bool started = false;
   };
   kinova::JointTargetSink& sink_;
@@ -94,6 +98,9 @@ class TrajectoryExecutor {
   kinova::JointVec path_tol_ = kinova::JointVec::Zero();  // guards the ACTIVE trajectory
   kinova::JointVec queued_tol_ =
       kinova::JointVec::Zero();  // applied when queued_ is promoted (Task 6)
+  double scale_ = 1.0;         // the ACTIVE goal's own requested scale
+  double queued_scale_ = 1.0;  // adopted when queued_ is promoted
+  double applied_ = 1.0;       // the scale actually in force (slew-limited, Task 3)
 };
 
 }  // namespace kinova::interface
