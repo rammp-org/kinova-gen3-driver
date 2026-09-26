@@ -433,6 +433,31 @@ implements them.
 | `void estop_clear()` | leaves the latch, to *no owner*; works in any mode |
 | `ArbitrationStatus status() const` | mode, e-stop latch, owner, generation, rejection count |
 
+### `TrajectoryGoal::speed_scale` — `interface/value_types.h`
+
+`TrajectoryGoal` carries `double speed_scale = 1.0`, in `(0, 1]`: execute this
+goal's path slower by dilating `TrajectoryExecutor`'s clock rather than
+altering the path itself — see the [speed scale
+deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale). A value
+outside `(0, 1]`, including non-finite, is **refused** at `on_trajectory_goal`
+(`GoalResponse::kReject`), never clamped.
+
+### `CommandSink::on_set_speed_override(double)` / `Supervisor::set_speed_override(double)`
+
+A runtime override an operator can use to slow every in-flight goal down,
+independent of what the goal itself requested. Returns `SpeedResult{accepted,
+message}`; a value outside `(0, 1]` (including non-finite) is refused and
+leaves the current override unchanged. The effective scale applied by the
+executor is `min(goal.speed_scale, override)`, clamped to `(0, 1]` and
+slew-limited at `kScaleSlewPerSec` — see the [speed scale
+deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
+
+Unlike every other `CommandSink` method, `on_set_speed_override` is **not**
+token-gated (`Arbiter::on_set_speed_override` forwards it ungated — see
+`arbiter.cpp`): it can only ever slow the arm down, so it can never make the
+arm do something it was not already doing, and gating it would let one
+client's ownership block another operator's hand on the speed dial.
+
 ### `CommandSink::on_halt(HaltReason)`
 
 The general "stop the arm now" primitive — used by ownership revocation and
@@ -453,8 +478,9 @@ target at the last-good **measured** q.
 
 ### Gating
 
-Every `CommandSink` method is gated except `on_query_state()` — reads are always
-open. `on_trajectory_accepted()` re-checks the token on the goal rather than
+Every `CommandSink` method is gated except `on_query_state()` (reads are always
+open) and `on_set_speed_override()` (see above — it can only slow the arm
+down). `on_trajectory_accepted()` re-checks the token on the goal rather than
 trusting that a matching `on_trajectory_goal()` preceded it. `CancelRequest`
 exists so that cancel carries a token too.
 
