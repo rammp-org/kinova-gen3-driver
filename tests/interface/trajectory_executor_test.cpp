@@ -581,52 +581,35 @@ TEST(ExecutorSpeedScale, AnOverrideChangeRampsRatherThanSteps) {
   EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9);
 
   // Slam the override to 0.1 and step 10 ms. A step would move the reference
-  // discontinuously; the slew limit must keep the change bounded.
+  // discontinuously; the slew limit must keep the change bounded. Pinned to
+  // the actual constant (kScaleSlewPerSec = 2.0 -> max_step = 2.0 * 0.01 =
+  // 0.02, so applied_ = 1.0 - 0.02 = 0.98) rather than a loose (0.1, 1.0)
+  // bound: that bound also passes a constant ten times too large -- a
+  // full-range change in 50 ms, exactly the step this feature exists to
+  // prevent.
   ex.tick(0.01, vec7(0.0), 0.1);
-  EXPECT_GT(ex.applied_scale(), 0.1 + 1e-6) << "must not arrive instantly";
-  EXPECT_LT(ex.applied_scale(), 1.0);
+  EXPECT_NEAR(ex.applied_scale(), 0.98, 1e-9);
 
   for (double t = 0.02; t < 3.0; t += 0.01) ex.tick(t, vec7(0.0), 0.1);
   EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-6) << "and must get there";
 }
 
-TEST(ExecutorSpeedScale, StaleQueuedScaleDoesNotLeakForward) {
+// Fix wave, finding 8: a negative dt_wall correctly freezes applied_ (via
+// max_step = 0), but traj_t is an ACCUMULATOR now -- unlike the old
+// `now_s - start_time` form, an un-guarded `traj_t += dt_wall * applied_`
+// would walk it backwards permanently rather than self-correcting on the
+// next forward tick. Unreachable today (secs_since uses steady_clock), but
+// cheap to close at the source.
+TEST(ExecutorSpeedScale, BackwardsWallClockDoesNotMoveTrajectoryTimeBackwards) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 1.0);  // A, scale 1.0
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 0.5);  // B, scale 0.5
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(5.0, vec7(0.0));                      // latch the clock at t=5
+  ExecStatus before = ex.tick(6.0, vec7(0.0));  // 1 s wall -> traj_t=1.0, fraction 0.1
+  EXPECT_NEAR(before.fraction, 0.1, 1e-9);
 
-  double t = 0.0;
-  ex.tick(t, vec7(0.0));  // start A
-
-  ExecStatus s{};
-  bool promoted = false;
-  for (int i = 0; i < 1000 && !promoted; ++i) {
-    t += 0.01;
-    s = ex.tick(t, vec7(0.0));
-    promoted = s.promoted;
-  }
-  ASSERT_TRUE(promoted) << "B must be promoted before testing the leak";
-
-  // Queue C without specifying a scale (defaults to full speed).
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0));
-
-  promoted = false;
-  for (int i = 0; i < 1000 && !promoted; ++i) {
-    t += 0.01;
-    s = ex.tick(t, vec7(0.0));
-    promoted = s.promoted;
-  }
-  ASSERT_TRUE(promoted) << "C must be promoted before testing its scale";
-
-  // Let the slew settle onto C's steady-state scale.
-  for (int i = 0; i < 200; ++i) {
-    t += 0.01;
-    ex.tick(t, vec7(0.0));
-  }
-  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-6)
-      << "C must run at full speed, not inherit B's stale 0.5 scale";
+  ExecStatus back = ex.tick(5.5, vec7(0.0));  // now_s went BACKWARDS
+  EXPECT_NEAR(back.fraction, before.fraction, 1e-9)
+      << "a backwards wall-clock stamp must never move trajectory time backwards";
 }

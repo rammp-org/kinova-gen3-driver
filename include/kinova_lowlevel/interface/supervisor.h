@@ -111,7 +111,8 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   GripperState on_query_gripper() override;
 
   // Runtime speed override (called on the backend thread; read by the sampler).
-  // Refused, not clamped, outside (0, 1] -- see speed_override_ below.
+  // Refused, not clamped, outside [kMinSpeedScale, 1.0] -- see speed_override_
+  // below.
   SpeedResult set_speed_override(double s);
   double speed_override() const { return speed_override_.load(); }
 
@@ -176,7 +177,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   std::atomic<bool> in_flight_{false};  // read by on_trajectory_goal
 
   // Written by the backend thread, read by the sampler. Only ever slows the
-  // arm: values outside (0, 1] are refused, not clamped.
+  // arm: values outside [kMinSpeedScale, 1.0] are refused, not clamped.
   std::atomic<double> speed_override_{1.0};
   static_assert(std::atomic<double>::is_always_lock_free,
                 "speed_override_ is read from the sampler thread; must be lock-free");

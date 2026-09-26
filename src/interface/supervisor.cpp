@@ -341,8 +341,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
-  if (!std::isfinite(g.speed_scale) || g.speed_scale <= 0.0 || g.speed_scale > 1.0)
-    return GoalResponse::kReject;  // out-of-range scale; reason surfaces at the ROS boundary
+  // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
+  // floors there internally, and accepting a request slower than the floor
+  // would silently RUN it faster than asked -- the clamp this feature's
+  // posture forbids. The floor must be unreachable from outside.
+  if (!std::isfinite(g.speed_scale) || g.speed_scale < kMinSpeedScale || g.speed_scale > 1.0)
+    return GoalResponse::kReject;  // out-of-range scale ([kMinSpeedScale, 1.0]); reason surfaces at the ROS boundary
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }
@@ -421,8 +425,13 @@ GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
 SpeedResult Supervisor::on_set_speed_override(double s) { return set_speed_override(s); }
 SpeedResult Supervisor::set_speed_override(double s) {
   if (!std::isfinite(s)) return {false, "speed override must be finite"};
-  if (s <= 0.0 || s > 1.0)
-    return {false, "speed override must be in (0, 1]; got " + std::to_string(s)};
+  // Same floor as on_trajectory_goal, and for the same reason: below
+  // kMinSpeedScale, effective_scale()'s internal clamp would silently run the
+  // arm FASTER than the caller asked for. Refuse it here too, so the floor is
+  // unreachable from outside at either accept site.
+  if (s < kMinSpeedScale || s > 1.0)
+    return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) +
+                       ", 1.0]; got " + std::to_string(s)};
   speed_override_.store(s);
   return {true, ""};
 }

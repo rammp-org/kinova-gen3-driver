@@ -132,14 +132,29 @@ time-reparameterised curve; there is no separate place in the code that scales
 `JointTargetSink` only accepts a position, so a derivative-scaling path would
 have no consumer.
 
-The effective scale is `min(goal_scale, override_scale)`, clamped to `(0, 1]`
-— whichever of the goal's own request and the operator's runtime override is
-slower wins, so an operator can only ever slow a goal down, never speed one up
-past what it asked for. A change in the effective scale is slew-limited at
+The effective scale is `min(goal_scale, override_scale)`, clamped to
+`[kMinSpeedScale, 1.0]` (`kMinSpeedScale = 0.01` — zero would stop the
+trajectory clock and hang the goal forever) — whichever of the goal's own
+request and the operator's runtime override is slower wins, so an operator can
+only ever slow a goal down, never speed one up past what it asked for. Both
+`speed_scale` and the runtime override are **refused**, not clamped, below
+this floor — see `api.md` — so `effective_scale()`'s internal clamp is a
+belt-and-braces guarantee, not something a caller can actually reach.
+
+A change in the effective scale **mid-goal** is slew-limited at
 `kScaleSlewPerSec` (2.0/s) rather than applied instantly, so the *commanded
-velocity* never steps the way a bare change of clock rate would — a goal
-submitted while the override is already down starts at that slower scale from
-its first tick, including one promoted off the preemption queue.
+velocity* never steps the way a bare change of clock rate would. That
+guarantee is scoped to mid-goal changes: at a goal **boundary** — a fresh
+`submit()` (including a `kLatestWins` preemption) or a queued goal's gapless
+promotion — the applied scale latches to the new goal's own scale
+immediately, on its very first tick, including *upward*. A goal submitted
+while the override is already down starts at that slower scale from its
+first tick; a slow goal followed by a faster queued one promotes straight to
+the faster scale rather than ramping up from the outgoing goal's (see
+`PromotionLatchesToAFasterPromotedScaleTooNotRampingUp`). A step in the
+commanded reference at a goal boundary is inherent to switching trajectories
+at all, scale aside — the slew limit only governs a change of scale *within*
+one running goal.
 
 **This is not `max_ref_speed`.** `max_ref_speed` rate-limits how fast
 `JointPositionMode` may move its reference *toward* whatever `q_d(t)` the

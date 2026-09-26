@@ -1495,11 +1495,27 @@ TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {
   EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
 }
 
+// Fix wave, finding 1: 0.002 is inside (0, 1] but below kMinSpeedScale (0.01).
+// effective_scale() floors there internally -- accepting this and silently
+// running at the floor would be ~5x FASTER than requested, the exact clamp
+// this feature's posture forbids. Must be refused outright, at both accept
+// sites (this one and the goal's own scale, below).
+TEST(SupervisorSpeed, BelowFloorOverrideIsRefusedNotSpedUpToTheFloor) {
+  SupFix f;
+  const SpeedResult r = f.sup.set_speed_override(0.002);
+  EXPECT_FALSE(r.accepted);
+  EXPECT_FALSE(r.message.empty()) << "a refusal must say why";
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 1.0) << "a refused set changes nothing";
+}
+
 TEST(SupervisorSpeed, AGoalWithAnOutOfRangeScaleIsRefused) {
   SupFix f;
   f.sup.start();
   f.run_rt();
-  for (double bad : {1.5, 0.0, -0.5, std::numeric_limits<double>::quiet_NaN()}) {
+  // 0.002 is below kMinSpeedScale but inside (0, 1] -- see
+  // BelowFloorOverrideIsRefusedNotSpedUpToTheFloor above for why it must be
+  // refused rather than silently run at the floor.
+  for (double bad : {1.5, 0.0, -0.5, 0.002, std::numeric_limits<double>::quiet_NaN()}) {
     TrajectoryGoal g;
     g.trajectory = ramp7(0.0, 0.2, 1.0);
     g.speed_scale = bad;
@@ -1516,4 +1532,88 @@ TEST(SupervisorSpeed, ADefaultConstructedGoalIsFullSpeed) {
   const TrajectoryGoal g;
   EXPECT_DOUBLE_EQ(g.speed_scale, 1.0);
   EXPECT_DOUBLE_EQ(effective_scale(g.speed_scale, 1.0), 1.0);
+}
+
+// Fix wave, finding 2: `in.goal.speed_scale` (supervisor.cpp, submit call) and
+// `speed_override_.load()` (supervisor.cpp, tick call) are the two lines that
+// connect this feature to the running Supervisor -- every executor test calls
+// submit()/tick() directly and cannot exercise either. Deleting either
+// argument at those call sites still passed the full suite before this test
+// existed. These two use the real wall clock, so the sleeps are sized well
+// past the unscaled duration to absorb sampler-thread scheduling jitter
+// (the sampler is a plain sleep_for loop at sampler_hz, not RT-pinned) rather
+// than chasing a tight bound that would make the test flaky instead of slow.
+TEST(SupervisorSpeed, GoalScaleReachesTheExecutorAndStretchesWallDuration) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);  // 400 ms UNSCALED duration
+  g.control_mode = ControlModeKind::kPosition;
+  g.preemption = Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.speed_scale = 0.5;  // -> ~800 ms of wall time if actually honoured
+  GoalId id{};
+  id[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), GoalResponse::kAccept);
+  const auto t0 = std::chrono::steady_clock::now();
+  f.sup.on_trajectory_accepted(id, g);
+
+  // 550 ms: 150 ms past the UNSCALED duration, 250 ms short of the scaled
+  // one. If speed_scale never reached submit(), this would already be done.
+  std::this_thread::sleep_for(std::chrono::milliseconds(550));
+  EXPECT_EQ(f.be.result_count(), 0u)
+      << "speed_scale=0.5 must still be in flight 150 ms past the unscaled 400 ms duration";
+
+  // Generous cap (2 s) on top of that to reach completion without a flaky
+  // tight bound; the assertion above is what actually proves the timing.
+  for (int i = 0; i < 200 && f.be.result_count() == 0u; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  const double elapsed_s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u) << "goal never completed";
+  EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
+  // Roughly twice the 400 ms unscaled duration (~800 ms); wide margin on
+  // both sides for thread scheduling, not for correctness.
+  EXPECT_GT(elapsed_s, 0.6) << "not meaningfully stretched -- speed_scale may not be reaching submit()";
+  EXPECT_LT(elapsed_s, 1.6) << "stretched far more than 2x -- something else is wrong";
+}
+
+TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);  // 400 ms UNSCALED duration, full speed
+  g.control_mode = ControlModeKind::kPosition;
+  g.preemption = Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  GoalId id{};
+  id[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), GoalResponse::kAccept);
+  const auto t0 = std::chrono::steady_clock::now();
+  f.sup.on_trajectory_accepted(id, g);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));  // let it start moving, unscaled
+  ASSERT_TRUE(f.sup.set_speed_override(0.25).accepted);  // slam it down mid-flight
+
+  // 550 ms after ACCEPT: 150 ms past the goal's own unscaled 400 ms duration.
+  // If tick() never received speed_override_.load(), the goal would have
+  // finished on schedule regardless of the override.
+  std::this_thread::sleep_for(std::chrono::milliseconds(450));
+  EXPECT_EQ(f.be.result_count(), 0u)
+      << "override=0.25 (set 100 ms in) must still be stretching the goal past its 400 ms duration";
+
+  for (int i = 0; i < 300 && f.be.result_count() == 0u; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  const double elapsed_s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u) << "goal never completed";
+  EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
+  EXPECT_GT(elapsed_s, 0.6)
+      << "not meaningfully stretched -- the override may not be reaching tick()";
 }

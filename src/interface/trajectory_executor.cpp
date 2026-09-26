@@ -98,7 +98,11 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
     applied_ -= max_step;
   else
     applied_ = want;
-  a.traj_t += dt_wall * applied_;
+  // A backwards wall-clock stamp already freezes applied_ above (max_step is
+  // 0 when dt_wall <= 0); it must not also walk traj_t backwards. Unlike the
+  // old `now_s - start_time` form, traj_t is an ACCUMULATOR now, so an
+  // un-guarded decrement here would never self-correct on the next tick.
+  if (dt_wall > 0.0) a.traj_t += dt_wall * applied_;
   const double elapsed = a.traj_t;
   const double dur = a.tr.duration_s();
   const kinova::JointVec q_desired = sample(a.tr, elapsed);
@@ -137,7 +141,6 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
       // !a.started latch — otherwise gapless promotion ramps from the
       // outgoing goal's scale, the exact step this feature exists to avoid.
       applied_ = effective_scale(scale_, override_scale);
-      queued_scale_ = 1.0;
       queued_.reset();
       return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};  // promoted this tick
     }
