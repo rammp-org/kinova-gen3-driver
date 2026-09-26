@@ -460,15 +460,28 @@ by the executor is `min(goal.speed_scale, override)`, clamped to
 [speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
 
 `on_set_speed_override` is gated **asymmetrically**, unlike every other
-`CommandSink` method. *Lowering* the effective override (`scale` below the
-arm's current one, read from `ArmState::speed_override`) is **not**
-token-gated: it can only ever slow the arm down further, so it can never make
-the arm do something it was not already doing, and gating it would let one
-client's ownership block another operator's hand on the speed dial. *Raising*
-it **is** gated exactly like every other command (`Arbiter::on_set_speed_override`
-calls `admit()`, so it checks both the live token and the e-stop latch):
-raising can undo another operator's deliberate slow-down of a moving arm, so
-an unauthenticated caller must not be able to do it.
+`CommandSink` method, and the two decisions live in two different places.
+`Arbiter::on_set_speed_override` decides **authorisation only**: it sets
+`SpeedOverrideRequest::may_raise = admit(token)` (which already checks both
+the live token and the e-stop latch) and forwards the request
+**unconditionally** — it never refuses the call itself. `may_raise` is
+always overwritten on the way in; a client setting it has no effect.
+`Supervisor::set_speed_override` decides **direction**: it refuses a request
+where `may_raise` is false and `scale` is not strictly less than the
+*current* `speed_override_`, comparing and storing as **one atomic
+compare-and-store** against that value — not a separate load, compare, and
+store, which would leave a window for a concurrent write to land in and make
+the comparison stale. (An earlier version of this feature decided direction
+in the `Arbiter`, against a copy of `ArmState::speed_override` — a snapshot
+the pump loop refreshes only at `pump_hz`, up to one pump period stale. That
+let an unauthenticated caller's request race a real lower and land as a
+raise; deciding direction where the value is authoritative, atomically with
+the store, closes the window.) *Lowering* is unaffected by `may_raise`: it
+can only ever slow the arm down further, so it can never make the arm do
+something it was not already doing, and gating it would let one client's
+ownership block another operator's hand on the speed dial. *Raising* without
+`may_raise` is refused: it can undo another operator's deliberate slow-down
+of a moving arm, so an unauthenticated caller must not be able to do it.
 
 ### `CommandSink::on_halt(HaltReason)`
 

@@ -131,10 +131,10 @@ struct ArmState {
   bool fault = false;
   double stamp_s = 0.0;
   // The runtime speed override currently in force. Populated by the
-  // Supervisor's pump loop from the same atomic the sampler reads. Doubles as
-  // the Arbiter's "current value" for gating a speed-override request (see
-  // Arbiter::on_set_speed_override) and as an operator-visible answer to "did
-  // my slow-down get undone?".
+  // Supervisor's pump loop from the same atomic the sampler reads (NOT the
+  // authoritative value itself -- see SpeedOverrideRequest::may_raise for why
+  // gating no longer reads this). An operator-visible answer to "did my
+  // slow-down get undone?".
   double speed_override = 1.0;
 };
 struct GainsRequest {
@@ -152,6 +152,15 @@ struct SpeedOverrideRequest {
   double scale = 1.0;
   std::string sender_id;
   Token token{};
+  // Set by the arbitration layer (Arbiter::on_set_speed_override) from
+  // admit(token) -- which already covers the e-stop latch -- and ALWAYS
+  // OVERWRITTEN before the request is forwarded downstream; a caller setting
+  // this field itself has no effect. True means "this caller is authorised
+  // to raise the effective override, not just lower it." The Arbiter decides
+  // AUTHORISATION only; the Supervisor decides DIRECTION, atomically against
+  // its own speed_override_, because it is the only place that value is
+  // authoritative -- see Supervisor::set_speed_override.
+  bool may_raise = false;
 };
 struct SpeedResult {
   bool accepted = false;

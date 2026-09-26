@@ -146,34 +146,36 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
   }
   return down_.on_set_gains(r);
 }
-// CORRECTED reasoning (fix wave, finding 3): the original comment here argued
-// the override was safe to forward ungated in every direction, because "it
-// can only ever reduce speed". That is true against the GOAL's own scale, but
-// false against the CURRENT override: a caller holding no token could call
-// this with 1.0 and undo another operator's deliberate slow-down of a moving
-// arm -- a speed-UP, unauthenticated.
+// CORRECTED reasoning, twice over (fix wave, finding 3, then a re-review
+// finding on top of that fix):
 //
-// So the direction is what's ungated, not the method: LOWERING the override
-// relative to the arm's current effective value stays ungated -- it still can
-// only ever reduce speed, and an operator reaching for the dial must never be
-// refused because someone else holds the token. RAISING it is gated exactly
-// like every other command: admit() checks both the live token and the
-// e-stop latch, because raising can undo someone else's slow-down.
+// Round 1: the ORIGINAL comment here argued the override was safe to forward
+// ungated in every direction, because "it can only ever reduce speed". True
+// against the GOAL's own scale, false against the CURRENT override: a caller
+// holding no token could call this with 1.0 and undo another operator's
+// deliberate slow-down of a moving arm -- a speed-UP, unauthenticated. Fixed
+// by making LOWERING ungated and RAISING gated.
 //
-// "Current" comes from the downstream's own on_query_state().speed_override
-// (ArmState), not a copy kept here -- the Arbiter knows nothing about
-// control, only CommandSink, so this is the one channel it has.
+// Round 2: the first fix decided "is this a raise?" HERE, by comparing
+// r.scale against down_.on_query_state().speed_override -- a snapshot the
+// Supervisor's pump loop refreshes at pump_hz (100 Hz), so it can be up to
+// one pump period (10 ms) stale. That reopened the exact hole: lower the
+// override, then within that 10 ms window send a scale that reads as "lower
+// than the stale snapshot" but is actually a raise relative to the real
+// value, and it would be forwarded ungated.
+//
+// So the Arbiter now decides AUTHORISATION ONLY -- may_raise = admit(token),
+// which already covers the token AND the e-stop latch -- and forwards
+// UNCONDITIONALLY. DIRECTION is decided downstream, by
+// Supervisor::set_speed_override, as one atomic compare-and-store against
+// its own speed_override_: the only place that value is authoritative, with
+// no window between reading "current" and writing "new" for a race to land
+// in.
 SpeedResult Arbiter::on_set_speed_override(const SpeedOverrideRequest& r) {
   std::lock_guard<std::mutex> l(m_);
-  const double current = down_.on_query_state().speed_override;
-  if (r.scale < current) return down_.on_set_speed_override(r);
-  if (!admit(r.token)) {
-    ++rejected_;
-    return {false, estopped_.load(std::memory_order_acquire)
-                       ? "e-stopped"
-                       : "raising the speed override requires the current token"};
-  }
-  return down_.on_set_speed_override(r);
+  SpeedOverrideRequest req = r;
+  req.may_raise = admit(r.token);
+  return down_.on_set_speed_override(req);
 }
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
 // Ungated for the same reason on_query_state is: a read that requires ownership is a

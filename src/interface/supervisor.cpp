@@ -424,18 +424,31 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
 SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {
-  return set_speed_override(r.scale);
+  return set_speed_override(r.scale, r.may_raise);
 }
-SpeedResult Supervisor::set_speed_override(double s) {
+SpeedResult Supervisor::set_speed_override(double s, bool may_raise) {
   if (!std::isfinite(s)) return {false, "speed override must be finite"};
   // Same floor as on_trajectory_goal, and for the same reason: below
   // kMinSpeedScale, effective_scale()'s internal clamp would silently run the
   // arm FASTER than the caller asked for. Refuse it here too, so the floor is
-  // unreachable from outside at either accept site.
+  // unreachable from outside at either accept site. Ahead of the direction
+  // check below: a below-floor or above-1.0 request is invalid regardless of
+  // who is asking.
   if (s < kMinSpeedScale || s > 1.0)
     return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) +
                        ", 1.0]; got " + std::to_string(s)};
-  speed_override_.store(s);
+  // Compare-and-store as ONE atomic operation against speed_override_, not a
+  // load, then a separate compare, then a separate store: that would leave a
+  // window between reading "current" and writing "new" for a concurrent
+  // caller's store to land in, making the comparison stale by the time the
+  // store happens -- which is exactly the race a caller-side snapshot
+  // comparison reopened (see Arbiter::on_set_speed_override). Do not
+  // "simplify" this back into a plain load-then-store.
+  double cur = speed_override_.load(std::memory_order_acquire);
+  do {
+    if (!may_raise && s >= cur)
+      return {false, "raising the speed override requires the current token"};
+  } while (!speed_override_.compare_exchange_weak(cur, s));
   return {true, ""};
 }
 ArmState Supervisor::on_query_state() {

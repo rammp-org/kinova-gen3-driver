@@ -112,8 +112,14 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
 
   // Runtime speed override (called on the backend thread; read by the sampler).
   // Refused, not clamped, outside [kMinSpeedScale, 1.0] -- see speed_override_
-  // below.
-  SpeedResult set_speed_override(double s);
+  // below. `may_raise` decides DIRECTION (the Arbiter decides only
+  // AUTHORISATION -- see arbiter.cpp): false refuses a set that is not a
+  // lowering relative to the CURRENT speed_override_, decided atomically
+  // with the store itself so there is no stale-read window to race. Defaults
+  // to true so an already-trusted direct caller (a test, or a backend with no
+  // Arbiter in front of it) is unrestricted, exactly as before this
+  // parameter existed.
+  SpeedResult set_speed_override(double s, bool may_raise = true);
   double speed_override() const { return speed_override_.load(); }
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?

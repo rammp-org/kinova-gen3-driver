@@ -1508,6 +1508,35 @@ TEST(SupervisorSpeed, BelowFloorOverrideIsRefusedNotSpedUpToTheFloor) {
   EXPECT_DOUBLE_EQ(f.sup.speed_override(), 1.0) << "a refused set changes nothing";
 }
 
+// Re-review finding on top of fix wave finding 3: the Arbiter's on_query_state()
+// comparison could be up to one pump period (10 ms @ pump_hz=100) stale, which
+// let an unauthenticated raise race a real lower and land as a raise. Direction
+// is now decided HERE, in Supervisor::set_speed_override, as one
+// compare-and-store against speed_override_ itself -- no separate read of a
+// snapshot, so no window to race. These three tests describe that contract
+// directly, at the level where it is actually enforced.
+TEST(SupervisorSpeed, LoweringWithoutMayRaiseSucceeds) {
+  SupFix f;
+  EXPECT_TRUE(f.sup.set_speed_override(0.5, /*may_raise=*/false).accepted);
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
+}
+
+TEST(SupervisorSpeed, RaisingWithoutMayRaiseIsRefusedAndLeavesThePreviousValueIntact) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);  // establish a lower value
+  const SpeedResult r = f.sup.set_speed_override(0.6, /*may_raise=*/false);
+  EXPECT_FALSE(r.accepted);
+  EXPECT_FALSE(r.message.empty());
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.3) << "a refused raise must not touch the stored value";
+}
+
+TEST(SupervisorSpeed, RaisingWithMayRaiseSucceeds) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);
+  EXPECT_TRUE(f.sup.set_speed_override(0.6, /*may_raise=*/true).accepted);
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.6);
+}
+
 TEST(SupervisorSpeed, AGoalWithAnOutOfRangeScaleIsRefused) {
   SupFix f;
   f.sup.start();

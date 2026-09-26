@@ -33,10 +33,14 @@ struct RecordingSink : public CommandSink, public StreamSink, public GripperSink
     return {true, ""};
   }
   double last_speed_override = 1.0;
-  // Tracks what a real downstream (e.g. Supervisor) would report back through
-  // ArmState::speed_override -- the Arbiter's only channel for "current".
+  // Emulates Supervisor::set_speed_override's OWN direction gating: the
+  // Arbiter no longer decides direction (it only tags may_raise and forwards
+  // unconditionally -- see arbiter.cpp), so a fake standing in for the
+  // downstream must apply the same rule for these tests to mean anything.
   double current_speed_override = 1.0;
   SpeedResult on_set_speed_override(const SpeedOverrideRequest& r) override {
+    if (!r.may_raise && r.scale >= current_speed_override)
+      return {false, "raising the speed override requires the current token"};
     last_speed_override = r.scale;
     current_speed_override = r.scale;
     return {true, ""};
@@ -192,8 +196,13 @@ TEST(Arbiter, SpeedOverrideLoweringForwardsWithoutRequiringTheToken) {
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.3);
 }
 
-// Fix wave, finding 3: raising the override past the arm's CURRENT effective value
-// is a speed-UP and must be gated like every other command -- unlike lowering.
+// Fix wave, finding 3 (and a re-review finding on top of it): raising the
+// override past the arm's CURRENT effective value is a speed-UP and must be
+// gated like every other command -- unlike lowering. The Arbiter itself no
+// longer decides "is this a raise" (that would mean comparing against a
+// possibly-stale snapshot); it only tags may_raise = admit(token) and
+// forwards unconditionally, so this DOES reach the downstream -- and is
+// refused there, per RecordingSink's emulation of Supervisor's own gate.
 TEST(Arbiter, SpeedOverrideRaisingWithoutTheTokenIsRefused) {
   RecordingSink sink;
   Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
@@ -202,7 +211,7 @@ TEST(Arbiter, SpeedOverrideRaisingWithoutTheTokenIsRefused) {
   const SpeedResult r = arb.on_set_speed_override(speed_req(0.9));  // stranger tries to undo it
   EXPECT_FALSE(r.accepted);
   EXPECT_FALSE(r.message.empty());
-  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2) << "never reached the downstream";
+  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2) << "the refused raise must not have taken effect";
 }
 
 TEST(Arbiter, SpeedOverrideRaisingWithTheTokenSucceeds) {
@@ -215,6 +224,12 @@ TEST(Arbiter, SpeedOverrideRaisingWithTheTokenSucceeds) {
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.9);
 }
 
+// admit() checks the e-stop latch BEFORE the token, so a raise attempt during
+// an e-stop gets may_raise=false regardless of whose token it carries. The
+// Arbiter no longer produces a distinguishable "e-stopped" message itself
+// (round 1 of this fix did; round 2 removed the Arbiter-side comparison
+// entirely) -- the refusal message now always comes from the downstream's
+// direction gate, the same one a missing-token raise hits.
 TEST(Arbiter, SpeedOverrideRaisingUnderAnEstopLatchIsRefused) {
   RecordingSink sink;
   Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
@@ -223,7 +238,7 @@ TEST(Arbiter, SpeedOverrideRaisingUnderAnEstopLatchIsRefused) {
   arb.estop();
   const SpeedResult r = arb.on_set_speed_override(speed_req(0.9, owner));  // even with the (now-dead) token
   EXPECT_FALSE(r.accepted);
-  EXPECT_EQ(r.message, "e-stopped");
+  EXPECT_FALSE(r.message.empty());
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2);
 }
 
