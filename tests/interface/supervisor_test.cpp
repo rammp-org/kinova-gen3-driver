@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <thread>
 
 #include "fake_backend.h"
@@ -1476,4 +1477,20 @@ TEST(Supervisor, QueryStateReportsEeTwistConsistentWithEePose) {
   EXPECT_TRUE(s.ee_twist.isApprox(expected, 1e-9))
       << "ee_twist " << s.ee_twist.transpose() << " != J*qd " << expected.transpose();
   EXPECT_GT(s.ee_twist.norm(), 1e-6) << "twist is the default, not a computed value";
+}
+
+TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {
+  SupFix f;
+  EXPECT_TRUE(f.sup.set_speed_override(0.5).accepted);
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
+
+  const SpeedResult too_fast = f.sup.set_speed_override(1.5);
+  EXPECT_FALSE(too_fast.accepted);
+  EXPECT_FALSE(too_fast.message.empty()) << "a refusal must say why";
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5) << "a refused set changes nothing";
+
+  EXPECT_FALSE(f.sup.set_speed_override(0.0).accepted);
+  EXPECT_FALSE(f.sup.set_speed_override(-0.2).accepted);
+  EXPECT_FALSE(f.sup.set_speed_override(std::numeric_limits<double>::quiet_NaN()).accepted);
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
 }

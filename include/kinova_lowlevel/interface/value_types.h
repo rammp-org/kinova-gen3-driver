@@ -139,6 +139,10 @@ struct GainsResult {
   bool accepted = false;
   std::string message;
 };
+struct SpeedResult {
+  bool accepted = false;
+  std::string message;
+};
 // Cancel had no struct to carry a token; it needs one, or any stranger can stop your motion.
 struct CancelRequest {
   GoalId id{};

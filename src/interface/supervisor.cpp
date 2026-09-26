@@ -256,7 +256,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
                 std::chrono::duration<double>(cfg_.mode_settle_s)));
       }
       const SubmitResult sr = traj_->submit(in.goal.trajectory, in.goal.control_mode,
-                                            in.goal.preemption, in.goal.path_tolerance);
+                                            in.goal.preemption, in.goal.path_tolerance,
+                                            in.goal.speed_scale);
       if (sr != SubmitResult::kAccepted) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
@@ -300,7 +301,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       JointFeedback fb;
       const bool ok = snap_.load(fb);        // sequence the read; don't rely on arg eval order
       q_meas = sampled_q(ok, fb.q, q_meas);  // failed read -> reuse last-good q (no phantom zero)
-      const ExecStatus st = traj_->tick(secs_since(t0), q_meas);
+      const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed_override_.load());
       TrajectoryFeedback fbk;
       fbk.actual = q_meas;
       fbk.fraction_complete = st.fraction;
@@ -415,6 +416,13 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
   return nullptr;
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
+SpeedResult Supervisor::set_speed_override(double s) {
+  if (!std::isfinite(s)) return {false, "speed override must be finite"};
+  if (s <= 0.0 || s > 1.0)
+    return {false, "speed override must be in (0, 1]; got " + std::to_string(s)};
+  speed_override_.store(s);
+  return {true, ""};
+}
 ArmState Supervisor::on_query_state() {
   ArmState s;
   state_snap_.load(s);

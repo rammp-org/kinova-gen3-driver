@@ -109,6 +109,11 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void on_gripper_setpoint(const GripperSetpoint&) override;
   GripperState on_query_gripper() override;
 
+  // Runtime speed override (called on the backend thread; read by the sampler).
+  // Refused, not clamped, outside (0, 1] -- see speed_override_ below.
+  SpeedResult set_speed_override(double s);
+  double speed_override() const { return speed_override_.load(); }
+
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
   // Why the last session ended. Distinct causes because a client cannot otherwise
@@ -168,6 +173,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // the rebind may be skipped -- either one alone leaves a silent desync.
   ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
   std::atomic<bool> in_flight_{false};  // read by on_trajectory_goal
+
+  // Written by the backend thread, read by the sampler. Only ever slows the
+  // arm: values outside (0, 1] are refused, not clamped.
+  std::atomic<double> speed_override_{1.0};
+  static_assert(std::atomic<double>::is_always_lock_free,
+                "speed_override_ is read from the sampler thread; must be lock-free");
 
   StreamingSession session_;              // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};  // mirrors session_, read by the sampler + goal pre-check
