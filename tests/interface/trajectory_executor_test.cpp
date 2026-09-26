@@ -502,6 +502,60 @@ TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
       << "the promoted goal must run at ITS scale, not the finished goal's";
 }
 
+// Gapless promotion (tick()) constructs the new Active with started=true
+// directly, so it never passes through the !a.started latch that a fresh
+// submit() uses. Tick spacing here must be small enough that a slew from the
+// wrong starting value cannot cover the whole gap in one step (dt_wall *
+// kScaleSlewPerSec must be well under the scale gap) — a 1 s step, as used
+// above, covers the entire 0..1 range and would hide the bug.
+TEST(ExecutorSpeedScale, PromotionLatchesToThePromotedGoalsScaleImmediately) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);   // A: fast
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 0.1);   // B: much slower
+
+  double t = 0.0;
+  ex.tick(t, vec7(0.0));  // start A
+  ExecStatus s{};
+  bool promoted = false;
+  for (int i = 0; i < 1000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-9)
+      << "the promoted goal must start at ITS OWN scale, not ramp down from "
+         "the outgoing goal's";
+}
+
+// The reverse direction: promoting into a FASTER scale must also latch
+// immediately, not ramp up from the outgoing (slower) goal's scale.
+TEST(ExecutorSpeedScale, PromotionLatchesToAFasterPromotedScaleTooNotRampingUp) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.1);   // A: slow
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 1.0);   // B: much faster
+
+  double t = 0.0;
+  ex.tick(t, vec7(0.0));  // start A, latches applied_ to 0.1 immediately
+  ExecStatus s{};
+  bool promoted = false;
+  for (int i = 0; i < 2000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9)
+      << "the promoted goal must start at its own (faster) scale, not ramp "
+         "up from the outgoing goal's";
+}
+
 TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);

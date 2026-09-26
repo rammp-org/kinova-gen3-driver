@@ -133,6 +133,10 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
       active_ = Active(*queued_, 0.0, now_s, true);  // traj_t=0, last_now_s=now
       path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
       scale_ = queued_scale_;
+      // A promoted goal starts at ITS OWN scale, same as a fresh submit's
+      // !a.started latch — otherwise gapless promotion ramps from the
+      // outgoing goal's scale, the exact step this feature exists to avoid.
+      applied_ = effective_scale(scale_, override_scale);
       queued_scale_ = 1.0;
       queued_.reset();
       return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};  // promoted this tick
