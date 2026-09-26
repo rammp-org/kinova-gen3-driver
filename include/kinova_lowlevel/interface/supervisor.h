@@ -92,6 +92,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
   GainsResult on_set_gains(const GainsRequest&) override;
+  SpeedResult on_set_speed_override(double) override;
   ArmState on_query_state() override;
   void on_halt(HaltReason) override;
 

@@ -418,6 +418,7 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
   return nullptr;
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
+SpeedResult Supervisor::on_set_speed_override(double s) { return set_speed_override(s); }
 SpeedResult Supervisor::set_speed_override(double s) {
   if (!std::isfinite(s)) return {false, "speed override must be finite"};
   if (s <= 0.0 || s > 1.0)

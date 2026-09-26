@@ -32,6 +32,11 @@ struct RecordingSink : public CommandSink, public StreamSink, public GripperSink
     ++gains;
     return {true, ""};
   }
+  double last_speed_override = 1.0;
+  SpeedResult on_set_speed_override(double s) override {
+    last_speed_override = s;
+    return {true, ""};
+  }
   ArmState on_query_state() override {
     ++queries;
     ArmState s;
@@ -162,6 +167,17 @@ TEST(Arbiter, SetGainsIsGated) {
   GainsRequest r;  // zero token
   EXPECT_FALSE(arb.on_set_gains(r).accepted);
   EXPECT_EQ(sink.gains, 0);
+}
+
+// Slowing the arm down is always allowed: it cannot make the arm do anything it was
+// not already doing, and an operator reaching for the dial should never be refused
+// because someone else holds the token.
+TEST(Arbiter, SpeedOverrideForwardsWithoutRequiringTheToken) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};  // no grant at all
+  const SpeedResult r = arb.on_set_speed_override(0.3);
+  EXPECT_TRUE(r.accepted);
+  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.3);
 }
 
 // ---------- revoke and the halt handshake ----------

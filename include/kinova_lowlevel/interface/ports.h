@@ -23,6 +23,13 @@ class CommandSink {
   virtual void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) = 0;
   virtual CancelResponse on_trajectory_cancel(const CancelRequest&) = 0;
   virtual GainsResult on_set_gains(const GainsRequest&) = 0;
+  // Slow everything down at runtime. NOT token-gated: it can only reduce
+  // speed, so it can never make the arm do something it was not already
+  // doing. Non-pure so existing implementers keep compiling; the default
+  // refuses, which is honest for a sink that cannot honour it.
+  virtual SpeedResult on_set_speed_override(double) {
+    return {false, "speed override not supported by this sink"};
+  }
   virtual ArmState on_query_state() = 0;
   // Stop the arm now. General primitive: ownership revocation and /estop both use it.
   virtual void on_halt(HaltReason) = 0;

@@ -146,6 +146,11 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
   }
   return down_.on_set_gains(r);
 }
+// Deliberately NOT token-gated. The override can only ever reduce speed, so it can
+// never make the arm do anything it was not already doing -- unlike on_set_gains,
+// refusing it because another client holds the token would be the wrong answer in
+// the one situation where someone is reaching for the speed dial.
+SpeedResult Arbiter::on_set_speed_override(double s) { return down_.on_set_speed_override(s); }
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
 // Ungated for the same reason on_query_state is: a read that requires ownership is a
 // read nobody can use to work out WHY they were refused.
