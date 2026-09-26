@@ -39,6 +39,11 @@ enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEm
 // forever; this is slow enough to be a hold in practice and still terminates.
 inline constexpr double kMinSpeedScale = 0.01;
 
+// How fast the applied scale may change, per second of wall time. A step in
+// the scale is a step in the commanded velocity; this bounds it. 2.0 means a
+// full 1.0 -> 0.0 change takes half a second.
+inline constexpr double kScaleSlewPerSec = 2.0;
+
 // The slower of the goal's own scale and the runtime override, clamped into
 // (0, 1]. Free and inline so it is unit-testable without threads. A non-finite
 // input is treated as "no request" rather than propagated: NaN compares false

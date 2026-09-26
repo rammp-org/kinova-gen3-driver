@@ -84,10 +84,20 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
     a.last_now_s = now_s;
     a.traj_t = 0.0;
     a.started = true;
+    // A goal submitted at a slow scale must start at it, not ramp down from
+    // whatever was previously in force.
+    applied_ = effective_scale(scale_, override_scale);
   }
   const double dt_wall = now_s - a.last_now_s;
   a.last_now_s = now_s;
-  applied_ = effective_scale(scale_, override_scale);
+  const double want = effective_scale(scale_, override_scale);
+  const double max_step = kScaleSlewPerSec * (dt_wall > 0.0 ? dt_wall : 0.0);
+  if (want > applied_ + max_step)
+    applied_ += max_step;
+  else if (want < applied_ - max_step)
+    applied_ -= max_step;
+  else
+    applied_ = want;
   a.traj_t += dt_wall * applied_;
   const double elapsed = a.traj_t;
   const double dur = a.tr.duration_s();

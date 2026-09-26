@@ -518,6 +518,24 @@ TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
       << "the replacement starts from zero, not from the old elapsed time";
 }
 
+TEST(ExecutorSpeedScale, AnOverrideChangeRampsRatherThanSteps) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(0.0, vec7(0.0), 1.0);
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9);
+
+  // Slam the override to 0.1 and step 10 ms. A step would move the reference
+  // discontinuously; the slew limit must keep the change bounded.
+  ex.tick(0.01, vec7(0.0), 0.1);
+  EXPECT_GT(ex.applied_scale(), 0.1 + 1e-6) << "must not arrive instantly";
+  EXPECT_LT(ex.applied_scale(), 1.0);
+
+  for (double t = 0.02; t < 3.0; t += 0.01) ex.tick(t, vec7(0.0), 0.1);
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-6) << "and must get there";
+}
+
 TEST(ExecutorSpeedScale, StaleQueuedScaleDoesNotLeakForward) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);
