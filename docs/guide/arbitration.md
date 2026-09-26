@@ -34,12 +34,24 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 |---|---|
 | no owner | no valid grant; commands are refused in `enforced` mode |
 | owned | exactly one owner: token, `owner_id`, `generation` |
-| e-stopped | **latched**; everything is refused, `disabled` mode included |
+| e-stopped | **latched**; every gated command is refused, `disabled` mode included — a handful of exceptions below are never gated |
 
-A command is admitted iff the bypass is on, or it carries the live token.
-`on_query_state()` is never gated — **reads are always open**, in every state.
-Cancel *is* gated: a stranger must not be able to stop your motion. The
-emergency path is e-stop, not cancel.
+A command is admitted iff the bypass is on, or it carries the live token —
+with a short list of exceptions. `on_query_state()` and `on_query_stream()`
+are never gated: reads are always open, in every state, including under an
+e-stop latch, because a read that requires ownership is a read nobody can use
+to work out why they were refused. `on_halt()` is never gated either — it is a
+bare pass-through in `Arbiter::on_halt` — because a safety stop must never
+wait on who holds the token. `on_set_speed_override()` is gated
+**asymmetrically**: *lowering* the effective override is ungated, even under
+an e-stop latch — it can only ever reduce speed, so it can never make the arm
+do something it was not already doing, and an operator reaching for the dial
+must never be refused because someone else holds the token — but *raising* it
+requires the live token, exactly like every other gated command (`admit()`
+checks the token and the e-stop latch together), because raising it can undo
+another operator's deliberate slow-down of a moving arm. Cancel *is* gated: a
+stranger must not be able to stop your motion. The emergency path is e-stop,
+not cancel.
 
 ## Handover stops the arm
 

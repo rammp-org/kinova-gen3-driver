@@ -146,11 +146,35 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
   }
   return down_.on_set_gains(r);
 }
-// Deliberately NOT token-gated. The override can only ever reduce speed, so it can
-// never make the arm do anything it was not already doing -- unlike on_set_gains,
-// refusing it because another client holds the token would be the wrong answer in
-// the one situation where someone is reaching for the speed dial.
-SpeedResult Arbiter::on_set_speed_override(double s) { return down_.on_set_speed_override(s); }
+// CORRECTED reasoning (fix wave, finding 3): the original comment here argued
+// the override was safe to forward ungated in every direction, because "it
+// can only ever reduce speed". That is true against the GOAL's own scale, but
+// false against the CURRENT override: a caller holding no token could call
+// this with 1.0 and undo another operator's deliberate slow-down of a moving
+// arm -- a speed-UP, unauthenticated.
+//
+// So the direction is what's ungated, not the method: LOWERING the override
+// relative to the arm's current effective value stays ungated -- it still can
+// only ever reduce speed, and an operator reaching for the dial must never be
+// refused because someone else holds the token. RAISING it is gated exactly
+// like every other command: admit() checks both the live token and the
+// e-stop latch, because raising can undo someone else's slow-down.
+//
+// "Current" comes from the downstream's own on_query_state().speed_override
+// (ArmState), not a copy kept here -- the Arbiter knows nothing about
+// control, only CommandSink, so this is the one channel it has.
+SpeedResult Arbiter::on_set_speed_override(const SpeedOverrideRequest& r) {
+  std::lock_guard<std::mutex> l(m_);
+  const double current = down_.on_query_state().speed_override;
+  if (r.scale < current) return down_.on_set_speed_override(r);
+  if (!admit(r.token)) {
+    ++rejected_;
+    return {false, estopped_.load(std::memory_order_acquire)
+                       ? "e-stopped"
+                       : "raising the speed override requires the current token"};
+  }
+  return down_.on_set_speed_override(r);
+}
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
 // Ungated for the same reason on_query_state is: a read that requires ownership is a
 // read nobody can use to work out WHY they were refused.

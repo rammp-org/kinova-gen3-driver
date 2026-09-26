@@ -130,6 +130,12 @@ struct ArmState {
   Vector6 ee_twist = Vector6::Zero();
   bool fault = false;
   double stamp_s = 0.0;
+  // The runtime speed override currently in force. Populated by the
+  // Supervisor's pump loop from the same atomic the sampler reads. Doubles as
+  // the Arbiter's "current value" for gating a speed-override request (see
+  // Arbiter::on_set_speed_override) and as an operator-visible answer to "did
+  // my slow-down get undone?".
+  double speed_override = 1.0;
 };
 struct GainsRequest {
   JointImpedanceGains gains{};
@@ -138,6 +144,14 @@ struct GainsRequest {
 struct GainsResult {
   bool accepted = false;
   std::string message;
+};
+// Mirrors GainsRequest's shape: a value carried alongside the capability
+// token that authorizes it, so the Arbiter can gate on the token without
+// widening CommandSink's on_set_speed_override signature into two arguments.
+struct SpeedOverrideRequest {
+  double scale = 1.0;
+  std::string sender_id;
+  Token token{};
 };
 struct SpeedResult {
   bool accepted = false;

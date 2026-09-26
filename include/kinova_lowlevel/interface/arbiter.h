@@ -41,7 +41,9 @@ class Arbiter : public CommandSink, public StreamSink, public GripperSink, publi
   void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
   GainsResult on_set_gains(const GainsRequest&) override;
-  SpeedResult on_set_speed_override(double) override;  // never gated -- see arbiter.cpp
+  // Lowering is never gated; raising past the arm's current effective
+  // override is -- see arbiter.cpp.
+  SpeedResult on_set_speed_override(const SpeedOverrideRequest&) override;
   ArmState on_query_state() override;  // never gated -- reads are always open
   void on_halt(HaltReason) override;   // pass-through
 

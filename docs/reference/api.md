@@ -435,28 +435,40 @@ implements them.
 
 ### `TrajectoryGoal::speed_scale` — `interface/value_types.h`
 
-`TrajectoryGoal` carries `double speed_scale = 1.0`, in `(0, 1]`: execute this
-goal's path slower by dilating `TrajectoryExecutor`'s clock rather than
-altering the path itself — see the [speed scale
-deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale). A value
-outside `(0, 1]`, including non-finite, is **refused** at `on_trajectory_goal`
-(`GoalResponse::kReject`), never clamped.
+`TrajectoryGoal` carries `double speed_scale = 1.0`, in `[kMinSpeedScale,
+1.0]` (`kMinSpeedScale = 0.01`): execute this goal's path slower by dilating
+`TrajectoryExecutor`'s clock rather than altering the path itself — see the
+[speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
+The floor exists because a scale of zero would stop the trajectory clock and
+hang the goal forever; `effective_scale()` clamps to it internally, but that
+clamp is unreachable from outside because this accept-time check refuses
+anything below it. A value outside `[kMinSpeedScale, 1.0]`, including
+non-finite, is **refused** at `on_trajectory_goal` (`GoalResponse::kReject`),
+never clamped — accepting a below-floor request and silently running it at the
+floor would be *faster* than asked for, not slower.
 
-### `CommandSink::on_set_speed_override(double)` / `Supervisor::set_speed_override(double)`
+### `CommandSink::on_set_speed_override(const SpeedOverrideRequest&)` / `Supervisor::set_speed_override(double)`
 
 A runtime override an operator can use to slow every in-flight goal down,
-independent of what the goal itself requested. Returns `SpeedResult{accepted,
-message}`; a value outside `(0, 1]` (including non-finite) is refused and
-leaves the current override unchanged. The effective scale applied by the
-executor is `min(goal.speed_scale, override)`, clamped to `(0, 1]` and
-slew-limited at `kScaleSlewPerSec` — see the [speed scale
-deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
+independent of what the goal itself requested. `SpeedOverrideRequest{scale,
+sender_id, token}` mirrors `GainsRequest`'s shape. Returns
+`SpeedResult{accepted, message}`; a scale outside `[kMinSpeedScale, 1.0]`
+(including non-finite) is refused and leaves the current override unchanged,
+for the same floor reason as `speed_scale` above. The effective scale applied
+by the executor is `min(goal.speed_scale, override)`, clamped to
+`[kMinSpeedScale, 1.0]` and slew-limited at `kScaleSlewPerSec` — see the
+[speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
 
-Unlike every other `CommandSink` method, `on_set_speed_override` is **not**
-token-gated (`Arbiter::on_set_speed_override` forwards it ungated — see
-`arbiter.cpp`): it can only ever slow the arm down, so it can never make the
-arm do something it was not already doing, and gating it would let one
-client's ownership block another operator's hand on the speed dial.
+`on_set_speed_override` is gated **asymmetrically**, unlike every other
+`CommandSink` method. *Lowering* the effective override (`scale` below the
+arm's current one, read from `ArmState::speed_override`) is **not**
+token-gated: it can only ever slow the arm down further, so it can never make
+the arm do something it was not already doing, and gating it would let one
+client's ownership block another operator's hand on the speed dial. *Raising*
+it **is** gated exactly like every other command (`Arbiter::on_set_speed_override`
+calls `admit()`, so it checks both the live token and the e-stop latch):
+raising can undo another operator's deliberate slow-down of a moving arm, so
+an unauthenticated caller must not be able to do it.
 
 ### `CommandSink::on_halt(HaltReason)`
 
@@ -478,15 +490,18 @@ target at the last-good **measured** q.
 
 ### Gating
 
-Every `CommandSink` method is gated except three: `on_query_state()` (reads
-are always open), `on_set_speed_override()` (see above — it can only slow the
-arm down), and `on_halt()` (a bare forward to the downstream `Supervisor` —
-`Arbiter::on_halt` takes no lock and never calls `admit()`). Halting is a
-safety action, one step stronger than the speed-override reasoning: gating it
-would mean the arm could not be stopped by whoever does not currently hold the
-token. `on_trajectory_accepted()` re-checks the token on the goal rather than
-trusting that a matching `on_trajectory_goal()` preceded it. `CancelRequest`
-exists so that cancel carries a token too.
+Every `CommandSink` method is gated except two outright, plus one that is
+gated in only one of its two directions: `on_query_state()` (reads are always
+open), `on_halt()` (a bare forward to the downstream `Supervisor` —
+`Arbiter::on_halt` takes no lock and never calls `admit()`), and
+`on_set_speed_override()`, which is ungated when *lowering* the effective
+override and gated (token + e-stop latch, via `admit()`) when *raising* it —
+see above. Halting is a safety action, one step stronger than the
+lowering-a-speed-override reasoning: gating it would mean the arm could not be
+stopped by whoever does not currently hold the token. `on_trajectory_accepted()`
+re-checks the token on the goal rather than trusting that a matching
+`on_trajectory_goal()` preceded it. `CancelRequest` exists so that cancel
+carries a token too.
 
 Rejections return `GoalResponse::kRejectUnauthorized` (goals),
 `CancelResponse::kReject` (cancel), or `{accepted=false}` (gains), and increment

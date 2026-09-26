@@ -33,14 +33,19 @@ struct RecordingSink : public CommandSink, public StreamSink, public GripperSink
     return {true, ""};
   }
   double last_speed_override = 1.0;
-  SpeedResult on_set_speed_override(double s) override {
-    last_speed_override = s;
+  // Tracks what a real downstream (e.g. Supervisor) would report back through
+  // ArmState::speed_override -- the Arbiter's only channel for "current".
+  double current_speed_override = 1.0;
+  SpeedResult on_set_speed_override(const SpeedOverrideRequest& r) override {
+    last_speed_override = r.scale;
+    current_speed_override = r.scale;
     return {true, ""};
   }
   ArmState on_query_state() override {
     ++queries;
     ArmState s;
     s.stamp_s = 42.0;
+    s.speed_override = current_speed_override;
     return s;
   }
   void on_halt(HaltReason r) override { halts.push_back(r); }
@@ -75,6 +80,12 @@ TrajectoryGoal goal_with(const Token& t) {
   TrajectoryGoal g;
   g.token = t;
   return g;
+}
+SpeedOverrideRequest speed_req(double scale, const Token& t = Token{}) {
+  SpeedOverrideRequest r;
+  r.scale = scale;
+  r.token = t;
+  return r;
 }
 }  // namespace
 
@@ -171,13 +182,49 @@ TEST(Arbiter, SetGainsIsGated) {
 
 // Slowing the arm down is always allowed: it cannot make the arm do anything it was
 // not already doing, and an operator reaching for the dial should never be refused
-// because someone else holds the token.
-TEST(Arbiter, SpeedOverrideForwardsWithoutRequiringTheToken) {
+// because someone else holds the token. The sink's current value defaults to 1.0,
+// so 0.3 is a lowering request.
+TEST(Arbiter, SpeedOverrideLoweringForwardsWithoutRequiringTheToken) {
   RecordingSink sink;
   Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};  // no grant at all
-  const SpeedResult r = arb.on_set_speed_override(0.3);
+  const SpeedResult r = arb.on_set_speed_override(speed_req(0.3));
   EXPECT_TRUE(r.accepted);
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.3);
+}
+
+// Fix wave, finding 3: raising the override past the arm's CURRENT effective value
+// is a speed-UP and must be gated like every other command -- unlike lowering.
+TEST(Arbiter, SpeedOverrideRaisingWithoutTheTokenIsRefused) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
+  const Token owner = arb.grant("operator").token;
+  ASSERT_TRUE(arb.on_set_speed_override(speed_req(0.2, owner)).accepted);  // slow the arm down
+  const SpeedResult r = arb.on_set_speed_override(speed_req(0.9));  // stranger tries to undo it
+  EXPECT_FALSE(r.accepted);
+  EXPECT_FALSE(r.message.empty());
+  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2) << "never reached the downstream";
+}
+
+TEST(Arbiter, SpeedOverrideRaisingWithTheTokenSucceeds) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
+  const Token owner = arb.grant("operator").token;
+  ASSERT_TRUE(arb.on_set_speed_override(speed_req(0.2, owner)).accepted);
+  const SpeedResult r = arb.on_set_speed_override(speed_req(0.9, owner));  // same owner, raising back up
+  EXPECT_TRUE(r.accepted);
+  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.9);
+}
+
+TEST(Arbiter, SpeedOverrideRaisingUnderAnEstopLatchIsRefused) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
+  const Token owner = arb.grant("operator").token;
+  ASSERT_TRUE(arb.on_set_speed_override(speed_req(0.2, owner)).accepted);
+  arb.estop();
+  const SpeedResult r = arb.on_set_speed_override(speed_req(0.9, owner));  // even with the (now-dead) token
+  EXPECT_FALSE(r.accepted);
+  EXPECT_EQ(r.message, "e-stopped");
+  EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2);
 }
 
 // ---------- revoke and the halt handshake ----------

@@ -86,6 +86,7 @@ void Supervisor::pump_loop() {
       s.ee_pose = pump_dyn_.fk(fb.q);
       pump_dyn_.jacobian(fb.q, pump_J_);
       s.ee_twist = pump_J_ * fb.qd;
+      s.speed_override = speed_override_.load();
       state_snap_.store(s);
       stream_.publish_state(s);
     }
@@ -422,7 +423,9 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
   return nullptr;
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
-SpeedResult Supervisor::on_set_speed_override(double s) { return set_speed_override(s); }
+SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {
+  return set_speed_override(r.scale);
+}
 SpeedResult Supervisor::set_speed_override(double s) {
   if (!std::isfinite(s)) return {false, "speed override must be finite"};
   // Same floor as on_trajectory_goal, and for the same reason: below
