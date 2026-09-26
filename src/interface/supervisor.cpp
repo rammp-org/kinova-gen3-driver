@@ -341,6 +341,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
+  if (!std::isfinite(g.speed_scale) || g.speed_scale <= 0.0 || g.speed_scale > 1.0)
+    return GoalResponse::kReject;  // out-of-range scale; reason surfaces at the ROS boundary
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }

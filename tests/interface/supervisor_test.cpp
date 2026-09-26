@@ -1494,3 +1494,26 @@ TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {
   EXPECT_FALSE(f.sup.set_speed_override(std::numeric_limits<double>::quiet_NaN()).accepted);
   EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
 }
+
+TEST(SupervisorSpeed, AGoalWithAnOutOfRangeScaleIsRefused) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  for (double bad : {1.5, 0.0, -0.5, std::numeric_limits<double>::quiet_NaN()}) {
+    TrajectoryGoal g;
+    g.trajectory = ramp7(0.0, 0.2, 1.0);
+    g.speed_scale = bad;
+    EXPECT_NE(f.sup.on_trajectory_goal(g), GoalResponse::kAccept)
+        << "scale " << bad << " must be refused at accept time";
+  }
+  f.sup.stop();
+  f.teardown();
+}
+
+TEST(SupervisorSpeed, ADefaultConstructedGoalIsFullSpeed) {
+  // on_trajectory_cancel pushes a default-constructed TrajectoryGoal onto the
+  // inbox; every field must be harmless at its default on that path.
+  const TrajectoryGoal g;
+  EXPECT_DOUBLE_EQ(g.speed_scale, 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(g.speed_scale, 1.0), 1.0);
+}
