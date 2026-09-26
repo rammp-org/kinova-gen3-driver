@@ -483,3 +483,37 @@ TEST(ExecutorSpeedScale, FullScaleIsIdenticalToBeforeTheFeature) {
   EXPECT_NEAR(mid.fraction, 0.5, 1e-9);
   EXPECT_NEAR(sink.last[0], 0.5, 1e-9);
 }
+
+TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 0.5);
+
+  ex.tick(0.0, vec7(0.0));
+  ExecStatus p = ex.tick(1.0, vec7(1.0));       // first finishes, second promoted
+  ASSERT_TRUE(p.promoted);
+  EXPECT_NEAR(p.fraction, 0.0, 1e-9) << "the promoted goal starts at zero";
+
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));     // 1 s wall at scale 0.5
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9)
+      << "the promoted goal must run at ITS scale, not the finished goal's";
+}
+
+TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(0.0, vec7(0.0));
+  ex.tick(1.5, vec7(0.0));  // 1.5 s into the first trajectory
+
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(2.0, vec7(0.0));
+  ExecStatus s = ex.tick(2.5, vec7(0.0));
+  EXPECT_NEAR(s.fraction, 0.25, 1e-9)
+      << "the replacement starts from zero, not from the old elapsed time";
+}
