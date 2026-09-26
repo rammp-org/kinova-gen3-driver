@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
+#include <limits>
 
 #include "kinova_lowlevel/units.h"
 using namespace kinova::interface;
@@ -425,4 +427,27 @@ TEST(TrajectorySample, HigherOrderDegeneraciesAreSafe) {
   single.has_velocities = true;
   single.points = {{vec7(0.3), 0.0}};
   EXPECT_NEAR(sample(single, 2.0)[0], 0.3, 1e-9);
+}
+
+TEST(EffectiveScale, TakesTheSlowerOfGoalAndOverride) {
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(0.25, 1.0), 0.25);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 0.3), 0.3);
+  EXPECT_DOUBLE_EQ(effective_scale(0.5, 0.2), 0.2);
+}
+
+TEST(EffectiveScale, NeverExceedsOneAndNeverReachesZero) {
+  // The contract is "this can only ever slow the arm down".
+  EXPECT_DOUBLE_EQ(effective_scale(2.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 5.0), 1.0);
+  EXPECT_GT(effective_scale(0.0, 1.0), 0.0);
+  EXPECT_GT(effective_scale(-1.0, 1.0), 0.0);
+}
+
+TEST(EffectiveScale, NonFiniteFallsBackToFullSpeed) {
+  // NaN compares false against every bound, so a naive clamp would pass it
+  // straight through and stop the clock forever.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_DOUBLE_EQ(effective_scale(nan, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, nan), 1.0);
 }

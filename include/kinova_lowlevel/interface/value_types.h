@@ -100,6 +100,9 @@ struct TrajectoryGoal {
   JointVec path_tolerance = JointVec::Constant(-1.0);  // <0 disables (matches executor)
   JointVec goal_tolerance = JointVec::Constant(-1.0);
   double goal_time_tolerance_s = 0.0;
+  // Execute this goal slower: (0, 1], 1.0 = as planned. Dilates the executor's
+  // clock, so the path is unchanged and the commanded velocity scales with it.
+  double speed_scale = 1.0;
   ControlModeKind control_mode = ControlModeKind::kPosition;
   Preemption preemption = Preemption::kLatestWins;
   JointImpedanceGains gains{};

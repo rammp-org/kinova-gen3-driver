@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cmath>
 #include <optional>
 #include <vector>
 
@@ -32,6 +33,23 @@ kinova::JointVec sample(const Trajectory& tr, double t_s);
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };
 enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };
+
+// Floor for the effective scale. Zero would stop the clock and hang the goal
+// forever; this is slow enough to be a hold in practice and still terminates.
+inline constexpr double kMinSpeedScale = 0.01;
+
+// The slower of the goal's own scale and the runtime override, clamped into
+// (0, 1]. Free and inline so it is unit-testable without threads. A non-finite
+// input is treated as "no request" rather than propagated: NaN compares false
+// against every bound, and a NaN scale would stop the trajectory clock dead.
+inline double effective_scale(double goal_scale, double override_scale) {
+  const double g = std::isfinite(goal_scale) ? goal_scale : 1.0;
+  const double o = std::isfinite(override_scale) ? override_scale : 1.0;
+  double s = g < o ? g : o;
+  if (s > 1.0) s = 1.0;
+  if (s < kMinSpeedScale) s = kMinSpeedScale;
+  return s;
+}
 
 struct ExecStatus {
   static constexpr int kOk = 0;
