@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "kinova_lowlevel/joint_target_sink.h"  // kinova::JointTargetSink (the mode seam)
@@ -86,9 +87,11 @@ class TrajectoryExecutor {
     Trajectory tr;
     // Trajectory time, ACCUMULATED at dt * scale — not a difference of wall
     // stamps. That is what lets the scale change while a goal is running.
-    double traj_t = 0.0;
-    double last_now_s = 0.0;
-    bool started = false;
+    double traj_t;
+    double last_now_s;
+    bool started;
+    Active(Trajectory t, double traj_t_, double last_now_s_, bool started_)
+        : tr(std::move(t)), traj_t(traj_t_), last_now_s(last_now_s_), started(started_) {}
   };
   kinova::JointTargetSink& sink_;
   std::array<bool, kinova::kNumJoints> continuous_{};

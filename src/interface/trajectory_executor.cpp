@@ -52,7 +52,7 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
   if (!is_active()) {  // idle -> adopt immediately
     mode_ = mode;
-    active_ = Active{tr, 0.0, 0.0, false};
+    active_ = Active(tr, 0.0, 0.0, false);
     path_tol_ = path_tol;  // tolerance guards the adopted trajectory
     scale_ = speed_scale;
     queued_.reset();
@@ -60,7 +60,7 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   }
   // active, same mode: preempt per the caller's policy.
   if (p == Preemption::kLatestWins) {
-    active_ = Active{tr, 0.0, 0.0, false};  // replace + reset clock (started=false)
+    active_ = Active(tr, 0.0, 0.0, false);  // replace + reset clock (started=false)
     path_tol_ = path_tol;                   // new trajectory's tolerance takes over
     scale_ = speed_scale;
     queued_.reset();
@@ -120,7 +120,7 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
 
   if (elapsed >= dur) {
     if (queued_) {  // gapless promotion — no idle gap
-      active_ = Active{*queued_, 0.0, now_s, true};  // traj_t=0, last_now_s=now
+      active_ = Active(*queued_, 0.0, now_s, true);  // traj_t=0, last_now_s=now
       path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
       scale_ = queued_scale_;
       queued_scale_ = 1.0;
