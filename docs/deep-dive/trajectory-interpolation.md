@@ -141,6 +141,12 @@ only ever slow a goal down, never speed one up past what it asked for. Both
 this floor — see `api.md` — so `effective_scale()`'s internal clamp is a
 belt-and-braces guarantee, not something a caller can actually reach.
 
+Both dials are exposed on `trajectory_run` for demonstrating this on a bench:
+`--speed-scale S` sets the goal's own scale at `submit()`, and `--scale-at T:S`
+changes the runtime override mid-flight at `t = T`, printing the applied scale
+as it ramps. The second is the one that shows the slew limiter below, since a
+goal-level scale is in force from the first tick and so never ramps.
+
 A change in the effective scale **mid-goal** is slew-limited at
 `kScaleSlewPerSec` (2.0/s) rather than applied instantly, so the *commanded
 velocity* never steps the way a bare change of clock rate would. That
