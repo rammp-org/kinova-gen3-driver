@@ -24,8 +24,9 @@
 //   # 3. move ONE joint a small amount along a timed trajectory
 //   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2
 //
-//   # sim (no robot): plumbing only — SimTransport does not move.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --joint 5 --delta 0.2
+//   # sim (no robot): plumbing only — SimTransport does not move. --no-guard
+//   # because a stationary q always trips the divergence guard here; see below.
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --joint 5 --delta 0.2 --no-guard
 //
 // SPEED SCALE. The executor dilates its own clock (traj_t += dt * scale), so the
 // PATH is untouched and only the pace changes; velocity scales with s, and
@@ -41,7 +42,27 @@
 //   #    kScaleSlewPerSec rather than stepping, because a step in scale is a step
 //   #    in commanded velocity. Watch the "applied" column move.
 //   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf \
-//       --joint 5 --delta 0.4 --duration 8 --scale-at 3.0:0.2
+//       --joint 5 --delta 0.4 --duration 8 --scale-at 3.0:0.2 --no-guard
+//
+// WHY --no-guard ON THE SIM EXAMPLES. SimTransport steps only the GRIPPER; the
+// arm's q never tracks the command, so measured q sits at the entry value for
+// the whole run while the sampled reference walks away from it. The divergence
+// guard is therefore guaranteed to fire in sim on any move larger than
+// --path-tol (0.2 rad default) — it is the guard working, not the trajectory
+// misbehaving, and it says nothing about the scale. Keep the guard ON against a
+// real arm, which is the only place its answer means anything.
+//
+// The abort is still legible if you leave the guard on: it fires exactly when
+// the reference crosses --path-tol, so the WALL TIME of the abort is itself a
+// readout of the dilated clock. The example above trips at ~7.2 s rather than
+// the ~4.0 s it would take undilated.
+//
+// Expect a nonzero residual in sim even on a clean completion, for the same
+// reason: JointPositionMode leashes its reference to within --leash (0.35 rad)
+// of measured q, and measured q never moves, so a --delta past the leash leaves
+// final_ref pinned at it. The example above completes with code=0 at ~27.2 s
+// wall and final_ref +0.35 of a +0.40 goal. Against a real arm q follows and the
+// residual goes to zero; in sim, read the COMPLETION TIME, not the residual.
 //
 // Out-of-range is REFUSED, not clamped: a scale below the floor would otherwise
 // be silently sped UP to it, running the arm faster than asked.
