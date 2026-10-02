@@ -12,6 +12,8 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-02
+
 ### Added
 
 - `TrajectoryGoal::speed_scale` and a runtime speed override on the `Supervisor`
@@ -176,7 +178,8 @@ full list, and none of these are API:
 - A KORTEX-enabled `install()` bakes the build machine's SDK path into the
   exported target, so it is not relocatable ([#50]).
 
-[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rammp-org/kinova-gen3-driver/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rammp-org/kinova-gen3-driver/releases/tag/v1.0.0
