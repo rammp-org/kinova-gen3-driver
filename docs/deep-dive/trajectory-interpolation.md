@@ -117,6 +117,63 @@ sampler is still a separate `sleep_for` thread, not synchronised with the RT
 cycle, so the staircase is shorter rather than gone; evaluating the trajectory
 inside the RT loop would remove it.
 
+## Speed scale
+
+`TrajectoryGoal::speed_scale` and `Supervisor::set_speed_override` slow a goal
+down by dilating `TrajectoryExecutor`'s own clock: each tick accumulates
+`traj_t += dt_wall * scale` instead of `traj_t += dt_wall`, then calls
+`sample(tr, traj_t)` exactly as before. `sample()` never sees the scale — the
+path it interpolates is byte-for-byte the plan the goal carried. Running the
+same geometric path at a slower clock means every derivative the planner's
+polynomial carries scales with the clock rate: commanded velocity scales with
+`s`, acceleration with `s²`. This falls straight out of the chain rule for a
+time-reparameterised curve; there is no separate place in the code that scales
+`qd`/`qdd`, and there should never be one — `sample()` returns a position, and
+`JointTargetSink` only accepts a position, so a derivative-scaling path would
+have no consumer.
+
+The effective scale is `min(goal_scale, override_scale)`, clamped to
+`[kMinSpeedScale, 1.0]` (`kMinSpeedScale = 0.01` — zero would stop the
+trajectory clock and hang the goal forever) — whichever of the goal's own
+request and the operator's runtime override is slower wins, so an operator can
+only ever slow a goal down, never speed one up past what it asked for. Both
+`speed_scale` and the runtime override are **refused**, not clamped, below
+this floor — see `api.md` — so `effective_scale()`'s internal clamp is a
+belt-and-braces guarantee, not something a caller can actually reach.
+
+Both dials are exposed on `trajectory_run` for demonstrating this on a bench:
+`--speed-scale S` sets the goal's own scale at `submit()`, and `--scale-at T:S`
+changes the runtime override mid-flight at `t = T`, printing the applied scale
+as it ramps. The second is the one that shows the slew limiter below, since a
+goal-level scale is in force from the first tick and so never ramps.
+
+A change in the effective scale **mid-goal** is slew-limited at
+`kScaleSlewPerSec` (2.0/s) rather than applied instantly, so the *commanded
+velocity* never steps the way a bare change of clock rate would. That
+guarantee is scoped to mid-goal changes: at a goal **boundary** — a fresh
+`submit()` (including a `kLatestWins` preemption) or a queued goal's gapless
+promotion — the applied scale latches to the new goal's own scale
+immediately, on its very first tick, including *upward*. A goal submitted
+while the override is already down starts at that slower scale from its
+first tick; a slow goal followed by a faster queued one promotes straight to
+the faster scale rather than ramping up from the outgoing goal's (see
+`PromotionLatchesToAFasterPromotedScaleTooNotRampingUp`). A step in the
+commanded reference at a goal boundary is inherent to switching trajectories
+at all, scale aside — the slew limit only governs a change of scale *within*
+one running goal.
+
+**This is not `max_ref_speed`.** `max_ref_speed` rate-limits how fast
+`JointPositionMode` may move its reference *toward* whatever `q_d(t)` the
+executor just handed it — a per-cycle clamp on the mode's own output, with no
+knowledge that a trajectory or a plan exists above it. Turning that down while
+the executor keeps sampling the plan at its normal rate makes the reference
+fall behind the sample the executor is publishing; the gap between
+`q_desired` and where the reference actually is grows without bound, and that
+manufactured gap is exactly what trips `PATH_TOLERANCE_VIOLATED`. Slowing a
+goal down is a `speed_scale`/override problem, not a `max_ref_speed` one:
+dilate the clock feeding `sample()`, don't throttle the mode consuming its
+output.
+
 ## Where the profile comes from
 
 The ROS2 frontend's `to_trajectory_goal` mapping copies `velocities` and

@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
+#include <limits>
 
 #include "kinova_lowlevel/units.h"
 using namespace kinova::interface;
@@ -38,7 +40,11 @@ TEST(TrajectorySample, HandlesEmptyAndSingleWaypoint) {
 namespace {
 struct RecordingSink : kinova::JointTargetSink {
   std::vector<kinova::JointVec> calls;
-  void set_target(const kinova::JointVec& q) noexcept override { calls.push_back(q); }
+  kinova::JointVec last = kinova::JointVec::Zero();
+  void set_target(const kinova::JointVec& q) noexcept override {
+    calls.push_back(q);
+    last = q;
+  }
 };
 kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
   return {{{vec7(0.0), 0.0}, {vec7(1.0), dur}}};
@@ -73,6 +79,38 @@ TEST(ExecutorSubmit, RejectsModeChangeWhileInFlight) {
   // same-mode goal is fine
   EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)),
             SubmitResult::kAccepted);
+}
+
+TEST(ExecutorSubmit, RejectsAnOutOfRangeOrNonFiniteSpeedScale) {
+  // Second layer under the Supervisor's accept-time check: a goal can reach
+  // submit() without passing on_trajectory_goal, and effective_scale() clamps
+  // internally -- a below-floor scale that got this far would silently run the
+  // arm FASTER than asked, and a non-finite one at full speed. Refuse, never
+  // clamp, on every path (direct, latest-wins, queued).
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using kinova::interface::ControlModeKind;
+  using kinova::interface::Preemption;
+  using kinova::interface::SubmitResult;
+  const double bad[] = {0.001,
+                        0.0,
+                        -1.0,
+                        1.5,
+                        std::numeric_limits<double>::quiet_NaN(),
+                        std::numeric_limits<double>::infinity()};
+  for (double s : bad) {
+    EXPECT_EQ(
+        ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0), s),
+        SubmitResult::kRejectedSpeedScale)
+        << "scale " << s;
+    EXPECT_FALSE(ex.is_active()) << "scale " << s;  // refused before any state change
+  }
+  // The queued path must refuse too: a bad scale latent in queued_scale_ would
+  // only surface at promotion, mid-motion.
+  ASSERT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.5),
+            SubmitResult::kAccepted);
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.001),
+            SubmitResult::kRejectedSpeedScale);
 }
 
 TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
@@ -425,4 +463,185 @@ TEST(TrajectorySample, HigherOrderDegeneraciesAreSafe) {
   single.has_velocities = true;
   single.points = {{vec7(0.3), 0.0}};
   EXPECT_NEAR(sample(single, 2.0)[0], 0.3, 1e-9);
+}
+
+TEST(EffectiveScale, TakesTheSlowerOfGoalAndOverride) {
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(0.25, 1.0), 0.25);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 0.3), 0.3);
+  EXPECT_DOUBLE_EQ(effective_scale(0.5, 0.2), 0.2);
+}
+
+TEST(EffectiveScale, NeverExceedsOneAndNeverReachesZero) {
+  // The contract is "this can only ever slow the arm down".
+  EXPECT_DOUBLE_EQ(effective_scale(2.0, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, 5.0), 1.0);
+  EXPECT_GT(effective_scale(0.0, 1.0), 0.0);
+  EXPECT_GT(effective_scale(-1.0, 1.0), 0.0);
+}
+
+TEST(EffectiveScale, NonFiniteFallsBackToFullSpeed) {
+  // NaN compares false against every bound, so a naive clamp would pass it
+  // straight through and stop the clock forever.
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_DOUBLE_EQ(effective_scale(nan, 1.0), 1.0);
+  EXPECT_DOUBLE_EQ(effective_scale(1.0, nan), 1.0);
+}
+
+TEST(ExecutorSpeedScale, HalfScaleTakesTwiceAsLongInWallTime) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.5);
+
+  ex.tick(0.0, vec7(0.0));                   // latch the clock
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));  // 2 s wall = 1 s trajectory time
+  EXPECT_TRUE(mid.active);
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9) << "fraction must track the SCALED clock";
+  EXPECT_NEAR(sink.last[0], 0.5, 1e-9) << "halfway along a 0->1 ramp";
+
+  ExecStatus end = ex.tick(4.0, vec7(1.0));  // 4 s wall = 2 s trajectory time
+  EXPECT_TRUE(end.completed);
+  EXPECT_NEAR(end.fraction, 1.0, 1e-9);
+}
+
+TEST(ExecutorSpeedScale, FullScaleIsIdenticalToBeforeTheFeature) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0));  // default scale
+  ex.tick(10.0, vec7(0.0));
+  ExecStatus mid = ex.tick(11.0, vec7(0.0));
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9);
+  EXPECT_NEAR(sink.last[0], 0.5, 1e-9);
+}
+
+TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 0.5);
+
+  ex.tick(0.0, vec7(0.0));
+  ExecStatus p = ex.tick(1.0, vec7(1.0));  // first finishes, second promoted
+  ASSERT_TRUE(p.promoted);
+  EXPECT_NEAR(p.fraction, 0.0, 1e-9) << "the promoted goal starts at zero";
+
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));  // 1 s wall at scale 0.5
+  EXPECT_NEAR(mid.fraction, 0.5, 1e-9)
+      << "the promoted goal must run at ITS scale, not the finished goal's";
+}
+
+// Gapless promotion (tick()) constructs the new Active with started=true
+// directly, so it never passes through the !a.started latch that a fresh
+// submit() uses. Tick spacing here must be small enough that a slew from the
+// wrong starting value cannot cover the whole gap in one step (dt_wall *
+// kScaleSlewPerSec must be well under the scale gap) — a 1 s step, as used
+// above, covers the entire 0..1 range and would hide the bug.
+TEST(ExecutorSpeedScale, PromotionLatchesToThePromotedGoalsScaleImmediately) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);  // A: fast
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 0.1);  // B: much slower
+
+  double t = 0.0;
+  ex.tick(t, vec7(0.0));  // start A
+  ExecStatus s{};
+  bool promoted = false;
+  for (int i = 0; i < 1000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-9)
+      << "the promoted goal must start at ITS OWN scale, not ramp down from "
+         "the outgoing goal's";
+}
+
+// The reverse direction: promoting into a FASTER scale must also latch
+// immediately, not ramp up from the outgoing (slower) goal's scale.
+TEST(ExecutorSpeedScale, PromotionLatchesToAFasterPromotedScaleTooNotRampingUp) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.1);  // A: slow
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
+            kinova::JointVec::Constant(-1.0), 1.0);  // B: much faster
+
+  double t = 0.0;
+  ex.tick(t, vec7(0.0));  // start A, latches applied_ to 0.1 immediately
+  ExecStatus s{};
+  bool promoted = false;
+  for (int i = 0; i < 2000 && !promoted; ++i) {
+    t += 0.01;
+    s = ex.tick(t, vec7(0.0));
+    promoted = s.promoted;
+  }
+  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9)
+      << "the promoted goal must start at its own (faster) scale, not ramp "
+         "up from the outgoing goal's";
+}
+
+TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(0.0, vec7(0.0));
+  ex.tick(1.5, vec7(0.0));  // 1.5 s into the first trajectory
+
+  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(2.0, vec7(0.0));
+  ExecStatus s = ex.tick(2.5, vec7(0.0));
+  EXPECT_NEAR(s.fraction, 0.25, 1e-9)
+      << "the replacement starts from zero, not from the old elapsed time";
+}
+
+TEST(ExecutorSpeedScale, AnOverrideChangeRampsRatherThanSteps) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(0.0, vec7(0.0), 1.0);
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9);
+
+  // Slam the override to 0.1 and step 10 ms. A step would move the reference
+  // discontinuously; the slew limit must keep the change bounded. Pinned to
+  // the actual constant (kScaleSlewPerSec = 2.0 -> max_step = 2.0 * 0.01 =
+  // 0.02, so applied_ = 1.0 - 0.02 = 0.98) rather than a loose (0.1, 1.0)
+  // bound: that bound also passes a constant ten times too large -- a
+  // full-range change in 50 ms, exactly the step this feature exists to
+  // prevent.
+  ex.tick(0.01, vec7(0.0), 0.1);
+  EXPECT_NEAR(ex.applied_scale(), 0.98, 1e-9);
+
+  for (double t = 0.02; t < 3.0; t += 0.01) ex.tick(t, vec7(0.0), 0.1);
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-6) << "and must get there";
+}
+
+// Fix wave, finding 8: a negative dt_wall correctly freezes applied_ (via
+// max_step = 0), but traj_t is an ACCUMULATOR now -- unlike the old
+// `now_s - start_time` form, an un-guarded `traj_t += dt_wall * applied_`
+// would walk it backwards permanently rather than self-correcting on the
+// next forward tick. Unreachable today (secs_since uses steady_clock), but
+// cheap to close at the source.
+TEST(ExecutorSpeedScale, BackwardsWallClockDoesNotMoveTrajectoryTimeBackwards) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);
+  ex.tick(5.0, vec7(0.0));                      // latch the clock at t=5
+  ExecStatus before = ex.tick(6.0, vec7(0.0));  // 1 s wall -> traj_t=1.0, fraction 0.1
+  EXPECT_NEAR(before.fraction, 0.1, 1e-9);
+
+  ExecStatus back = ex.tick(5.5, vec7(0.0));  // now_s went BACKWARDS
+  EXPECT_NEAR(back.fraction, before.fraction, 1e-9)
+      << "a backwards wall-clock stamp must never move trajectory time backwards";
 }

@@ -146,6 +146,37 @@ GainsResult Arbiter::on_set_gains(const GainsRequest& r) {
   }
   return down_.on_set_gains(r);
 }
+// CORRECTED reasoning, twice over (fix wave, finding 3, then a re-review
+// finding on top of that fix):
+//
+// Round 1: the ORIGINAL comment here argued the override was safe to forward
+// ungated in every direction, because "it can only ever reduce speed". True
+// against the GOAL's own scale, false against the CURRENT override: a caller
+// holding no token could call this with 1.0 and undo another operator's
+// deliberate slow-down of a moving arm -- a speed-UP, unauthenticated. Fixed
+// by making LOWERING ungated and RAISING gated.
+//
+// Round 2: the first fix decided "is this a raise?" HERE, by comparing
+// r.scale against down_.on_query_state().speed_override -- a snapshot the
+// Supervisor's pump loop refreshes at pump_hz (100 Hz), so it can be up to
+// one pump period (10 ms) stale. That reopened the exact hole: lower the
+// override, then within that 10 ms window send a scale that reads as "lower
+// than the stale snapshot" but is actually a raise relative to the real
+// value, and it would be forwarded ungated.
+//
+// So the Arbiter now decides AUTHORISATION ONLY -- may_raise = admit(token),
+// which already covers the token AND the e-stop latch -- and forwards
+// UNCONDITIONALLY. DIRECTION is decided downstream, by
+// Supervisor::set_speed_override, as one atomic compare-and-store against
+// its own speed_override_: the only place that value is authoritative, with
+// no window between reading "current" and writing "new" for a race to land
+// in.
+SpeedResult Arbiter::on_set_speed_override(const SpeedOverrideRequest& r) {
+  std::lock_guard<std::mutex> l(m_);
+  SpeedOverrideRequest req = r;
+  req.may_raise = admit(r.token);
+  return down_.on_set_speed_override(req);
+}
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
 // Ungated for the same reason on_query_state is: a read that requires ownership is a
 // read nobody can use to work out WHY they were refused.

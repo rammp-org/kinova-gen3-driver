@@ -92,6 +92,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
   GainsResult on_set_gains(const GainsRequest&) override;
+  SpeedResult on_set_speed_override(const SpeedOverrideRequest&) override;
   ArmState on_query_state() override;
   void on_halt(HaltReason) override;
 
@@ -108,6 +109,18 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // GripperSink (called on the backend thread):
   void on_gripper_setpoint(const GripperSetpoint&) override;
   GripperState on_query_gripper() override;
+
+  // Runtime speed override (called on the backend thread; read by the sampler).
+  // Refused, not clamped, outside [kMinSpeedScale, 1.0] -- see speed_override_
+  // below. `may_raise` decides DIRECTION (the Arbiter decides only
+  // AUTHORISATION -- see arbiter.cpp): false refuses a set that is not a
+  // lowering relative to the CURRENT speed_override_, decided atomically
+  // with the store itself so there is no stale-read window to race. Defaults
+  // to true so an already-trusted direct caller (a test, or a backend with no
+  // Arbiter in front of it) is unrestricted, exactly as before this
+  // parameter existed.
+  SpeedResult set_speed_override(double s, bool may_raise = true);
+  double speed_override() const { return speed_override_.load(); }
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
@@ -168,6 +181,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // the rebind may be skipped -- either one alone leaves a silent desync.
   ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
   std::atomic<bool> in_flight_{false};  // read by on_trajectory_goal
+
+  // Written by the backend thread, read by the sampler. Only ever slows the
+  // arm: values outside [kMinSpeedScale, 1.0] are refused, not clamped.
+  std::atomic<double> speed_override_{1.0};
+  static_assert(std::atomic<double>::is_always_lock_free,
+                "speed_override_ is read from the sampler thread; must be lock-free");
 
   StreamingSession session_;              // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};  // mirrors session_, read by the sampler + goal pre-check

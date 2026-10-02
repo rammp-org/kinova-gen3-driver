@@ -24,8 +24,48 @@
 //   # 3. move ONE joint a small amount along a timed trajectory
 //   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2
 //
-//   # sim (no robot): plumbing only — SimTransport does not move.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --joint 5 --delta 0.2
+//   # sim (no robot): plumbing only — SimTransport does not move. --no-guard
+//   # because a stationary q always trips the divergence guard here; see below.
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --joint 5 --delta 0.2 --no-guard
+//
+// SPEED SCALE. The executor dilates its own clock (traj_t += dt * scale), so the
+// PATH is untouched and only the pace changes; velocity scales with s, and
+// acceleration with s^2, for free. Two dials, and the SLOWER of the two wins:
+//
+//   # 4. the goal's own scale — what a planner client sets on submit.
+//   #    Half speed => the same move takes twice as long.
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf \
+//       --joint 5 --delta 0.2 --speed-scale 0.5
+//
+//   # 5. the RUNTIME override, changed mid-flight at t=T — the operator's dial.
+//   #    This is the one that shows the slew limiter: the applied scale ramps at
+//   #    kScaleSlewPerSec rather than stepping, because a step in scale is a step
+//   #    in commanded velocity. Watch the "applied" column move.
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf \
+//       --joint 5 --delta 0.4 --duration 8 --scale-at 3.0:0.2 --no-guard
+//
+// WHY --no-guard ON THE SIM EXAMPLES. SimTransport steps only the GRIPPER; the
+// arm's q never tracks the command, so measured q sits at the entry value for
+// the whole run while the sampled reference walks away from it. The divergence
+// guard is therefore guaranteed to fire in sim on any move larger than
+// --path-tol (0.2 rad default) — it is the guard working, not the trajectory
+// misbehaving, and it says nothing about the scale. Keep the guard ON against a
+// real arm, which is the only place its answer means anything.
+//
+// The abort is still legible if you leave the guard on: it fires exactly when
+// the reference crosses --path-tol, so the WALL TIME of the abort is itself a
+// readout of the dilated clock. The example above trips at ~7.2 s rather than
+// the ~4.0 s it would take undilated.
+//
+// Expect a nonzero residual in sim even on a clean completion, for the same
+// reason: JointPositionMode leashes its reference to within --leash (0.35 rad)
+// of measured q, and measured q never moves, so a --delta past the leash leaves
+// final_ref pinned at it. The example above completes with code=0 at ~27.2 s
+// wall and final_ref +0.35 of a +0.40 goal. Against a real arm q follows and the
+// residual goes to zero; in sim, read the COMPLETION TIME, not the residual.
+//
+// Out-of-range is REFUSED, not clamped: a scale below the floor would otherwise
+// be silently sped UP to it, running the arm faster than asked.
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -80,9 +120,12 @@ int main(int argc, char** argv) {
   double delta = 0.0;
   double speed = 0.2;  // rad/s peak cap; below the mode's own 0.5 default
   double leash = 0.35;
-  double tick_hz = 250.0;  // rate the publisher samples the trajectory at
-  double path_tol = 0.2;   // rad; per-joint divergence guard (live feedback)
-  bool no_guard = false;   // escape hatch: disable the divergence guard
+  double tick_hz = 250.0;    // rate the publisher samples the trajectory at
+  double path_tol = 0.2;     // rad; per-joint divergence guard (live feedback)
+  bool no_guard = false;     // escape hatch: disable the divergence guard
+  double speed_scale = 1.0;  // the GOAL's own scale, handed to submit()
+  double scale_at_t = -1.0;  // wall time to change the runtime override at; <0 => never
+  double scale_at_s = 1.0;   // the override to change to at scale_at_t
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -126,7 +169,19 @@ int main(int argc, char** argv) {
       path_tol = std::stod(next("--path-tol"));
     else if (a == "--no-guard")
       no_guard = true;
-    else if (a == "--csv")
+    else if (a == "--speed-scale")
+      speed_scale = std::stod(next("--speed-scale"));
+    else if (a == "--scale-at") {
+      // T:S — at wall time T seconds, change the runtime override to S.
+      const std::string v = next("--scale-at");
+      const auto colon = v.find(':');
+      if (colon == std::string::npos) {
+        std::cerr << "--scale-at wants T:S, e.g. 3.0:0.2\n";
+        std::exit(2);
+      }
+      scale_at_t = std::stod(v.substr(0, colon));
+      scale_at_s = std::stod(v.substr(colon + 1));
+    } else if (a == "--csv")
       csv_path = next("--csv");
     else {
       std::cerr << "unknown arg: " << a << "\n";
@@ -157,6 +212,17 @@ int main(int argc, char** argv) {
     std::cerr << "--path-tol must be > 0 (or pass --no-guard)\n";
     return 2;
   }
+  // Refused, never clamped: clamping a below-floor scale would silently run the
+  // arm FASTER than asked, which is the wrong direction to fail in.
+  auto check_scale = [](double s, const char* flag) {
+    if (!std::isfinite(s) || s < interface::kMinSpeedScale || s > 1.0) {
+      std::cerr << flag << " must be in [" << interface::kMinSpeedScale << ", 1.0]; got " << s
+                << " (refused, not clamped)\n";
+      std::exit(2);
+    }
+  };
+  check_scale(speed_scale, "--speed-scale");
+  if (scale_at_t >= 0.0) check_scale(scale_at_s, "--scale-at S");
 
   Dynamics dyn(urdf);
 
@@ -205,6 +271,12 @@ int main(int argc, char** argv) {
 
   std::printf("\n[traj] plan: %s over %.2f s (peak %.3f rad/s, speed cap %.3f rad/s)\n",
               (delta != 0.0 ? "1-joint move" : "HOLD (no motion)"), duration_s, peak_v, speed);
+  if (speed_scale != 1.0)
+    std::printf("[traj]   speed-scale %.3f => same path, %.2f s wall, peak %.3f rad/s\n",
+                speed_scale, duration_s / speed_scale, peak_v * speed_scale);
+  if (scale_at_t >= 0.0)
+    std::printf("[traj]   runtime override -> %.3f at t=%.2f s (slew-limited at %.1f /s)\n",
+                scale_at_s, scale_at_t, interface::kScaleSlewPerSec);
   if (move_joint >= 0)
     std::printf("[traj]   j%d: %+.4f -> %+.4f rad (%+.2f deg)\n", move_joint, entry.q[move_joint],
                 target[move_joint], delta * kRad2Deg);
@@ -266,17 +338,28 @@ int main(int argc, char** argv) {
     interface::TrajectoryExecutor exec(mode);  // JointPositionMode IS-A JointTargetSink
     const JointVec tol = no_guard ? JointVec::Constant(-1.0)  // guard disabled
                                   : JointVec::Constant(path_tol);
-    exec.submit(tr, interface::ControlModeKind::kPosition, interface::Preemption::kLatestWins, tol);
+    exec.submit(tr, interface::ControlModeKind::kPosition, interface::Preemption::kLatestWins, tol,
+                speed_scale);
 
     const auto t0 = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration<double>(1.0 / tick_hz);
     JointVec q_meas = entry.q;  // last good measured q; the tap seeds it from the entry read
+    double last_applied = 1.0;  // so the slew ramp prints only when it moves
     while (!g_stop.load(std::memory_order_acquire)) {
       const double now_s =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       JointFeedback fb;
       if (snapshot.load(fb)) q_meas = fb.q;  // else keep last good q (no spurious abort)
-      const interface::ExecStatus st = exec.tick(now_s, q_meas);
+      // The operator's dial: 1.0 until scale_at_t, then scale_at_s. The executor
+      // slews toward it rather than stepping, so applied_scale() lags this.
+      const double override_scale = (scale_at_t >= 0.0 && now_s >= scale_at_t) ? scale_at_s : 1.0;
+      const interface::ExecStatus st = exec.tick(now_s, q_meas, override_scale);
+      const double applied = exec.applied_scale();
+      if (std::abs(applied - last_applied) > 1e-3) {
+        std::printf("[traj]   t=%.2f s  override=%.3f  applied=%.3f (slewing)\n", now_s,
+                    override_scale, applied);
+        last_applied = applied;
+      }
       if (st.completed) {
         if (st.error_code == interface::ExecStatus::kPathToleranceViolated)
           std::printf(

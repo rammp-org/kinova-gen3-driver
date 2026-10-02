@@ -47,39 +47,70 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
 }
 
 SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
-                                        const kinova::JointVec& path_tol) {
+                                        const kinova::JointVec& path_tol, double speed_scale) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
+  // Second layer under the Supervisor's accept-time check: a goal can reach
+  // here without passing on_trajectory_goal (on_trajectory_accepted is its own
+  // entry point), and effective_scale() clamps internally -- a below-floor
+  // scale that got this far would silently run FASTER than asked, a non-finite
+  // one at full speed. Refuse, never clamp. Phrased so NaN fails the test.
+  if (!(speed_scale >= kMinSpeedScale && speed_scale <= 1.0))
+    return SubmitResult::kRejectedSpeedScale;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
   if (!is_active()) {  // idle -> adopt immediately
     mode_ = mode;
-    active_ = Active{tr, 0.0, false};
+    active_ = Active(tr, 0.0, 0.0, false);
     path_tol_ = path_tol;  // tolerance guards the adopted trajectory
+    scale_ = speed_scale;
     queued_.reset();
     return SubmitResult::kAccepted;
   }
   // active, same mode: preempt per the caller's policy.
   if (p == Preemption::kLatestWins) {
-    active_ = Active{tr, 0.0, false};  // replace + reset clock (started=false)
-    path_tol_ = path_tol;              // new trajectory's tolerance takes over
+    active_ = Active(tr, 0.0, 0.0, false);  // replace + reset clock (started=false)
+    path_tol_ = path_tol;                   // new trajectory's tolerance takes over
+    scale_ = speed_scale;
     queued_.reset();
     return SubmitResult::kAccepted;
   }
   // kQueue: store trajectory + its tolerance for gapless promotion on completion
-  // (promotion in Task 6). Do NOT touch path_tol_: the active trajectory keeps its
-  // own divergence guard until the queued goal is actually promoted.
+  // (promotion in Task 6). Do NOT touch path_tol_/scale_: the active trajectory
+  // keeps its own divergence guard and clock scale until the queued goal is
+  // actually promoted.
   queued_ = tr;
   queued_tol_ = path_tol;
+  queued_scale_ = speed_scale;
   return SubmitResult::kAccepted;
 }
 
-ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas) {
+ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas,
+                                    double override_scale) {
   if (!active_) return ExecStatus{false, false, 0.0, ExecStatus::kOk};
   Active& a = *active_;
   if (!a.started) {
-    a.start_time = now_s;
+    a.last_now_s = now_s;
+    a.traj_t = 0.0;
     a.started = true;
+    // A goal submitted at a slow scale must start at it, not ramp down from
+    // whatever was previously in force.
+    applied_ = effective_scale(scale_, override_scale);
   }
-  const double elapsed = now_s - a.start_time;
+  const double dt_wall = now_s - a.last_now_s;
+  a.last_now_s = now_s;
+  const double want = effective_scale(scale_, override_scale);
+  const double max_step = kScaleSlewPerSec * (dt_wall > 0.0 ? dt_wall : 0.0);
+  if (want > applied_ + max_step)
+    applied_ += max_step;
+  else if (want < applied_ - max_step)
+    applied_ -= max_step;
+  else
+    applied_ = want;
+  // A backwards wall-clock stamp already freezes applied_ above (max_step is
+  // 0 when dt_wall <= 0); it must not also walk traj_t backwards. Unlike the
+  // old `now_s - start_time` form, traj_t is an ACCUMULATOR now, so an
+  // un-guarded decrement here would never self-correct on the next tick.
+  if (dt_wall > 0.0) a.traj_t += dt_wall * applied_;
+  const double elapsed = a.traj_t;
   const double dur = a.tr.duration_s();
   const kinova::JointVec q_desired = sample(a.tr, elapsed);
   sink_.set_target(q_desired);
@@ -109,9 +140,14 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   }
 
   if (elapsed >= dur) {
-    if (queued_) {                              // gapless promotion — no idle gap
-      active_ = Active{*queued_, now_s, true};  // latch start to NOW (started=true)
-      path_tol_ = queued_tol_;                  // adopt the promoted goal's divergence guard
+    if (queued_) {                                   // gapless promotion — no idle gap
+      active_ = Active(*queued_, 0.0, now_s, true);  // traj_t=0, last_now_s=now
+      path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
+      scale_ = queued_scale_;
+      // A promoted goal starts at ITS OWN scale, same as a fresh submit's
+      // !a.started latch — otherwise gapless promotion ramps from the
+      // outgoing goal's scale, the exact step this feature exists to avoid.
+      applied_ = effective_scale(scale_, override_scale);
       queued_.reset();
       return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};  // promoted this tick
     }

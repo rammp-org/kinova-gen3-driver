@@ -86,6 +86,7 @@ void Supervisor::pump_loop() {
       s.ee_pose = pump_dyn_.fk(fb.q);
       pump_dyn_.jacobian(fb.q, pump_J_);
       s.ee_twist = pump_J_ * fb.qd;
+      s.speed_override = speed_override_.load();
       state_snap_.store(s);
       stream_.publish_state(s);
     }
@@ -255,12 +256,15 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
             std::chrono::duration_cast<clock::duration>(
                 std::chrono::duration<double>(cfg_.mode_settle_s)));
       }
-      const SubmitResult sr = traj_->submit(in.goal.trajectory, in.goal.control_mode,
-                                            in.goal.preemption, in.goal.path_tolerance);
+      const SubmitResult sr =
+          traj_->submit(in.goal.trajectory, in.goal.control_mode, in.goal.preemption,
+                        in.goal.path_tolerance, in.goal.speed_scale);
       if (sr != SubmitResult::kAccepted) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
-        r.error_string = "rejected by executor";
+        r.error_string = sr == SubmitResult::kRejectedSpeedScale
+                             ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
+                             : "rejected by executor";
         action_.settle(in.id, r);
         continue;
       }
@@ -300,7 +304,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       JointFeedback fb;
       const bool ok = snap_.load(fb);        // sequence the read; don't rely on arg eval order
       q_meas = sampled_q(ok, fb.q, q_meas);  // failed read -> reuse last-good q (no phantom zero)
-      const ExecStatus st = traj_->tick(secs_since(t0), q_meas);
+      const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed_override_.load());
       TrajectoryFeedback fbk;
       fbk.actual = q_meas;
       fbk.fraction_complete = st.fraction;
@@ -340,6 +344,13 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
+  // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
+  // floors there internally, and accepting a request slower than the floor
+  // would silently RUN it faster than asked -- the clamp this feature's
+  // posture forbids. The floor must be unreachable from outside.
+  if (!std::isfinite(g.speed_scale) || g.speed_scale < kMinSpeedScale || g.speed_scale > 1.0)
+    return GoalResponse::kReject;  // out-of-range scale ([kMinSpeedScale, 1.0]); reason surfaces at
+                                   // the ROS boundary
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }
@@ -415,6 +426,34 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
   return nullptr;
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
+SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {
+  return set_speed_override(r.scale, r.may_raise);
+}
+SpeedResult Supervisor::set_speed_override(double s, bool may_raise) {
+  if (!std::isfinite(s)) return {false, "speed override must be finite"};
+  // Same floor as on_trajectory_goal, and for the same reason: below
+  // kMinSpeedScale, effective_scale()'s internal clamp would silently run the
+  // arm FASTER than the caller asked for. Refuse it here too, so the floor is
+  // unreachable from outside at either accept site. Ahead of the direction
+  // check below: a below-floor or above-1.0 request is invalid regardless of
+  // who is asking.
+  if (s < kMinSpeedScale || s > 1.0)
+    return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) + ", 1.0]; got " +
+                       std::to_string(s)};
+  // Compare-and-store as ONE atomic operation against speed_override_, not a
+  // load, then a separate compare, then a separate store: that would leave a
+  // window between reading "current" and writing "new" for a concurrent
+  // caller's store to land in, making the comparison stale by the time the
+  // store happens -- which is exactly the race a caller-side snapshot
+  // comparison reopened (see Arbiter::on_set_speed_override). Do not
+  // "simplify" this back into a plain load-then-store.
+  double cur = speed_override_.load(std::memory_order_acquire);
+  do {
+    if (!may_raise && s >= cur)
+      return {false, "raising the speed override requires the current token"};
+  } while (!speed_override_.compare_exchange_weak(cur, s));
+  return {true, ""};
+}
 ArmState Supervisor::on_query_state() {
   ArmState s;
   state_snap_.load(s);

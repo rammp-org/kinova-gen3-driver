@@ -12,6 +12,20 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- `TrajectoryGoal::speed_scale` and a runtime speed override on the `Supervisor`
+  (`on_set_speed_override`): execute a planned trajectory slower by dilating the
+  executor's clock. The path is unchanged; velocity scales with `s`, acceleration
+  with `s²`. Effective scale is the slower of goal and override, clamped to
+  `[kMinSpeedScale, 1.0]` (`kMinSpeedScale = 0.01`; zero would hang the goal's
+  clock forever), and changes are slew-limited so the commanded velocity never
+  steps mid-goal; a goal or override outside that interval, including
+  non-finite, is refused outright rather than clamped. Raising the runtime
+  override past the arm's current effective speed requires the live
+  arbitration token and is refused under an e-stop latch; lowering it never
+  does (#69).
+
 ## [1.1.1] — 2026-09-22
 
 A patch release: `JointVelocityMode` holds at a zero command. No signature or

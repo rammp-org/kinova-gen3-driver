@@ -760,6 +760,12 @@ TEST(RtSafety, SupervisorInLoopNoMajorFaultsSteadyState) {
     // Baseline on THIS (loop) thread, after warm-up.
     ResourceUsage u0 = read_usage();
 
+    // Drop the speed override before the measured window starts so the sampler
+    // is mid-slew (kScaleSlewPerSec) for part of the window, not already
+    // converged -- this exercises the slew path each cycle, not just the
+    // applied_ == want fast path.
+    sup.set_speed_override(0.25);
+
     // Steady-state window: re-arm the mode (the warm-up run consumed the
     // request — RtExecutor::run() resets its local `active` on each call) and
     // run ~2s on this same thread while the sampler/pump keep driving traffic.
