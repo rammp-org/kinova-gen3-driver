@@ -441,11 +441,14 @@ implements them.
 [speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
 The floor exists because a scale of zero would stop the trajectory clock and
 hang the goal forever; `effective_scale()` clamps to it internally, but that
-clamp is unreachable from outside because this accept-time check refuses
-anything below it. A value outside `[kMinSpeedScale, 1.0]`, including
-non-finite, is **refused** at `on_trajectory_goal` (`GoalResponse::kReject`),
-never clamped — accepting a below-floor request and silently running it at the
-floor would be *faster* than asked for, not slower.
+clamp is unreachable from outside because two layers refuse anything below it.
+A value outside `[kMinSpeedScale, 1.0]`, including non-finite, is **refused**
+at `on_trajectory_goal` (`GoalResponse::kReject`) and again by
+`TrajectoryExecutor::submit` (`SubmitResult::kRejectedSpeedScale`, settled as
+`kInvalidGoal`) — the second layer covers a goal delivered straight to
+`on_trajectory_accepted`, which never passes the first. Never clamped:
+accepting a below-floor request and silently running it at the floor would be
+*faster* than asked for, not slower.
 
 ### `CommandSink::on_set_speed_override(const SpeedOverrideRequest&)` / `Supervisor::set_speed_override(double)`
 

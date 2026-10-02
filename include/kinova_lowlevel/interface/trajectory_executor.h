@@ -33,7 +33,12 @@ kinova::JointVec sample(const Trajectory& tr, double t_s);
 
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };
-enum class SubmitResult { kAccepted, kRejectedModeChangeWhileMoving, kRejectedEmpty };
+enum class SubmitResult {
+  kAccepted,
+  kRejectedModeChangeWhileMoving,
+  kRejectedEmpty,
+  kRejectedSpeedScale,
+};
 
 // Floor for the effective scale. Zero would stop the clock and hang the goal
 // forever; this is slow enough to be a hold in practice and still terminates.

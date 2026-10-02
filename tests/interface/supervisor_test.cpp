@@ -208,6 +208,32 @@ TEST(Supervisor, PositionGoalRunsToCompletionAndSettlesSuccess) {
   EXPECT_GT(f.be.feedback_count(), 0u);  // add feedback_count() to FakeBackend
 }
 
+TEST(Supervisor, AcceptedGoalWithBelowFloorScaleIsRefusedNotRunFaster) {
+  // A backend may call on_trajectory_accepted without a preceding
+  // on_trajectory_goal -- the same hole the control_mode second-layer guard in
+  // the sampler covers. A below-floor scale on that path must settle
+  // kInvalidGoal; effective_scale()'s internal clamp would otherwise run the
+  // goal FASTER than the caller asked.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.speed_scale = 0.001;  // on_trajectory_goal would have refused this
+  interface::GoalId id{};
+  id[0] = 7;
+  f.sup.on_trajectory_accepted(id, g);  // bypasses the front gate
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kInvalidGoal);
+  EXPECT_EQ(f.be.last_result_id()[0], 7);
+}
+
 TEST(Supervisor, LatestWinsPreemptionSettlesOldGoalPreempted) {
   SupFix f;
   f.sup.start();

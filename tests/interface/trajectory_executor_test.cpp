@@ -81,6 +81,38 @@ TEST(ExecutorSubmit, RejectsModeChangeWhileInFlight) {
             SubmitResult::kAccepted);
 }
 
+TEST(ExecutorSubmit, RejectsAnOutOfRangeOrNonFiniteSpeedScale) {
+  // Second layer under the Supervisor's accept-time check: a goal can reach
+  // submit() without passing on_trajectory_goal, and effective_scale() clamps
+  // internally -- a below-floor scale that got this far would silently run the
+  // arm FASTER than asked, and a non-finite one at full speed. Refuse, never
+  // clamp, on every path (direct, latest-wins, queued).
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using kinova::interface::ControlModeKind;
+  using kinova::interface::Preemption;
+  using kinova::interface::SubmitResult;
+  const double bad[] = {0.001,
+                        0.0,
+                        -1.0,
+                        1.5,
+                        std::numeric_limits<double>::quiet_NaN(),
+                        std::numeric_limits<double>::infinity()};
+  for (double s : bad) {
+    EXPECT_EQ(
+        ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0), s),
+        SubmitResult::kRejectedSpeedScale)
+        << "scale " << s;
+    EXPECT_FALSE(ex.is_active()) << "scale " << s;  // refused before any state change
+  }
+  // The queued path must refuse too: a bad scale latent in queued_scale_ would
+  // only surface at promotion, mid-motion.
+  ASSERT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.5),
+            SubmitResult::kAccepted);
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.001),
+            SubmitResult::kRejectedSpeedScale);
+}
+
 TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);

@@ -49,6 +49,13 @@ kinova::JointVec sample(const Trajectory& tr, double t_s) {
 SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
                                         const kinova::JointVec& path_tol, double speed_scale) {
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
+  // Second layer under the Supervisor's accept-time check: a goal can reach
+  // here without passing on_trajectory_goal (on_trajectory_accepted is its own
+  // entry point), and effective_scale() clamps internally -- a below-floor
+  // scale that got this far would silently run FASTER than asked, a non-finite
+  // one at full speed. Refuse, never clamp. Phrased so NaN fails the test.
+  if (!(speed_scale >= kMinSpeedScale && speed_scale <= 1.0))
+    return SubmitResult::kRejectedSpeedScale;
   if (is_active() && mode != mode_) return SubmitResult::kRejectedModeChangeWhileMoving;
   if (!is_active()) {  // idle -> adopt immediately
     mode_ = mode;
