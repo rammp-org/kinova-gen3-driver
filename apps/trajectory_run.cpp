@@ -120,12 +120,12 @@ int main(int argc, char** argv) {
   double delta = 0.0;
   double speed = 0.2;  // rad/s peak cap; below the mode's own 0.5 default
   double leash = 0.35;
-  double tick_hz = 250.0;  // rate the publisher samples the trajectory at
-  double path_tol = 0.2;   // rad; per-joint divergence guard (live feedback)
-  bool no_guard = false;   // escape hatch: disable the divergence guard
-  double speed_scale = 1.0;    // the GOAL's own scale, handed to submit()
-  double scale_at_t = -1.0;    // wall time to change the runtime override at; <0 => never
-  double scale_at_s = 1.0;     // the override to change to at scale_at_t
+  double tick_hz = 250.0;    // rate the publisher samples the trajectory at
+  double path_tol = 0.2;     // rad; per-joint divergence guard (live feedback)
+  bool no_guard = false;     // escape hatch: disable the divergence guard
+  double speed_scale = 1.0;  // the GOAL's own scale, handed to submit()
+  double scale_at_t = -1.0;  // wall time to change the runtime override at; <0 => never
+  double scale_at_s = 1.0;   // the override to change to at scale_at_t
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -181,8 +181,7 @@ int main(int argc, char** argv) {
       }
       scale_at_t = std::stod(v.substr(0, colon));
       scale_at_s = std::stod(v.substr(colon + 1));
-    }
-    else if (a == "--csv")
+    } else if (a == "--csv")
       csv_path = next("--csv");
     else {
       std::cerr << "unknown arg: " << a << "\n";
@@ -353,8 +352,7 @@ int main(int argc, char** argv) {
       if (snapshot.load(fb)) q_meas = fb.q;  // else keep last good q (no spurious abort)
       // The operator's dial: 1.0 until scale_at_t, then scale_at_s. The executor
       // slews toward it rather than stepping, so applied_scale() lags this.
-      const double override_scale =
-          (scale_at_t >= 0.0 && now_s >= scale_at_t) ? scale_at_s : 1.0;
+      const double override_scale = (scale_at_t >= 0.0 && now_s >= scale_at_t) ? scale_at_s : 1.0;
       const interface::ExecStatus st = exec.tick(now_s, q_meas, override_scale);
       const double applied = exec.applied_scale();
       if (std::abs(applied - last_applied) > 1e-3) {

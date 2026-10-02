@@ -256,9 +256,9 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
             std::chrono::duration_cast<clock::duration>(
                 std::chrono::duration<double>(cfg_.mode_settle_s)));
       }
-      const SubmitResult sr = traj_->submit(in.goal.trajectory, in.goal.control_mode,
-                                            in.goal.preemption, in.goal.path_tolerance,
-                                            in.goal.speed_scale);
+      const SubmitResult sr =
+          traj_->submit(in.goal.trajectory, in.goal.control_mode, in.goal.preemption,
+                        in.goal.path_tolerance, in.goal.speed_scale);
       if (sr != SubmitResult::kAccepted) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
@@ -347,7 +347,8 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   // would silently RUN it faster than asked -- the clamp this feature's
   // posture forbids. The floor must be unreachable from outside.
   if (!std::isfinite(g.speed_scale) || g.speed_scale < kMinSpeedScale || g.speed_scale > 1.0)
-    return GoalResponse::kReject;  // out-of-range scale ([kMinSpeedScale, 1.0]); reason surfaces at the ROS boundary
+    return GoalResponse::kReject;  // out-of-range scale ([kMinSpeedScale, 1.0]); reason surfaces at
+                                   // the ROS boundary
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }
@@ -435,8 +436,8 @@ SpeedResult Supervisor::set_speed_override(double s, bool may_raise) {
   // check below: a below-floor or above-1.0 request is invalid regardless of
   // who is asking.
   if (s < kMinSpeedScale || s > 1.0)
-    return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) +
-                       ", 1.0]; got " + std::to_string(s)};
+    return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) + ", 1.0]; got " +
+                       std::to_string(s)};
   // Compare-and-store as ONE atomic operation against speed_override_, not a
   // load, then a separate compare, then a separate store: that would leave a
   // window between reading "current" and writing "new" for a concurrent

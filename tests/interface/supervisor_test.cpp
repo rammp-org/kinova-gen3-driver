@@ -1523,11 +1523,13 @@ TEST(SupervisorSpeed, LoweringWithoutMayRaiseSucceeds) {
 
 TEST(SupervisorSpeed, RaisingWithoutMayRaiseIsRefusedAndLeavesThePreviousValueIntact) {
   SupFix f;
-  ASSERT_TRUE(f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);  // establish a lower value
+  ASSERT_TRUE(
+      f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);  // establish a lower value
   const SpeedResult r = f.sup.set_speed_override(0.6, /*may_raise=*/false);
   EXPECT_FALSE(r.accepted);
   EXPECT_FALSE(r.message.empty());
-  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.3) << "a refused raise must not touch the stored value";
+  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.3)
+      << "a refused raise must not touch the stored value";
 }
 
 TEST(SupervisorSpeed, RaisingWithMayRaiseSucceeds) {
@@ -1606,7 +1608,8 @@ TEST(SupervisorSpeed, GoalScaleReachesTheExecutorAndStretchesWallDuration) {
   EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
   // Roughly twice the 400 ms unscaled duration (~800 ms); wide margin on
   // both sides for thread scheduling, not for correctness.
-  EXPECT_GT(elapsed_s, 0.6) << "not meaningfully stretched -- speed_scale may not be reaching submit()";
+  EXPECT_GT(elapsed_s, 0.6)
+      << "not meaningfully stretched -- speed_scale may not be reaching submit()";
   EXPECT_LT(elapsed_s, 1.6) << "stretched far more than 2x -- something else is wrong";
 }
 
@@ -1626,7 +1629,7 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
   f.sup.on_trajectory_accepted(id, g);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(100));  // let it start moving, unscaled
-  ASSERT_TRUE(f.sup.set_speed_override(0.25).accepted);  // slam it down mid-flight
+  ASSERT_TRUE(f.sup.set_speed_override(0.25).accepted);         // slam it down mid-flight
 
   // 550 ms after ACCEPT: 150 ms past the goal's own unscaled 400 ms duration.
   // If tick() never received speed_override_.load(), the goal would have

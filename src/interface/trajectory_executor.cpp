@@ -133,7 +133,7 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
   }
 
   if (elapsed >= dur) {
-    if (queued_) {  // gapless promotion — no idle gap
+    if (queued_) {                                   // gapless promotion — no idle gap
       active_ = Active(*queued_, 0.0, now_s, true);  // traj_t=0, last_now_s=now
       path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
       scale_ = queued_scale_;

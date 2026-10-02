@@ -106,9 +106,9 @@ class TrajectoryExecutor {
   kinova::JointVec path_tol_ = kinova::JointVec::Zero();  // guards the ACTIVE trajectory
   kinova::JointVec queued_tol_ =
       kinova::JointVec::Zero();  // applied when queued_ is promoted (Task 6)
-  double scale_ = 1.0;         // the ACTIVE goal's own requested scale
-  double queued_scale_ = 1.0;  // adopted when queued_ is promoted
-  double applied_ = 1.0;       // the scale actually in force (slew-limited, Task 3)
+  double scale_ = 1.0;           // the ACTIVE goal's own requested scale
+  double queued_scale_ = 1.0;    // adopted when queued_ is promoted
+  double applied_ = 1.0;         // the scale actually in force (slew-limited, Task 3)
 };
 
 }  // namespace kinova::interface

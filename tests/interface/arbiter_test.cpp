@@ -219,7 +219,8 @@ TEST(Arbiter, SpeedOverrideRaisingWithTheTokenSucceeds) {
   Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
   const Token owner = arb.grant("operator").token;
   ASSERT_TRUE(arb.on_set_speed_override(speed_req(0.2, owner)).accepted);
-  const SpeedResult r = arb.on_set_speed_override(speed_req(0.9, owner));  // same owner, raising back up
+  const SpeedResult r =
+      arb.on_set_speed_override(speed_req(0.9, owner));  // same owner, raising back up
   EXPECT_TRUE(r.accepted);
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.9);
 }
@@ -236,7 +237,8 @@ TEST(Arbiter, SpeedOverrideRaisingUnderAnEstopLatchIsRefused) {
   const Token owner = arb.grant("operator").token;
   ASSERT_TRUE(arb.on_set_speed_override(speed_req(0.2, owner)).accepted);
   arb.estop();
-  const SpeedResult r = arb.on_set_speed_override(speed_req(0.9, owner));  // even with the (now-dead) token
+  const SpeedResult r =
+      arb.on_set_speed_override(speed_req(0.9, owner));  // even with the (now-dead) token
   EXPECT_FALSE(r.accepted);
   EXPECT_FALSE(r.message.empty());
   EXPECT_DOUBLE_EQ(sink.last_speed_override, 0.2);

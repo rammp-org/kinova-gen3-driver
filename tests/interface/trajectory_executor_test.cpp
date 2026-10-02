@@ -462,13 +462,13 @@ TEST(ExecutorSpeedScale, HalfScaleTakesTwiceAsLongInWallTime) {
   ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
             kinova::JointVec::Constant(-1.0), 0.5);
 
-  ex.tick(0.0, vec7(0.0));               // latch the clock
-  ExecStatus mid = ex.tick(2.0, vec7(0.0));   // 2 s wall = 1 s trajectory time
+  ex.tick(0.0, vec7(0.0));                   // latch the clock
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));  // 2 s wall = 1 s trajectory time
   EXPECT_TRUE(mid.active);
   EXPECT_NEAR(mid.fraction, 0.5, 1e-9) << "fraction must track the SCALED clock";
   EXPECT_NEAR(sink.last[0], 0.5, 1e-9) << "halfway along a 0->1 ramp";
 
-  ExecStatus end = ex.tick(4.0, vec7(1.0));   // 4 s wall = 2 s trajectory time
+  ExecStatus end = ex.tick(4.0, vec7(1.0));  // 4 s wall = 2 s trajectory time
   EXPECT_TRUE(end.completed);
   EXPECT_NEAR(end.fraction, 1.0, 1e-9);
 }
@@ -493,11 +493,11 @@ TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
             kinova::JointVec::Constant(-1.0), 0.5);
 
   ex.tick(0.0, vec7(0.0));
-  ExecStatus p = ex.tick(1.0, vec7(1.0));       // first finishes, second promoted
+  ExecStatus p = ex.tick(1.0, vec7(1.0));  // first finishes, second promoted
   ASSERT_TRUE(p.promoted);
   EXPECT_NEAR(p.fraction, 0.0, 1e-9) << "the promoted goal starts at zero";
 
-  ExecStatus mid = ex.tick(2.0, vec7(0.0));     // 1 s wall at scale 0.5
+  ExecStatus mid = ex.tick(2.0, vec7(0.0));  // 1 s wall at scale 0.5
   EXPECT_NEAR(mid.fraction, 0.5, 1e-9)
       << "the promoted goal must run at ITS scale, not the finished goal's";
 }
@@ -512,9 +512,9 @@ TEST(ExecutorSpeedScale, PromotionLatchesToThePromotedGoalsScaleImmediately) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);
   ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 1.0);   // A: fast
+            kinova::JointVec::Constant(-1.0), 1.0);  // A: fast
   ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 0.1);   // B: much slower
+            kinova::JointVec::Constant(-1.0), 0.1);  // B: much slower
 
   double t = 0.0;
   ex.tick(t, vec7(0.0));  // start A
@@ -537,9 +537,9 @@ TEST(ExecutorSpeedScale, PromotionLatchesToAFasterPromotedScaleTooNotRampingUp) 
   RecordingSink sink;
   TrajectoryExecutor ex(sink);
   ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 0.1);   // A: slow
+            kinova::JointVec::Constant(-1.0), 0.1);  // A: slow
   ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 1.0);   // B: much faster
+            kinova::JointVec::Constant(-1.0), 1.0);  // B: much faster
 
   double t = 0.0;
   ex.tick(t, vec7(0.0));  // start A, latches applied_ to 0.1 immediately
