@@ -95,7 +95,7 @@ void TelemetrySink::consume(const CycleSample& s) {
   }
 }
 
-std::string TelemetrySink::console_line() const {
+std::string TelemetrySink::console_line(uint32_t period_ns) const {
   char buf[384];
   std::snprintf(buf, sizeof(buf),
                 "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
@@ -107,7 +107,38 @@ std::string TelemetrySink::console_line() const {
                 compute_.percentile(0.99) / 1000.0, jitter_.percentile(0.99) / 1000.0,
                 static_cast<unsigned long long>(overruns_),
                 static_cast<unsigned long long>(faults_));
-  return std::string(buf);
+  std::string out(buf);
+
+  // A comm round-trip that eats most of the budget is almost always an
+  // EXTERNAL fixed delay, not our code. The one that has actually bitten us is
+  // NIC RX interrupt coalescing: nvethernet defaults `rx-usecs` to 512, which
+  // held every reply from the arm in the NIC for a fixed ~512 us — comm p50
+  // 799 us of a 1000 us budget, leaving 21 us of margin at p99.
+  //
+  // Nothing the driver reports about ITSELF reveals that: wake jitter and
+  // compute both stay sub-microsecond while 80% of the period disappears
+  // before the kernel is even involved. It went unnoticed across every
+  // recorded run until it was measured from outside. So say it loudly here.
+  //
+  // percentile() returns the LOWER bound of a log2 bucket, so the true p50 is
+  // at least the value printed: if this fires, comm really is over the
+  // threshold. The flip side is granularity — near a 1 kHz budget the only
+  // buckets are 262 us and 524 us, so in practice it trips at >=52% and cannot
+  // see a merely marginal 45%. That is fine for the failure it exists to catch.
+  if (period_ns > 0) {
+    const uint32_t comm_p50 = comm_.percentile(0.5);
+    // comm_p50 / period_ns > 2/5, in integer math.
+    if (static_cast<uint64_t>(comm_p50) * 5ull > static_cast<uint64_t>(period_ns) * 2ull) {
+      char w[256];
+      std::snprintf(w, sizeof(w),
+                    "  *** comm p50 >=%.0fus of the %.0fus budget (>=%.0f%%) — suspect NIC rx "
+                    "interrupt coalescing: `ethtool -c <iface>`, see docs/rt-tuning.md ***",
+                    comm_p50 / 1000.0, period_ns / 1000.0,
+                    100.0 * static_cast<double>(comm_p50) / static_cast<double>(period_ns));
+      out += w;
+    }
+  }
+  return out;
 }
 
 }  // namespace kinova

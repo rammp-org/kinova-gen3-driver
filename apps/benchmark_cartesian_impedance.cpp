@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
       while (ring.pop(s)) sink.consume(s);
       auto now = std::chrono::steady_clock::now();
       if (now - last_print >= std::chrono::seconds(1)) {
-        std::cout << sink.console_line() << " dropped=" << ring.dropped() << "\n";
+        std::cout << sink.console_line(static_cast<uint32_t>(1.0e9 / rate_hz)) << " dropped=" << ring.dropped() << "\n";
         last_print = now;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(5));

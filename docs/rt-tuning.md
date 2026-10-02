@@ -105,6 +105,103 @@ Why each (the script documents inline too):
 - **`timer_migration = 0`, THP `never`** — remove timer bounce and khugepaged
   compaction stalls.
 
+## A2. NIC interrupt coalescing on the arm link (the largest single win)
+
+**This one cost 80% of the cycle budget for weeks without being noticed, and no
+metric the driver reports about itself shows it.** If you are chasing loop
+timing on a new machine, check this before anything else.
+
+The Jetson's `nvethernet` driver defaults `rx-usecs` to **512**. That timer is
+armed by the arriving packet, so every reply from the arm sits in the NIC for a
+fixed ~512 µs before the kernel sees it. At 1 kHz that is most of the period
+spent waiting on a timer — not on the network, and not on the arm.
+
+Measured on abra (`eno1`, 1 Gb direct link, 7.2M cycles before / 156k after):
+
+| | `rx-usecs 512` (default) | `rx-usecs 8` |
+| --- | --- | --- |
+| comm p50 | 799 µs | **282 µs** |
+| comm p99 | 979 µs | **594 µs** |
+| comm p99.9 | 1242 µs | **658 µs** |
+| comm max | 14795 µs | **1103 µs** |
+| overruns | 0.364% | **0.001%** |
+
+At the default, p99 sat 21 µs under a 1000 µs budget — about 2% margin — so any
+small perturbation produced visible stutter. Note what did *not* change: wake
+jitter p99 stayed at 0.1 µs and compute p99 at 0.5 µs throughout. The loss
+happens before the kernel is involved, which is exactly why in-process
+telemetry cannot see it. The `TelemetrySink` summary line now warns when comm
+p50 exceeds 40% of the period, so it is at least loud from now on.
+
+### Diagnose it in 30 seconds, without the driver
+
+Compare a slow ping (each packet arms a fresh timer) against a fast one (the
+timer is already armed, so packets ride an existing one):
+
+```sh
+ping -c 8   -i 0.3   192.168.1.10      # slow: 0.642 ms min  <- the penalty
+ping -c 200 -i 0.002 192.168.1.10      # fast: 0.114 ms min  <- the true RTT
+```
+
+A direct 1 Gb link one hop away should be ~0.1 ms. A ~0.5 ms gap between those
+two numbers **is** the coalescing delay, and it matches `rx-usecs` almost to
+the microsecond. This needs no driver, no arm motion, and no root.
+
+### Applying it
+
+`ethtool -C` is **refused while the interface is up** — the driver logs
+`Coalesce parameters can be changed only if interface is down`. Two commands
+are needed, and they do different jobs:
+
+```sh
+sudo nmcli device disconnect eno1   # stop NM (autoconnect=yes) racing you back up
+sudo ip link set eno1 down          # actually clear IFF_UP -- the flag the driver tests
+sudo ethtool -C eno1 rx-usecs 8 rx-frames 1
+sudo nmcli device connect eno1      # hand it back to NM, which owns the IP config
+```
+
+Gotchas, each of which cost a round trip to discover:
+
+- **`nmcli device disconnect` alone is not enough.** It tears down the
+  connection and IP config but leaves the interface `UP`, so the change is
+  still refused. You need both commands, in that order.
+- **`ip link set eno1 up` alone is not enough either.** The link comes up with
+  no IPv4 address and traffic for the arm silently leaks out over the default
+  route (wifi), which looks like 100% packet loss to the arm. Reconnect through
+  NM.
+- **Stop the driver first.** It holds an open KORTEX session over that link.
+- **8 is the floor on this hardware.** 0, 1, 2 and 4 are refused; `rx-frames`
+  accepts 1.
+- **Do not bounce a link your ssh session arrives over.** You will be cut off
+  mid-change with the link down. `ip route get <your client ip>` tells you.
+
+`scripts/rt_setup.sh` does all of this (step 9), idempotently — it reads the
+current value, skips the bounce entirely when already correct, and refuses to
+bounce if the driver is running or if your ssh session would be cut.
+
+### It is chronic, not a regression
+
+Worth stating plainly, because it is easy to misread a large improvement as
+having found a *new* fault. Checked against 27 archived HIL runs in
+`/home/abra/kinova-hil-runs/*/timing.csv` from 2026-09-17/18: **every one** shows
+comm p50 of 770–944 µs with the same ~512 µs signature above its own floor. The
+penalty has been present in all recorded history. Fixing it removes chronic
+fragility; it does not explain any particular stutter you are investigating.
+
+### Multiple devices on the arm link
+
+Coalescing hurts most at *low* packet rates, which is exactly the arm at ~1
+kpps. Measured 1070 interrupts/s for 1007 packets/s — 1:1 — so the 512 µs timer
+was batching nothing: only one packet ever arrived inside a window. It was pure
+latency with no throughput benefit, and the change costs nothing.
+
+Under heavier traffic (cameras sharing the link) NAPI switches to polling and
+batches regardless of the coalescing config, so per-packet interrupt cost does
+not scale linearly. The real concern there is different: camera packets share
+the arm's receive path and can queue ahead of its replies, and `NET_RX` softirq
+work already lands on the RT core. Prefer giving bulk devices their own NIC; if
+they must share, steer RPS explicitly away from the RT core and re-measure.
+
 ## B. Boot-time tunings (kernel cmdline — needs a reboot)
 
 Core **isolation** is the single biggest win for tail latency and must be set on
@@ -216,13 +313,15 @@ in the bootloader config.)
    / cpu_dma_latency **without sudo** (survives rebuilds). Log out + back in.
 2. `sudo ./scripts/rt_setup.sh 11` — system-global runtime tunings (governor,
    clocks, C-states, throttling). Re-run after reboot, or enable the systemd unit.
-3. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot.
-4. `sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 1h` → record
+3. `sudo ethtool -c eno1 | grep rx-usecs` — if it is not 8, see **A2**. This is
+   the largest single win and the easiest to miss; `rt_setup.sh` handles it.
+4. Edit `extlinux.conf` → `isolcpus=11 nohz_full=11 rcu_nocbs=11` → reboot.
+5. `sudo taskset -c 11 cyclictest -m -t1 -p 90 -i 1000 -D 1h` → record
    max-latency baseline.
-5. Run the driver (NO sudo) `--cpu 11 --rt-priority 80`; confirm `policy: FIFO`,
+6. Run the driver (NO sudo) `--cpu 11 --rt-priority 80`; confirm `policy: FIFO`,
    `cpu_dma_latency: pinned@0us`, `majflt+=0`, zero overruns, low involuntary
    context switches.
 
-Steps 2–4 are system/boot-global (governor, isolation) and improve the tail,
+Steps 2–5 are system/boot-global (governor, isolation) and improve the tail,
 especially under load. Step 1 is the only one required for the driver to get
 real RT, and it's a one-time grant — no per-run sudo.
