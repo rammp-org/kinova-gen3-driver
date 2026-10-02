@@ -12,6 +12,33 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- The telemetry summary warns when the comm round-trip is eating the cycle
+  budget: `TelemetrySink::console_line(period_ns)` appends a warning once comm
+  p50 exceeds 40% of the period. `period_ns` defaults to `0` (check disabled),
+  so existing callers — including `kinova-gen3-ros2` — compile and behave
+  exactly as before until they pass it.
+
+  This exists because the Jetson's `nvethernet` default of `rx-usecs 512` held
+  every reply from the arm in the NIC for a fixed ~512 µs — **80% of a 1 kHz
+  budget, leaving 21 µs of margin at p99** — while wake jitter stayed at 0.1 µs
+  and compute at 0.5 µs. Nothing the driver reported about itself could reveal
+  it, and it was present in all 27 archived HIL runs. See
+  [rt-tuning A2](docs/rt-tuning.md) for the measurements, the 30-second ICMP
+  diagnostic, and why `ethtool -C` needs the link down.
+
+- `scripts/rt_setup.sh` step 9 applies the fix (`rx-usecs 8`, `rx-frames 1`),
+  idempotently: it skips the link bounce entirely when the value is already
+  correct, and refuses to bounce if the driver is running or if the invoking
+  ssh session arrives over that interface.
+
+### Changed
+
+- The in-tree apps pass their loop period to `console_line`, so they get the
+  new warning.
+
+
 ## [1.1.1] — 2026-09-22
 
 A patch release: `JointVelocityMode` holds at a zero command. No signature or

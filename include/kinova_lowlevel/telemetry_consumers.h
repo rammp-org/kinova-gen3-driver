@@ -31,7 +31,12 @@ class TelemetrySink {
   void consume(const CycleSample&);
   // One-line summary. NOTE: percentiles/max are CUMULATIVE since construction,
   // not since the last call — for interval/rolling analysis use the CSV.
-  std::string console_line() const;
+  //
+  // Pass the loop period to also get a loud warning when the comm round-trip
+  // is eating the cycle budget (see the implementation for why that is worth
+  // shouting about). period_ns = 0 (the default) disables the check, so
+  // existing callers are unaffected.
+  std::string console_line(uint32_t period_ns = 0) const;
   const NanoHistogram& cycle_hist() const { return cycle_; }
   const NanoHistogram& compute_hist() const { return compute_; }
 

@@ -65,3 +65,47 @@ TEST(TelemetrySink, CountsOverruns) {
   s.consume(c);
   EXPECT_NE(s.console_line().find("overrun"), std::string::npos);
 }
+
+// The comm-budget warning. This exists because NIC rx interrupt coalescing ate
+// 80% of the cycle budget for weeks while every in-process metric looked
+// perfect, so the threshold itself is the thing worth pinning down.
+namespace {
+void feed_comm(TelemetrySink& s, uint32_t comm_ns, int n) {
+  CycleSample c;
+  c.comm_ns = comm_ns;
+  c.cycle_ns = comm_ns;  // comm dominates the cycle, as it does in practice
+  for (int i = 0; i < n; ++i) s.consume(c);
+}
+constexpr uint32_t kPeriod1kHz = 1000000;  // ns
+}  // namespace
+
+TEST(TelemetrySink, CommBudgetWarningFiresOnTheCoalescingSignature) {
+  // The real measured failure: comm p50 799 us of a 1000 us budget.
+  TelemetrySink s;
+  feed_comm(s, 799000, 100);
+  EXPECT_NE(s.console_line(kPeriod1kHz).find("coalescing"), std::string::npos);
+}
+
+TEST(TelemetrySink, CommBudgetWarningSilentWhenHealthy) {
+  // The measured post-fix value, 281.6 us, must NOT warn. 281.6 us lands in the
+  // 262144 ns log2 bucket, which is 26% of the budget.
+  TelemetrySink s;
+  feed_comm(s, 281600, 100);
+  EXPECT_EQ(s.console_line(kPeriod1kHz).find("coalescing"), std::string::npos);
+}
+
+TEST(TelemetrySink, CommBudgetWarningOffByDefault) {
+  // No period => no check, so existing callers are unaffected.
+  TelemetrySink s;
+  feed_comm(s, 799000, 100);
+  EXPECT_EQ(s.console_line().find("coalescing"), std::string::npos);
+}
+
+TEST(TelemetrySink, CommBudgetWarningScalesWithTheLoopRate) {
+  // 799 us is fine inside a 500 Hz (2000 us) budget -- 40%, and it buckets to
+  // 524288 ns = 26%. The warning is about the FRACTION of the budget, not an
+  // absolute latency, which is why a slower loop tolerates the same comm cost.
+  TelemetrySink s;
+  feed_comm(s, 799000, 100);
+  EXPECT_EQ(s.console_line(2000000).find("coalescing"), std::string::npos);
+}

@@ -85,6 +85,92 @@ for irq in /proc/irq/[0-9]*; do
 done
 log "nudged ${moved} IRQ affinities away from core ${RT_CORE} (best-effort)"
 
+# 9. NIC interrupt coalescing on the arm link.
+#    MEASURED 2026-10-01: the nvethernet default rx-usecs=512 holds every reply
+#    from the arm in the NIC for a fixed ~512 us before the kernel sees it. At
+#    1 kHz that is 80% of the cycle budget spent waiting on a timer:
+#
+#      rx-usecs 512 -> comm p50 799us, p99.9 1242us, max 14795us, overruns 0.364%
+#      rx-usecs 8   -> comm p50 282us, p99.9  658us, max  1103us, overruns 0.001%
+#
+#    It costs nothing: at ~1 packet/ms only one packet ever arrives inside a
+#    512 us window, so the timer batched nothing (measured 1070 interrupts/s for
+#    1007 packets/s, i.e. 1:1 either way). Pure latency, no throughput benefit.
+#
+#    Diagnose without the driver: `ping -c8 -i0.3` (fresh timer each packet) vs
+#    `ping -c200 -i0.002` (timer already armed). 0.64ms vs 0.11ms = coalescing.
+#
+#    nvethernet REFUSES the change while the interface is up ("Coalesce
+#    parameters can be changed only if interface is down"), so this bounces the
+#    link -- but only when the value is actually wrong, making it idempotent and
+#    safe to re-run.
+ARM_IFACE="${ARM_IFACE:-eno1}"
+ARM_RX_USECS="${ARM_RX_USECS:-8}"      # 8 is the lowest this hardware accepts (0/1/2/4 refused)
+ARM_RX_FRAMES="${ARM_RX_FRAMES:-1}"
+
+coalesce_now() { ethtool -c "$1" 2>/dev/null | awk -v k="^$2:" '$0 ~ k {print $2}'; }
+
+if ! command -v ethtool >/dev/null 2>&1; then
+  log "SKIP coalescing: ethtool not installed"
+elif [[ ! -e "/sys/class/net/${ARM_IFACE}" ]]; then
+  log "SKIP coalescing: no interface ${ARM_IFACE}"
+else
+  cur_u="$(coalesce_now "$ARM_IFACE" rx-usecs)"
+  cur_f="$(coalesce_now "$ARM_IFACE" rx-frames)"
+  if [[ "$cur_u" == "$ARM_RX_USECS" && "$cur_f" == "$ARM_RX_FRAMES" ]]; then
+    log "coalescing already rx-usecs=${cur_u} rx-frames=${cur_f} on ${ARM_IFACE} (no bounce needed)"
+  else
+    # Never cut the link this session came in over: the bounce would kill it
+    # mid-change and the reconnect would never run.
+    via=""
+    if [[ -n "${SSH_CONNECTION:-}" ]]; then
+      client="$(printf '%s' "$SSH_CONNECTION" | awk '{print $1}')"
+      via="$(ip route get "$client" 2>/dev/null | sed -n 's/.*dev \([^ ]*\).*/\1/p' | head -1)"
+    fi
+    if [[ "$via" == "$ARM_IFACE" ]]; then
+      log "SKIP coalescing: this ssh session returns over ${ARM_IFACE}; bouncing it would cut you off."
+      log "  reconnect over another interface, or run: sudo ethtool -C ${ARM_IFACE} rx-usecs ${ARM_RX_USECS} rx-frames ${ARM_RX_FRAMES} (link down)"
+    elif pgrep -f 'kinova_gen3_no[d]e' >/dev/null 2>&1; then
+      log "SKIP coalescing: the arm driver is running and holds a session over ${ARM_IFACE}."
+      log "  stop it, then re-run this script (currently rx-usecs=${cur_u})"
+    else
+      log "coalescing on ${ARM_IFACE}: rx-usecs ${cur_u}->${ARM_RX_USECS}, rx-frames ${cur_f}->${ARM_RX_FRAMES} (bouncing the link)"
+      # NetworkManager (autoconnect) will race a bare `ip link down`, and
+      # `nmcli device disconnect` alone leaves IFF_UP set -- the flag the driver
+      # tests. Both are needed, in this order.
+      command -v nmcli >/dev/null 2>&1 && { nmcli device disconnect "$ARM_IFACE" >/dev/null 2>&1 || true; }
+      ip link set "$ARM_IFACE" down 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        ip link show "$ARM_IFACE" | head -1 | grep -q "state DOWN" && break
+        sleep 0.5
+      done
+      if ip link show "$ARM_IFACE" | head -1 | grep -q "state DOWN"; then
+        ethtool -C "$ARM_IFACE" rx-usecs "$ARM_RX_USECS" 2>/dev/null || log "  WARN: rx-usecs=${ARM_RX_USECS} refused"
+        ethtool -C "$ARM_IFACE" rx-frames "$ARM_RX_FRAMES" 2>/dev/null || log "  WARN: rx-frames=${ARM_RX_FRAMES} refused"
+      else
+        log "  WARN: ${ARM_IFACE} never reached state DOWN; the driver will refuse the change"
+      fi
+      # Hand the device back to NM, which owns the IP config. Bringing the link
+      # up with `ip link set up` alone leaves it addressless and arm traffic
+      # silently leaks out over the default route.
+      if command -v nmcli >/dev/null 2>&1; then
+        nmcli device connect "$ARM_IFACE" >/dev/null 2>&1 || true
+      else
+        ip link set "$ARM_IFACE" up 2>/dev/null || true
+      fi
+      for _ in $(seq 1 30); do
+        ip -o -4 addr show dev "$ARM_IFACE" 2>/dev/null | grep -q inet && break
+        sleep 0.5
+      done
+      if ip -o -4 addr show dev "$ARM_IFACE" 2>/dev/null | grep -q inet; then
+        log "  coalescing now rx-usecs=$(coalesce_now "$ARM_IFACE" rx-usecs) rx-frames=$(coalesce_now "$ARM_IFACE" rx-frames); ${ARM_IFACE} reconfigured"
+      else
+        log "  WARN: ${ARM_IFACE} has NO IPv4 address. Fix: nmcli device connect ${ARM_IFACE}"
+      fi
+    fi
+  fi
+fi
+
 log "done. Verify with:  cat /proc/sys/kernel/sched_rt_runtime_us ; cat /sys/devices/system/cpu/cpu${RT_CORE}/cpufreq/scaling_governor"
 log "Measure jitter with: sudo cyclictest -m -S -p 90 -i 1000 -D 60   (apt install rt-tests)"
 log "NOTE: these reset on reboot, and core isolation (isolcpus) is a SEPARATE boot-time step — see docs/rt-tuning.md"
