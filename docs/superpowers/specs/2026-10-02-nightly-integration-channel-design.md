@@ -54,6 +54,34 @@ this spec.
   If it ever becomes wanted, tools shaped like `roschema` exist; it bolts on
   without changing this design.
 
+## Phase 0 (2026-10-02): everything lives in rammp-nightly
+
+Standing constraint at rollout: **no changes to the member repos.** The target
+architecture below (per-repo dispatch contracts, builds and logs in the owning
+repos) needs each image repo to accept nightly inputs, so it waits. Phase 0
+delivers the same consumer-facing channel — same dated tags on each repo's own
+ghcr package, same `:nightly` aliases, same manifests, same guarantee — with
+the builds running inside rammp-nightly's own workflow instead:
+
+- Each leg checks out the member repo at the resolved SHA and runs its **own,
+  unmodified** build (RAMMP-docker's Makefile already takes `INTERFACES_REF`;
+  the node Dockerfile already takes `CORE_REF` for the driver).
+- Cross-repo pins the repos cannot yet accept as inputs are applied as
+  **build-time patches in the nightly's checkout**: the node's `FROM` line is
+  pointed at tonight's base tag, and the CuRobo entry in its
+  `kinova_gen3.repos` copy at the CuRobo SHA. The manifest, not the patched
+  checkout, is the set's source of truth.
+- Pushes use one classic PAT with `write:packages` (ghcr), stored only in
+  rammp-nightly; dated tags and the `:nightly` promotion both happen there.
+- Deferred with the repo freeze: the planner-image rebase onto rammp-cuda
+  (phase 0 builds it from l4t-jetpack exactly as its repo does today), the
+  `/etc/rammp-set.json` stamp (needs a Dockerfile ARG), and `expected_sha`
+  (moot — phase 0 checks out SHAs directly, so nothing can move mid-run).
+
+When the freeze lifts, the migration is per-repo and incremental: add a repo's
+dispatch contract, switch its leg from "build here" to "dispatch and await",
+delete the patch. Tags, manifests and consumers never notice.
+
 ## The set
 
 The unit of publication is a **set**: the five repos' dev HEADs resolved at
