@@ -61,11 +61,12 @@ the same instant, identified by a date — `nightly-20261002`.
 
 A green set publishes:
 
-- **Three images**, each pushed by its own repo's workflow to its own ghcr
+- **Four images**, each pushed by its own repo's workflow to its own ghcr
   package, right next to that repo's release tags:
-  `rammp-base:nightly-<date>`, `rammp-curobo:nightly-<date>`,
-  `kinova-gen3-ros2:nightly-<date>`. Dated tags are **immutable** — never
-  rebuilt, never re-pointed.
+  `rammp-base:nightly-<date>` and `rammp-cuda:nightly-<date>` (one RAMMP-docker
+  invocation builds both; GPU modules ride rammp-cuda),
+  `rammp-curobo:nightly-<date>`, `kinova-gen3-ros2:nightly-<date>`. Dated tags
+  are **immutable** — never rebuilt, never re-pointed.
 - **A moving alias** `:nightly` on each image, re-pointed to the dated tag
   only after the entire set is green. Collaborators who want "latest known
   good" pull `:nightly`; collaborators who want reproducibility pin a date.
@@ -74,7 +75,7 @@ A green set publishes:
     SHAs. This is deliberately the org's existing pin format: a source-build
     collaborator can `vcs import` it directly, and the release-time pin-move
     can be generated from it mechanically.
-  - `nightly-<date>.images.json` — the three image digests.
+  - `nightly-<date>.images.json` — the four image digests.
 - **A stamp inside each image** at `/etc/rammp-set.json` (set id, the five
   SHAs, build time), so a running container can always answer "which set am
   I from". Fail loud beats silent mis-mapping, here as everywhere.
@@ -90,15 +91,19 @@ A new repo. It owns **no build logic and writes to no ghcr package** — it
 schedules, dispatches, awaits, and records. Its contents:
 
 - `stacks/<name>.yml` — one definition per stack; `stacks/kinova-arm.yml` is
-  the first. A stack declares its member repos and branches, the build order
-  as **waves** (each wave a list of builds that may run in parallel, each
-  wave gated on the previous one's success), the dispatch inputs each build
-  needs, and its cron schedule. Stacks are data; adding one is a stack file
-  plus a thin scheduled workflow naming it, no new orchestration code.
-- The shared orchestration workflow. Per run: resolve each member repo's
-  branch HEAD to a SHA (one instant, one `gh api` pass) → dispatch wave by
-  wave, awaiting each leg → on full green, dispatch the promote step into
-  each image repo → commit the manifest.
+  the first. A stack file declares the member repos, their branches, and the
+  images a set publishes — the data both the workflow and the manifest
+  tooling read.
+- One workflow per stack (cron + manual dispatch with ref overrides). Build
+  **order** lives here, not in the stack file: GitHub's `needs:` graph is the
+  native way to express waves (each wave a set of parallel dispatches gated
+  on the previous wave's success), and a per-stack workflow keeps it legible.
+  Per run: resolve every member's branch HEAD to a SHA (one instant) →
+  dispatch wave by wave, awaiting each leg → on full green, dispatch the
+  promote step into each image repo → commit the manifest. Adding a stack is
+  a stack file plus a workflow following this pattern; the shared logic
+  (member resolution, manifest writing) lives in `scripts/`, so the workflow
+  is wiring, not code.
 - `manifests/<stack>/` — the blessed-set history.
 - One tracking issue per stack for red nights (updated, not duplicated).
 
@@ -121,15 +126,26 @@ of their own and enter as source pins:
 
 | wave | repo | build | set SHAs injected as |
 | --- | --- | --- | --- |
-| 1 | RAMMP-docker | rammp-base image | `INTERFACES_REF` = interfaces SHA |
-| 2 | RAMMP-CuRobo | curobo image | its own dev SHA; base = `rammp-base:nightly-<date>` |
+| 1 | RAMMP-docker | rammp-base + rammp-cuda images | `INTERFACES_REF` = interfaces SHA |
+| 2 | RAMMP-CuRobo | planner image | its own dev SHA; base = `rammp-cuda:nightly-<date>` |
 | 2 | kinova-gen3-ros2 | node image | driver SHA + CuRobo SHA via the `CORE_REF`-style overrides; base = `rammp-base:nightly-<date>` |
 | 3 | all three image repos | promote | re-point `:nightly` to `nightly-<date>` |
 
 Wave 2 may start only after wave 1 reports success, which also guarantees the
-base tag it builds `FROM` exists. kinova-gen3-driver's own dev CI continues to
+base tags it builds `FROM` exist. kinova-gen3-driver's own dev CI continues to
 run per push as today; the set-level proof of the driver is the node leg
 compiling and testing against its SHA.
+
+**Enabling work: the planner image moves onto rammp-cuda.** Today
+RAMMP-CuRobo's image builds `FROM nvcr.io/nvidia/l4t-jetpack` and reinstalls
+what the base family already carries — ROS 2 Humble, torch 2.10.0 from the
+jp6/cu126 index, the openblas/cuDSS runtime fixes, the Cyclone RMW. Those
+layers are deleted; the image becomes `FROM rammp-cuda` (parameterized, so the
+nightly can inject the dated tag) and keeps only the cuRobo v0.7.8 kernel
+compile — which must now apt-install the CUDA toolchain itself, because
+rammp-cuda deliberately ships runtime libraries only, no `nvcc` — plus the
+repo's own packages. The repo's existing ~1 h image gate (build-and-link, no
+GPU) proves the rebase; the functional gate remains the Jetson, as today.
 
 ## The dispatch contract (the interface this design creates)
 
@@ -141,6 +157,10 @@ A repo is **nightly-able** when its image build workflow accepts
   `.repos` overrides),
 - the tag to publish,
 - the set id (for correlation and the `/etc/rammp-set.json` stamp),
+- the SHA the orchestrator resolved for the dispatched repo itself
+  (`expected_sha`): `workflow_dispatch` targets a branch, not a SHA, so the
+  dispatched run fails loudly if HEAD moved between resolve and dispatch
+  rather than silently building a commit the manifest will not name,
 
 and exposes a **promote** entry (re-tag a given dated tag as `:nightly` using
 its own token). Any org repo implementing this contract can join a stack.
