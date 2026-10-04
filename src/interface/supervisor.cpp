@@ -437,7 +437,21 @@ void Supervisor::apply_impedance_gains(const GainsSpec& s) {
   std::lock_guard<std::mutex> l(gains_mtx_);
   imp_.set_gains(resolve_gains(s, session_default_params_));
 }
-GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
+// Sets the SESSION DEFAULT -- what kSessionDefault resolves to from now on. It
+// deliberately touches no live mode: a running impedance session keeps the
+// tuning it opened with (open-time-only semantics, spec open item resolved);
+// the next bare command picks the new default up.
+GainsResult Supervisor::on_set_gains(const GainsRequest& r) {
+  if (r.spec.profile == GainsProfile::kSessionDefault)
+    return {false, "set_gains needs a named profile or custom gains"};
+  if (r.spec.profile == GainsProfile::kCustom) {
+    const GainsCheck c = validate_custom(r.spec.custom);
+    if (!c.ok) return {false, c.message};
+  }
+  std::lock_guard<std::mutex> l(gains_mtx_);
+  session_default_params_ = resolve_gains(r.spec, session_default_params_);
+  return {true, ""};
+}
 SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {
   return set_speed_override(r.scale, r.may_raise);
 }
@@ -533,6 +547,21 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
             "timeout_s must be > 0: an unbounded stream has no safe-stop"};
   if (!pair_supported(r.kind, r.control_mode))
     return {false, result_code::kStreamRejected, "unsupported (setpoint kind, control mode) pair"};
+  // Gains that cannot act are a caller bug -- reject loudly, don't ignore.
+  if (r.control_mode != ControlModeKind::kImpedance &&
+      r.gains.profile != GainsProfile::kSessionDefault)
+    return {false, result_code::kStreamRejected, "gains supplied for a non-impedance stream"};
+  if (r.control_mode == ControlModeKind::kImpedance) {
+    if (r.gains.profile == GainsProfile::kCustom) {
+      const GainsCheck c = validate_custom(r.gains.custom);
+      if (!c.ok) return {false, result_code::kStreamRejected, c.message};
+    }
+    // Applied BEFORE the mode switch so the first impedance cycle already runs
+    // this session's tuning. If session_.open later refuses, the gains stay on
+    // imp_ harmlessly: every next impedance command applies its own resolution,
+    // so nothing can run under them.
+    apply_impedance_gains(r.gains);
+  }
 
   // Switch modes BEFORE the session is marked open, so no setpoint can land mid-switch.
   const ControlModeKind want = r.control_mode;

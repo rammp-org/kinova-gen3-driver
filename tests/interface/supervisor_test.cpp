@@ -1757,3 +1757,81 @@ TEST(SupervisorGains, RejectsGainsOnAPositionGoal) {
   g.gains.profile = GainsProfile::kStiff;  // cannot act in position mode
   EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
 }
+
+TEST(SupervisorGains, ImpedanceStreamOpensWithRequestedProfile) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, StreamGainsDoNotLeakAcrossSessions) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  r.gains = {};  // bare re-open: session default, not the last session's stiff
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, RejectsGainsOnANonImpedanceStream) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kSoft;  // cannot act here
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+  f.sup.stop();
+  f.teardown();
+}
+
+TEST(SupervisorGains, SetGainsReplacesTheSessionDefault) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::GainsRequest gr;
+  gr.spec.profile = GainsProfile::kSoft;
+  EXPECT_TRUE(f.sup.on_set_gains(gr).accepted);
+  run_goal(f, imp_goal(0.04), 1);  // bare goal now resolves to soft
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kSoft);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, SetGainsRejectsCircularAndInvalidSpecs) {
+  SupFix f;
+  interface::GainsRequest gr;  // kSessionDefault: "set the default to the default"
+  const interface::GainsResult r1 = f.sup.on_set_gains(gr);
+  EXPECT_FALSE(r1.accepted);
+  EXPECT_FALSE(r1.message.empty());
+  gr.spec.profile = GainsProfile::kCustom;  // all-zero custom: the known bad default
+  const interface::GainsResult r2 = f.sup.on_set_gains(gr);
+  EXPECT_FALSE(r2.accepted);
+  EXPECT_FALSE(r2.message.empty());
+}
