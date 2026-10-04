@@ -225,6 +225,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       //     runs skips the rebind, so traj_ keeps writing the previous sink.
       // Either way the arm sits still and the goal settles SUCCESSFUL. Testing
       // both makes the rebind a no-op at worst.
+      // EVERY impedance goal applies its resolved gains -- mode switch or not.
+      // Resolution happens here (execution), not at accept: the session default
+      // is whatever it is when the goal RUNS. No goal's gains outlive it: the
+      // next bare goal resolves kSessionDefault and overwrites them.
+      if (in.goal.control_mode == ControlModeKind::kImpedance)
+        apply_impedance_gains(in.goal.gains);
       if (in.goal.control_mode != traj_bound_kind_ ||
           in.goal.control_mode != active_mode_kind_.load()) {
         if (have_active) {  // cross-mode goal slipped past the accept-time pre-check (in_flight_
@@ -236,13 +242,6 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
           continue;
         }
         if (in.goal.control_mode == ControlModeKind::kImpedance) {
-          if (in.goal.has_gains) {
-            JointImpedanceParams p;
-            p.Kq = in.goal.gains.kq;
-            p.zeta = in.goal.gains.zeta;
-            p.torque_limit = in.goal.gains.torque_limit;
-            imp_.set_gains(p);
-          }
           exec_.request_mode(&imp_);
           traj_.emplace(imp_, continuous_);  // no-op in the executor if already active
           active_mode_kind_.store(ControlModeKind::kImpedance);
@@ -354,6 +353,15 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }
+  // Gains that cannot act are a caller bug -- reject loudly, don't ignore.
+  if (g.control_mode == ControlModeKind::kPosition &&
+      g.gains.profile != GainsProfile::kSessionDefault)
+    return GoalResponse::kReject;
+  // Custom gains are bounds-checked at ACCEPT, so a bad request dies with the
+  // goal response instead of reaching the arm (#64).
+  if (g.control_mode == ControlModeKind::kImpedance &&
+      g.gains.profile == GainsProfile::kCustom && !validate_custom(g.gains.custom).ok)
+    return GoalResponse::kReject;
   // in_flight_ implies a goal is running, so a stream cannot be open and
   // active_mode_kind_ is one of the same two kinds g.control_mode was just
   // filtered to. Reading it directly keeps ONE record of the running mode.
@@ -424,6 +432,10 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
       return nullptr;
   }
   return nullptr;
+}
+void Supervisor::apply_impedance_gains(const GainsSpec& s) {
+  std::lock_guard<std::mutex> l(gains_mtx_);
+  imp_.set_gains(resolve_gains(s, session_default_params_));
 }
 GainsResult Supervisor::on_set_gains(const GainsRequest&) { return {}; }
 SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {

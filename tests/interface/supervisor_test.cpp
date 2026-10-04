@@ -30,7 +30,7 @@ TEST(ValueTypes, DefaultsAndResultCodes) {
   g.preemption = Preemption::kLatestWins;
   g.path_tolerance = JointVec::Constant(0.2);
   EXPECT_EQ(g.trajectory.points.size(), 0u);
-  EXPECT_FALSE(g.has_gains);
+  EXPECT_EQ(g.gains.profile, GainsProfile::kSessionDefault);
   EXPECT_EQ(result_code::kSuccessful, 0);
   EXPECT_EQ(result_code::kPathToleranceViolated, -4);
   EXPECT_EQ(result_code::kPreempted, -6);
@@ -323,10 +323,10 @@ TEST(Supervisor, RejectsCrossModeGoalThatSlipsInFlightPrecheck) {
   gi.control_mode = interface::ControlModeKind::kImpedance;
   gi.preemption = interface::Preemption::kQueue;
   gi.path_tolerance = JointVec::Constant(-1.0);
-  gi.has_gains = true;
-  gi.gains.kq = JointVec::Constant(60.0);
-  gi.gains.zeta = 0.6;
-  gi.gains.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  gi.gains.profile = GainsProfile::kCustom;
+  gi.gains.custom.kq = JointVec::Constant(60.0);
+  gi.gains.custom.zeta = 0.6;
+  gi.gains.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
   interface::GoalId p{};
   p[0] = 1;
   interface::GoalId i{};
@@ -410,10 +410,10 @@ TEST(Supervisor, SwitchesToImpedanceAtRest) {
   g.trajectory = ramp7(0.0, 0.03, 0.3);
   g.path_tolerance = JointVec::Constant(-1.0);
   g.control_mode = interface::ControlModeKind::kImpedance;
-  g.has_gains = true;
-  g.gains.kq = JointVec::Constant(60.0);
-  g.gains.zeta = 0.6;
-  g.gains.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  g.gains.profile = GainsProfile::kCustom;
+  g.gains.custom.kq = JointVec::Constant(60.0);
+  g.gains.custom.zeta = 0.6;
+  g.gains.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
   interface::GoalId id{};
   id[0] = 9;
   ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
@@ -1674,4 +1674,86 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
   EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
   EXPECT_GT(elapsed_s, 0.6)
       << "not meaningfully stretched -- the override may not be reaching tick()";
+}
+
+// ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----
+namespace {
+interface::TrajectoryGoal imp_goal(double to, interface::GainsSpec spec = {}) {
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, to, 0.3);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.gains = spec;
+  return g;
+}
+void run_goal(SupFix& f, const interface::TrajectoryGoal& g, uint8_t id0) {
+  interface::GoalId id{};
+  id[0] = id0;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(900));  // run + settle
+}
+}  // namespace
+
+TEST(SupervisorGains, ImpedanceGoalWithoutSpecRunsTheSessionDefault) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  run_goal(f, imp_goal(0.04), 1);
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, CustomGainsDoNotLeakIntoTheNextGoal) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::GainsSpec s;
+  s.profile = GainsProfile::kCustom;
+  s.custom.kq = JointVec::Constant(50.0);
+  s.custom.zeta = 0.9;
+  s.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  run_goal(f, imp_goal(0.03, s), 1);
+  EXPECT_NEAR(f.imp.params().Kq[0], 50.0, 1e-12);  // custom took effect...
+  run_goal(f, imp_goal(0.06), 2);                  // ...and a bare goal resets to default
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
+  // Old bug: gains sat inside the mode-switch branch, so the second impedance
+  // goal's gains were silently ignored.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  run_goal(f, imp_goal(0.03), 1);  // enter impedance with defaults
+  interface::GainsSpec s;
+  s.profile = GainsProfile::kStiff;
+  run_goal(f, imp_goal(0.06, s), 2);  // same mode, new gains
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, RejectsInvalidCustomGainsAtAccept) {
+  SupFix f;  // no threads needed: on_trajectory_goal is a pure pre-check
+  interface::GainsSpec s;
+  s.profile = GainsProfile::kCustom;  // all-zero custom = the known bad message default
+  EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
+}
+
+TEST(SupervisorGains, RejectsGainsOnAPositionGoal) {
+  SupFix f;
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.gains.profile = GainsProfile::kStiff;  // cannot act in position mode
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
 }

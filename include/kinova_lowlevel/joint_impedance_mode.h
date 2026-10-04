@@ -90,8 +90,11 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   // arm moves even at a fixed Kq.
   JointVec last_damping() const noexcept { return Dq_last_; }
 
+  // Snapshot of the live parameter set (RT-safe copy). For tests, diagnostics
+  // and gain read-back -- the one way to see what tuning is actually in force.
+  JointImpedanceParams params() const noexcept;
+
  private:
-  JointImpedanceParams params() const noexcept;  // RT-safe: returns a value snapshot
   // Fills any non-finite IK limit with the URDF value cached at construction, so
   // a caller-supplied tighter software limit survives but the default does not
   // leave the solver unbounded.

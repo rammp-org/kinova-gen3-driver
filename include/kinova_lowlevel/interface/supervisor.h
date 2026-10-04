@@ -11,6 +11,7 @@
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
+#include "kinova_lowlevel/interface/gains.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/streaming_session.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
@@ -147,6 +148,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   kinova::PoseTargetSink* pose_sink_for(ControlModeKind);
   // One teardown, four callers: graceful close, deadline expiry, IK fault, on_halt.
   void close_stream(StreamCloseCause);
+  // Resolve a command's GainsSpec against the session default and push it into
+  // imp_. gains_mtx_ makes the two writer sites (sampler drain, backend stream
+  // open) mutually exclusive on imp_.set_gains' single-writer double-buffer --
+  // they are already mutually exclusive by the goal/stream gating, but that
+  // argument is three files wide; the mutex makes it local. Never on the RT path.
+  void apply_impedance_gains(const GainsSpec& s);
 
   JointPositionMode& pos_;
   JointImpedanceMode& imp_;
@@ -187,6 +194,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   std::atomic<double> speed_override_{1.0};
   static_assert(std::atomic<double>::is_always_lock_free,
                 "speed_override_ is read from the sampler thread; must be lock-free");
+
+  // What a bare command (GainsSpec{} == kSessionDefault) resolves to.
+  // Initially the kMedium profile; replaced whole by on_set_gains. Guarded by
+  // gains_mtx_, which also serialises the imp_.set_gains writer sites.
+  std::mutex gains_mtx_;
+  JointImpedanceParams session_default_params_ = profile_params(GainsProfile::kMedium);
 
   StreamingSession session_;              // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};  // mirrors session_, read by the sampler + goal pre-check

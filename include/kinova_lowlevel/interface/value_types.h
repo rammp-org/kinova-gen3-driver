@@ -115,8 +115,11 @@ struct TrajectoryGoal {
   double speed_scale = 1.0;
   ControlModeKind control_mode = ControlModeKind::kPosition;
   Preemption preemption = Preemption::kLatestWins;
-  JointImpedanceGains gains{};
-  bool has_gains = false;
+  // Which compliance this goal runs under when control_mode == kImpedance.
+  // Defaults to the session default (initially the kMedium profile). A
+  // position goal carrying a non-default spec is REJECTED: gains that cannot
+  // act are a caller bug, surfaced loudly, not ignored.
+  GainsSpec gains{};
   std::string sender_id;
   Token token{};  // every command carries its own authority
 };
