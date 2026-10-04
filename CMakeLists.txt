@@ -177,6 +177,19 @@ else()
     target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# benchmark_joint_impedance runs JointImpedanceMode through the RtExecutor and
+# reports timing -- the baseline instrument for the target-feedforward work.
+# Verified with --sim (SimTransport), same posture as the cartesian benchmark.
+add_executable(benchmark_joint_impedance apps/benchmark_joint_impedance.cpp)
+target_link_libraries(benchmark_joint_impedance PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(benchmark_joint_impedance PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(benchmark_joint_impedance PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(benchmark_joint_impedance PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(benchmark_joint_impedance PRIVATE KINOVA_NO_KORTEX)
+endif()
+
 # benchmark_cartesian_impedance runs CartesianImpedanceMode through the
 # RtExecutor and reports timing. Verified with --sim (SimTransport); the real
 # KORTEX path is compiled in but only built/linked, never exercised while the
