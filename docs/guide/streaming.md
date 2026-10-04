@@ -51,9 +51,11 @@ into a mode that can't drive it:
 | joint torque      | torque       | yes |
 | joint velocity    | velocity     | yes — native `set_velocity_target`, pass-through-then-limit |
 | EE twist          | velocity     | yes — resolved by `JointVelocityMode`'s damped-least-squares twist map |
+| joint velocity    | impedance    | yes — integrated into a leashed reference for `JointImpedanceMode` ([below](#compliant-velocity-and-twist-the-impedance-pairs)) |
+| EE twist          | impedance    | yes — same DLS twist map, then the same leashed integration |
 
 Every pair above is now backed by a real control path. An unsupported
-`(kind, control mode)` combination — e.g. joint velocity into impedance mode —
+`(kind, control mode)` combination — e.g. joint torque into impedance mode —
 is still refused loudly at `on_stream_open`, with
 `StreamOpenResult{accepted=false, error_code=result_code::kStreamRejected}` and
 a message naming the unsupported pair; `pair_supported` in
@@ -73,8 +75,9 @@ on it:
   planned for this mode. Push on the arm while it tracks a stream and it will
   not spring back or soften; it keeps integrating the velocity you asked for,
   up to a 0.1 rad leash on how far the reference may lead the measured
-  position. Want compliance, stream into an impedance mode instead. A zero
-  velocity **holds**: the reference stops and the position servo keeps it.
+  position. Want compliance, open the same setpoint kind in **impedance**
+  instead — see [the impedance pairs](#compliant-velocity-and-twist-the-impedance-pairs).
+  A zero velocity **holds**: the reference stops and the position servo keeps it.
 - **A stale stream commands zero, not the last-known velocity.** Holding the
   last velocity while the stream is silent would keep the arm travelling
   toward nothing. So staleness (per the deadline mechanics
@@ -117,6 +120,50 @@ rotate the commanded EE twist the moment any one joint saturates — the exact
 thing a mode named "velocity" must not do to a twist target. Uniform scaling
 keeps the achieved twist pointing the same direction as the commanded one,
 just shorter.
+
+## Compliant velocity and twist: the impedance pairs
+
+`joint velocity × impedance` and `EE twist × impedance` run the **same proven
+mechanism** the velocity mode has used since v1.1.1 (#34) — integrate the
+commanded velocity into a position reference, leashed to 0.1 rad of lead over
+the measured position — but drive it into `JointImpedanceMode` instead of a
+stiff position servo. Push on the arm and it yields like any other impedance
+session; the leash bounds the spring stretch, so under sustained contact the
+contact force saturates at roughly `Kq × 0.1 rad` per joint instead of winding
+up. The commanded `qd` is also fed forward as the mode's reference velocity,
+so the damper pulls toward the commanded rate rather than fighting it (the
+same feedforward trajectory execution uses).
+
+Differences from the `× velocity` pairs that matter to a client:
+
+- **Where the integration runs.** `JointVelocityMode` integrates inside its
+  own 1 kHz `compute()`. For the impedance pairs the **Supervisor's sampler**
+  integrates at its own fixed rate (1 kHz by default) and streams the result
+  into `JointImpedanceMode`'s joint-target sink; the backend thread only
+  stores your latest command. Client send rate stays decoupled from
+  integration rate — send at 30 Hz and the reference still advances smoothly.
+- **Staleness authority is the session deadline, not the mode watchdog.** The
+  sampler's own writes keep the mode's watchdog fresh by design, so going
+  quiet does **not** zero the command at 1 kHz the way the velocity mode does.
+  The arm keeps moving at your last commanded velocity — leash-bounded — until
+  the session deadline lapses (up to `timeout_s` after your last setpoint),
+  at which point the teardown closes the session
+  (`StreamCloseCause::kDeadlineExpired`) and latches the hold at measured q.
+  Size `timeout_s` accordingly: it is the bound on post-silence coasting.
+- **Gains apply at open.** These are impedance sessions, so
+  `StreamOpenRequest::gains` works exactly as for any other impedance stream:
+  resolved and applied at open, no leakage from previous sessions.
+- **The twist map is the same.** EE twists go through the identical
+  damped-least-squares resolution with null-space posture bias (factored into
+  `velocity_reference.h`, shared with `JointVelocityMode`), so everything in
+  [the twist section above](#the-first-twist-setpoint-can-swing-the-elbow) —
+  the posture step at the first setpoint included — applies here too.
+- **Opening seeds a hold.** The reference seeds at measured q and the stored
+  command at zero, so a session that opens and says nothing holds — it cannot
+  resume a velocity someone streamed in a previous session.
+
+The `× velocity` pairs are untouched: same mode, same stiff contract, same
+1 kHz zero-on-stale response as before.
 
 ## A setpoint is a command, not an increment
 
@@ -163,6 +210,12 @@ watch it, at two different rates, and each owns a different job:
   So the arm is never left chasing a stale target for longer than one control
   cycle, even though the session that requested the stream may not tear down
   for up to `timeout_s` more.
+
+  One deliberate exception: in the **compliant velocity/twist pairs**
+  (`joint velocity`/`EE twist` × impedance) the Supervisor's sampler writes the
+  mode's target at 1 kHz itself, which keeps the watchdog fresh regardless of
+  the client — there, the session deadline alone is the staleness authority.
+  See [the impedance pairs](#compliant-velocity-and-twist-the-impedance-pairs).
 
 Each mode also has its own default timeout (`JointTorqueParams::cmd_timeout_s`,
 `JointPositionParams::cmd_timeout_s`, `JointImpedanceParams::cmd_timeout_s`,

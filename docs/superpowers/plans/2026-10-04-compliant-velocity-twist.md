@@ -72,17 +72,17 @@ threads (both non-RT). The RT path — every mode's `compute()` and `RtExecutor`
   (caller supplies the Jacobian — `JointVelocityMode` computes it on the RT thread, the
   Supervisor under `dyn_mtx_`); `last_manipulability()`, `reset()`
 
-- [ ] Write failing tests (`tests/velocity_reference_test.cpp`): integration advances `q_ref`
+- [x] Write failing tests (`tests/velocity_reference_test.cpp`): integration advances `q_ref`
   by `qd*dt`; leash caps the lead at `max_lead` when `q_meas` lags; continuous joints wrap
   across ±π (short way) and bounded joints clamp to limits; `TwistDlsSolver` reproduces a
   commanded twist away from singularity (`J*qd ≈ V`); null-space posture pulls toward
   `q_rest` under a zero twist without disturbing the task (`J*qd ≈ 0`).
-- [ ] Add the new unit + wire CMake; run `--gtest_filter='VelocityReference*:TwistDls*'` → pass.
-- [ ] Refactor `JointVelocityMode` to delegate: `compute()`'s integrate/leash tail calls
+- [x] Add the new unit + wire CMake; run `--gtest_filter='VelocityReference*:TwistDls*'` → pass.
+- [x] Refactor `JointVelocityMode` to delegate: `compute()`'s integrate/leash tail calls
   `integrate_leashed_reference`; `solve_twist` computes `J_` then calls the solver member;
   `last_manipulability()` reads the solver; `on_enter` resets it.
-- [ ] Run `--gtest_filter='JointVelocityMode*'` → all pass UNCHANGED, then the full suite.
-- [ ] Commit: `refactor(modes): factor the velocity->leashed-reference integrator and twist DLS out of JointVelocityMode (#63)`
+- [x] Run `--gtest_filter='JointVelocityMode*'` → all pass UNCHANGED, then the full suite.
+- [x] Commit: `refactor(modes): factor the velocity->leashed-reference integrator and twist DLS out of JointVelocityMode (#63)`
 
 ### Task 2: Pair table admits velocity/twist × impedance; gains-at-open covers them
 
@@ -97,12 +97,12 @@ threads (both non-RT). The RT path — every mode's `compute()` and `RtExecutor`
 requests `imp_`, arms `imp_`'s watchdog, and applies gains-at-open with no supervisor change —
 Task 2 proves that with tests; Task 3 makes the session actually drive the mode.
 
-- [ ] Write failing tests: `pair_supported(kJointVelocity|kEeTwist, kImpedance)` true (both
+- [x] Write failing tests: `pair_supported(kJointVelocity|kEeTwist, kImpedance)` true (both
   still false for kPosition/kTorque); supervisor accepts both opens and `on_query_stream()`
   reports `control_mode == kImpedance`; a `kStiff` profile at a velocity×impedance open
   lands on `imp_.params()`.
-- [ ] Flip the two table lines; update the stale tests; run the suite.
-- [ ] Commit: `feat(interface): joint velocity and EE twist streams may open in impedance (#63)`
+- [x] Flip the two table lines; update the stale tests; run the suite.
+- [x] Commit: `feat(interface): joint velocity and EE twist streams may open in impedance (#63)`
 
 ### Task 3: Sampler-side integration drives the impedance mode
 
@@ -125,15 +125,15 @@ Task 2 proves that with tests; Task 3 makes the session actually drive the mode.
 No zero-velocity latch analogous to `vel_` is needed in `close_stream`: integration stops
 with the session, and the existing `sink_for(kImpedance)` hold latches measured q.
 
-- [ ] Write failing tests:
+- [x] Write failing tests:
   - velocity×impedance stream at 0.05 rad/s for ~0.5 s moves `imp_.reference()` off the
     entry pose by roughly rate×time (sim q static ⇒ stays under the leash)
   - leash: 1.0 rad/s for ~0.4 s caps `imp_.reference() - q_meas` at ≈0.1 rad
   - twist×impedance (fixture seeded off-singularity): nonzero twist ⇒ `imp_.reference()` moves
   - stale session: no setpoints past `timeout_s` ⇒ closed, `stream_close_cause() == kDeadlineExpired`,
     hold at measured q
-- [ ] Implement; run the new tests, then the full suite (RT untouched — `rt_safety_test` proves it).
-- [ ] Commit: `feat(interface): velocity and twist streams integrate into a leashed impedance reference (#63)`
+- [x] Implement; run the new tests, then the full suite (RT untouched — `rt_safety_test` proves it).
+- [x] Commit: `feat(interface): velocity and twist streams integrate into a leashed impedance reference (#63)`
 
 ### Task 4: Documentation
 
@@ -144,5 +144,5 @@ with the session, and the existing `sink_for(kImpedance)` hold latches measured 
 - Do NOT touch `docs/guide/control-modes.md`, `docs/reference/api.md`, `docs/interface.md`,
   `CHANGELOG.md` (orchestrator-owned).
 
-- [ ] Write the docs; `mkdocs build` if available.
-- [ ] Commit: `docs(streaming): compliant velocity/twist pairs -- semantics and pair table (#63)`
+- [x] Write the docs; `mkdocs build` if available.
+- [x] Commit: `docs(streaming): compliant velocity/twist pairs -- semantics and pair table (#63)`
