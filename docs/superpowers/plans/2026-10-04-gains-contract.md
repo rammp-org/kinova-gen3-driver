@@ -171,7 +171,7 @@ TEST(GainsResolve, CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault) {
 
 TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
   // The floor constants are hard-coded; THIS test keeps them honest against the
-  // URDF. Sample the joint space, record max |g_i|, require floor >= 1.2x that
+  // URDF. Sample the joint space, record max |g_i|, require floor >= 1.05x that (joint 1 worst-case gravity is 35.7 of a 39 ceiling: no room for more)
   // and floor <= ceil. On failure it prints the measured max so the constant
   // can be re-pinned after a model change.
   Dynamics dyn(URDF_PATH);  // 2F-85 model: worst-case payload
@@ -190,7 +190,7 @@ TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
     max_g = max_g.cwiseMax(g.cwiseAbs());
   }
   for (int i = 0; i < kNumJoints; ++i) {
-    EXPECT_GE(kTorqueLimitFloor[i], 1.2 * max_g[i])
+    EXPECT_GE(kTorqueLimitFloor[i], 1.05 * max_g[i])
         << "joint " << i << ": measured worst-case |gravity| = " << max_g[i];
     EXPECT_LE(kTorqueLimitFloor[i], kTorqueLimitCeil[i]);
   }
@@ -335,7 +335,7 @@ the measured per-joint worst-case gravity; everything else PASSES.
 
 - [ ] **Step 6: Pin the floors from the measured numbers**
 
-Take each printed `measured worst-case |gravity|`, multiply by 1.2, round UP to
+Take each printed `measured worst-case |gravity|`, multiply by 1.05, round UP to
 one decimal, and replace the provisional `kTorqueLimitFloor` values. If a floor
 would exceed its ceil (it should not on this arm), stop and flag it — that
 would mean the URDF cannot be held compliantly at that joint.

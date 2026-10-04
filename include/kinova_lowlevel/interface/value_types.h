@@ -95,6 +95,16 @@ struct JointImpedanceGains {
   JointVec torque_limit = JointVec::Zero();
 };
 
+// How a command names its compliance. kSessionDefault = "whatever the session
+// default points at" (initially the kMedium profile); named profiles are
+// complete, core-owned parameter sets; kCustom overrides kq/zeta/torque_limit
+// on top of the session default and MUST pass validate_custom at accept time.
+enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
+struct GainsSpec {
+  GainsProfile profile = GainsProfile::kSessionDefault;
+  JointImpedanceGains custom{};  // read iff profile == kCustom
+};
+
 struct TrajectoryGoal {
   Trajectory trajectory;
   JointVec path_tolerance = JointVec::Constant(-1.0);  // <0 disables (matches executor)
