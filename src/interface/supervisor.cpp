@@ -44,14 +44,15 @@ Supervisor::Supervisor(const SupervisorDeps& d)
       action_(require(d.action, "action")),
       grip_(d.grip),
       cfg_(d.cfg) {
-  // Cache which joints wrap, once, from the same URDF source JointPositionMode
-  // reads. The executor's divergence guard needs it; see TrajectoryExecutor::tick.
-  // Dynamics is not thread-safe against the RT loop, so this is read here in the
-  // constructor rather than per mode switch.
-  kinova::JointVec lower, upper;
-  pump_dyn_.joint_limits(lower, upper);
+  // Cache which joints wrap (and the limits themselves -- the sampler's
+  // compliant-velocity integrate step clamps against them), once, from the same
+  // URDF source JointPositionMode reads. The executor's divergence guard needs
+  // the wrap flags; see TrajectoryExecutor::tick. Dynamics is not thread-safe
+  // against the RT loop, so this is read here in the constructor rather than
+  // per mode switch.
+  pump_dyn_.joint_limits(q_lower_, q_upper_);
   for (int i = 0; i < kinova::kNumJoints; ++i)
-    continuous_[i] = !std::isfinite(lower[i]) && !std::isfinite(upper[i]);
+    continuous_[i] = !std::isfinite(q_lower_[i]) && !std::isfinite(q_upper_[i]);
 }
 Supervisor::~Supervisor() { stop(); }
 
@@ -83,8 +84,12 @@ void Supervisor::pump_loop() {
       s.tau = fb.tau;
       s.fault = fb.fault;
       s.stamp_s = secs_since(t0);
-      s.ee_pose = pump_dyn_.fk(fb.q);
-      pump_dyn_.jacobian(fb.q, pump_J_);
+      {
+        // Shared with the sampler's twist resolution; see dyn_mtx_ in the header.
+        std::lock_guard<std::mutex> dl(dyn_mtx_);
+        s.ee_pose = pump_dyn_.fk(fb.q);
+        pump_dyn_.jacobian(fb.q, pump_J_);
+      }
       s.ee_twist = pump_J_ * fb.qd;
       s.speed_override = speed_override_.load();
       state_snap_.store(s);
@@ -102,7 +107,16 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
   JointVec q_meas = JointVec::Zero();  // last-good measured q; reused when a snapshot read fails
   GoalId queued_id{};
   bool have_queued = false;
+  auto last_tick = clock::now();  // for the compliant-velocity integration dt
   while (running_.load(std::memory_order_acquire)) {
+    // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
+    // real period jitters above 1/sampler_hz under load; integrating with the
+    // NOMINAL period would make the commanded velocity rate-inaccurate by exactly
+    // that jitter. A stall cannot produce a reference jump: the leash bounds the
+    // lead regardless of dt.
+    const auto tick_now = clock::now();
+    const double tick_dt = std::chrono::duration<double>(tick_now - last_tick).count();
+    last_tick = tick_now;
     // 0) a halt jumps the queue: settle everything ACCEPTed, then hold where the arm IS.
     bool halt = false;
     HaltReason hr = HaltReason::kOwnershipRevoked;
@@ -158,6 +172,44 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     if (stream_open_.load() && active_mode_kind_.load() == ControlModeKind::kPosition &&
         pos_.ik_faulted())
       close_stream(StreamCloseCause::kIkFault);
+    // 0d) compliant velocity/twist (#63): while a velocity-kind session runs in
+    //     impedance, integrate the stored command into a leashed position
+    //     reference and drive it into the mode -- the same mechanism
+    //     JointVelocityMode runs inside compute() at 1 kHz, executed HERE
+    //     because the client's send rate is irregular and the integration must
+    //     not be. These writes also keep imp_'s own watchdog fresh, which is by
+    //     design: the session deadline (0b above) is the staleness authority
+    //     for these pairs, and its teardown latches the hold at measured q.
+    if (stream_open_.load() && session_.control_mode() == ControlModeKind::kImpedance &&
+        (session_.kind() == SetpointKind::kJointVelocity ||
+         session_.kind() == SetpointKind::kEeTwist)) {
+      JointFeedback fb;
+      const bool ok = snap_.load(fb);
+      q_meas = sampled_q(ok, fb.q, q_meas);  // the leash needs MEASURED q, never a phantom zero
+      std::lock_guard<std::mutex> l(stream_mtx_);
+      // Re-checked under the lock: a close that landed since the test above has
+      // already latched the hold, and one more target would overwrite it.
+      if (stream_open_.load()) {
+        JointVec qd = JointVec::Zero();
+        if (session_.kind() == SetpointKind::kEeTwist) {
+          {
+            std::lock_guard<std::mutex> dl(dyn_mtx_);  // stream_mtx_ -> dyn_mtx_, never reversed
+            pump_dyn_.jacobian(q_meas, sampler_J_);
+          }
+          stream_dls_.solve(sampler_J_, q_meas, stream_twist_cmd_, stream_dls_params_,
+                            continuous_, qd);
+        } else {
+          qd = stream_qd_cmd_;
+        }
+        integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas,
+                                    kinova::kVelocityRefMaxLead, continuous_, q_lower_, q_upper_);
+        kinova::JointTarget t;
+        t.q = stream_q_ref_;
+        t.qd = qd;
+        t.has_velocity = true;  // free feedforward: damp toward the commanded rate, not zero
+        imp_.set_joint_target(t);
+      }
+    }
     // 1) drain inbox (only this thread touches traj_)
     for (;;) {
       Inbound in;
@@ -596,6 +648,21 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   else if (want == ControlModeKind::kVelocity)
     vel_.set_command_timeout(r.timeout_s);
 
+  // Compliant velocity/twist (#63): the SAMPLER integrates, so seed its state
+  // here, before the session becomes visible -- reference at measured q (the
+  // first tick holds) and no stored command (a session that opens and says
+  // nothing must not resume a velocity someone streamed last session). On a
+  // torn first snapshot read, the mode's own reference is the honest fallback,
+  // never a phantom zero. Harmless if session_.open refuses below: the sampler
+  // only reads this state while a session is open.
+  if (want == ControlModeKind::kImpedance &&
+      (r.kind == SetpointKind::kJointVelocity || r.kind == SetpointKind::kEeTwist)) {
+    JointFeedback fb;
+    stream_q_ref_ = snap_.load(fb) ? fb.q : imp_.reference();
+    stream_qd_cmd_.setZero();
+    stream_twist_cmd_.setZero();
+  }
+
   const StreamOpenResult res = session_.open(r, secs_since(t0_));
   if (!res.accepted) {
     // Refused AFTER the mode switch and the re-arm: hand the mode straight back to
@@ -700,14 +767,25 @@ void Supervisor::on_setpoint_joint_torque(const JointSetpoint& s) {
   if (!session_.admit(SetpointKind::kJointTorque, secs_since(t0_))) return;
   tau_.set_torque(s.values);
 }
+// The two velocity kinds have TWO homes (streaming_session.cpp's pair table):
+// kVelocity writes the mode's sink directly, exactly as before. kImpedance only
+// STORES the command -- the sampler is the one writer of imp_'s joint target
+// while such a session is open (it integrates at its own fixed rate; writing
+// here too would put two writers on one single-writer double buffer).
 void Supervisor::on_setpoint_joint_velocity(const JointSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   if (!session_.admit(SetpointKind::kJointVelocity, secs_since(t0_))) return;
-  if (session_.control_mode() == ControlModeKind::kVelocity) vel_.set_velocity_target(s.values);
+  if (session_.control_mode() == ControlModeKind::kVelocity)
+    vel_.set_velocity_target(s.values);
+  else if (session_.control_mode() == ControlModeKind::kImpedance)
+    stream_qd_cmd_ = s.values;
 }
 void Supervisor::on_setpoint_twist(const TwistSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   if (!session_.admit(SetpointKind::kEeTwist, secs_since(t0_))) return;
-  if (session_.control_mode() == ControlModeKind::kVelocity) vel_.set_twist_target(s.twist);
+  if (session_.control_mode() == ControlModeKind::kVelocity)
+    vel_.set_twist_target(s.twist);
+  else if (session_.control_mode() == ControlModeKind::kImpedance)
+    stream_twist_cmd_ = s.twist;
 }
 }  // namespace kinova::interface

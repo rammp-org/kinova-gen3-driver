@@ -21,6 +21,7 @@
 #include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
+#include "kinova_lowlevel/velocity_reference.h"
 namespace kinova::interface {
 
 // Reuse the last-good measured q when a lock-free feedback-snapshot read fails
@@ -218,6 +219,29 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   JointVec stream_hold_q_ = JointVec::Zero();   // last-good measured q for the teardown hold
   bool have_hold_q_ = false;                    // false until the first successful snapshot read
   std::chrono::steady_clock::time_point t0_{};  // time origin for session stamps; set in start()
+
+  // Compliant velocity/twist sessions (#63). The backend thread only STORES the
+  // latest command here (client rates are irregular); the SAMPLER integrates it
+  // into a leashed position reference at its own fixed rate and is the ONLY
+  // writer of imp_'s joint target while such a session is open -- a direct
+  // backend write would put two writers on one single-writer double buffer.
+  // All three are guarded by stream_mtx_ (seeded at open, read/advanced by the
+  // sampler tick, overwritten by setpoints).
+  JointVec stream_q_ref_ = JointVec::Zero();      // integrated reference configuration
+  JointVec stream_qd_cmd_ = JointVec::Zero();     // latest joint-velocity command
+  kinova::Vector6 stream_twist_cmd_ = kinova::Vector6::Zero();  // latest EE twist command
+  kinova::TwistDlsSolver stream_dls_;             // sampler-only solver scratch
+  kinova::TwistDlsParams stream_dls_params_{};    // defaults match JointVelocityParams
+  kinova::Jacobian6 sampler_J_;                   // sampler-only, filled under dyn_mtx_
+  // URDF joint limits, cached in the constructor (Dynamics is not thread-safe
+  // against the RT loop): the sampler's integrate step clamps against them.
+  JointVec q_lower_ = JointVec::Zero();
+  JointVec q_upper_ = JointVec::Zero();
+  // pump_dyn_ is shared: the pump computes fk/jacobian for state publishing,
+  // the sampler needs the jacobian for the twist resolution. Both threads are
+  // non-RT; this mutex never appears on the RT path. Taken AFTER stream_mtx_
+  // when both are held (sampler tick) -- keep that order.
+  std::mutex dyn_mtx_;
 
   kinova::Jacobian6 pump_J_;  // preallocated; pump thread only
 

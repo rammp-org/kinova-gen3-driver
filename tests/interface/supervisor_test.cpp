@@ -1867,6 +1867,124 @@ TEST(Supervisor, CompliantVelocityAndTwistStreamsOpenInImpedance) {
   f.teardown();
 }
 
+TEST(Supervisor, ACompliantVelocityStreamIntegratesIntoTheImpedanceReference) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);  // rad/s; 0.5 s of it stays under the leash
+  for (int i = 0; i < 50; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Freeze q_d_ before reading it (reference() is RT-owned): close would latch
+  // the hold at measured q and the reference would walk straight back.
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  // ~0.5 s at 0.05 rad/s. The exact span is wall-clock (open -> teardown), so
+  // bound it rather than pin it: clearly moving at the commanded rate, clearly
+  // not pinned at the leash and not still at the entry pose.
+  EXPECT_GT(ref[0], 0.015);
+  EXPECT_LT(ref[0], 0.06);
+}
+
+TEST(Supervisor, TheLeashCapsACompliantVelocityReferenceWhenTheArmLags) {
+  // SimTransport is a static echo: measured q never moves. The windup guard
+  // must cap the reference lead at the leash no matter how long the command
+  // runs -- this is the bound on how hard the spring can push under contact.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(1.0);  // 0.4 s of this would be 0.4 rad unleashed
+  for (int i = 0; i < 40; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  for (int i = 0; i < kNumJoints; ++i) {
+    EXPECT_LE(ref[i], kVelocityRefMaxLead + 1e-6) << "joint " << i;
+    EXPECT_GT(ref[i], 0.09) << "joint " << i;  // it reached the leash, not stalled short
+  }
+}
+
+TEST(Supervisor, ACompliantTwistStreamResolvesThroughTheJacobian) {
+  SupFix f(0.2);  // off the straight-up pose so the Jacobian is well-conditioned
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEeTwist;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::TwistSetpoint sp;
+  sp.twist = Vector6::Zero();
+  sp.twist[0] = 0.05;  // 5 cm/s along x
+  for (int i = 0; i < 50; ++i) {
+    f.sup.on_setpoint_twist(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  // A nonzero twist must produce a nonzero qd through the DLS resolution, which
+  // the integrator then turns into reference motion off the entry pose.
+  EXPECT_GT((ref - f.init.q).cwiseAbs().maxCoeff(), 1e-3);
+}
+
+TEST(Supervisor, AStaleCompliantVelocitySessionClosesAndHoldsAtMeasuredQ) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.1;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 5; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Go quiet past the deadline: the sampler must close the session (the
+  // staleness authority for these pairs -- the sampler's own 1 kHz writes keep
+  // the mode watchdog fresh by design) and latch the hold at MEASURED q.
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  EXPECT_FALSE(f.sup.stream_is_open());
+  EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
+
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.stop();
+  // Measured q never moved (static sim echo), so the hold walks the reference
+  // back to the entry pose.
+  EXPECT_NEAR(ref.cwiseAbs().maxCoeff(), 0.0, 0.02);
+}
+
 TEST(SupervisorGains, GainsAtOpenApplyToACompliantVelocityStream) {
   // The gains-at-open logic keys on the CONTROL MODE, so the new pairs get it
   // for free -- this test pins that down rather than assuming it.
