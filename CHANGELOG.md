@@ -12,6 +12,52 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- **One gains contract on every impedance surface** (#63). Commands name their
+  compliance with a `GainsSpec`: a core-owned named profile (`soft` / `medium` /
+  `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains
+  (kq/zeta/torque_limit over the session default), or nothing — which means the
+  session default, initially `medium`. Trajectory goals, stream opens
+  (`StreamOpenRequest::gains`, applied at open) and `on_set_gains` (now real:
+  it validates and replaces the session default) all speak it. Gains apply on
+  EVERY impedance command — mode switch or not — and never leak into the next
+  command or session.
+- **Accept-time gain validation** (#64). Non-finite values, out-of-range
+  stiffness or damping ratio, and torque limits below the per-joint gravity
+  floor are refused with a reason, never clamped. The floors are pinned from
+  the measured worst-case URDF gravity (2F-85 model) and a test re-derives them
+  so a model change fails loudly. Gains on a surface where they cannot act (a
+  position goal, a non-impedance stream) are refused, not ignored.
+- **Target feedforward** (port of `feat/target-feedforward`). Joint-space
+  targets carry `{q, qd, qdd}` (`JointTarget` through `JointTargetSink`);
+  `JointImpedanceMode` damps the velocity error against the achieved
+  (post-rate-limit) reference velocity and adds `M(q)·qdd`, removing the
+  standing tracking lag `2ζ·qd·√(M/Kq)` on profiled trajectories. The executor
+  feeds derivatives scaled into wall time under the speed scale (`qd·s`,
+  `qdd·s²`). Teleop/pose/entry-hold paths and the staleness freeze are
+  unchanged — feedforward engages only when a target carries a profile.
+- **`benchmark_joint_impedance`**: sim benchmark for the joint impedance
+  compute path (`--track` streams profiled sinusoid targets). Feedforward cost
+  measured before/after: within the noise floor (x86 sim, mean ~1.5 µs).
+- **Compliant velocity and twist streams**: `joint velocity × kImpedance` and
+  `EE twist × kImpedance` pairs — the v1.1.1 integrate-into-a-held-reference
+  mechanism, factored out of `JointVelocityMode` and driven into
+  `JointImpedanceMode` at 1 kHz with velocity feedforward.
+
+### Changed
+
+- **BREAKING (C++):** `TrajectoryGoal` drops `has_gains`/`gains`
+  (`JointImpedanceGains`) for `GainsSpec gains`; `GainsRequest.gains` becomes
+  `GainsRequest.spec`; `StreamOpenRequest` gains a `gains` field;
+  `JointTargetSink` implementers now override `set_joint_target(const
+  JointTarget&)` (position-only `set_target` remains as a non-virtual
+  convenience). Ships as a minor per the pinned-chain practice recorded in the
+  spec's compatibility section; `kinova-gen3-ros2` and `rammp_arm_interfaces`
+  move in lockstep.
+- `JointImpedanceMode::params()` is public (gain read-back for tests and
+  diagnostics).
+
 ## [1.2.0] — 2026-10-02
 
 ### Added
