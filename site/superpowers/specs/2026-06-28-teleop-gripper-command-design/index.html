@@ -1,0 +1,1183 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Teleop Gripper Command — Design Spec - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#teleop-gripper-command-design-spec" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Teleop Gripper Command — Design Spec
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-gripper-is-actually-driven" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the gripper is actually driven
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#guiding-principles-consistent-with-the-socket-server-spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guiding principles (consistent with the socket-server spec)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-1-jointcommand-jointfeedback-fields-includekinova_lowleveljoint_typesh" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 1 — JointCommand / JointFeedback fields (include/kinova_lowlevel/joint_types.h)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-2-gripperinjector-decorator-appsteleop_socket_servercpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 2 — GripperInjector decorator (apps/teleop_socket_server.cpp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-3-kortextransport-gripper-readwrite-srckortex_transportcpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 3 — KortexTransport gripper read/write (src/kortex_transport.cpp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-4-simtransport-gripper-echo-includekinova_lowlevelsim_transporth-srcsim_transportcpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 4 — SimTransport gripper echo (include/kinova_lowlevel/sim_transport.h, src/sim_transport.cpp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-5-server-wiring-appsteleop_socket_servercpp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 5 — Server wiring (apps/teleop_socket_server.cpp)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-6-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 6 — Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope (deferred)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#acceptance-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Acceptance criteria
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#build-test-loop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build / test loop
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="teleop-gripper-command-design-spec">Teleop Gripper Command — Design Spec<a class="headerlink" href="#teleop-gripper-command-design-spec" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-06-28
+<strong>Status:</strong> Approved for planning
+<strong>Branch:</strong> <code>feat/teleop-gripper</code> (off <code>feat/teleop-socket-server</code>)
+<strong>Scope:</strong> Wire the gripper through the teleop socket server so the Python
+supervisor can command gripper position 0–1 over the existing UDP protocol, and
+read back the gripper's actual position. Picks up the gripper work explicitly
+deferred by the socket-server spec
+(<a href="../2026-06-26-teleop-socket-server-design/"><code>2026-06-26-teleop-socket-server-design.md</code></a>,
+"Out of scope §5.3").</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>The supervisor already sends a <code>gripper</code> field (<code>f32</code>, 0–1) in every
+<code>POSE_TARGET</code> packet and reads a <code>gripper_state</code> field in every <code>FEEDBACK</code>
+packet. Today the server stores the commanded value (<code>last_gripper</code>) and echoes
+it, but <strong>no command ever reaches the hardware</strong> — the <code>TODO(gripper)</code> in
+<code>apps/teleop_socket_server.cpp</code> marks exactly where the path stops.</p>
+<p>After this work:
+- A <code>gripper</code> value in <code>POSE_TARGET</code> drives the physical Robotiq 2F-85 gripper.
+- <code>FEEDBACK.gripper_state</code> reports the gripper's <strong>actual</strong> position read from the
+  robot, not the last command.
+- The arm controller (<code>CartesianImpedanceMode</code>) is untouched; gripper control is
+  orthogonal to it.
+- <strong>No change to the wire protocol</strong> — the fields, sizes, and the parity test
+  (<code>20 / 84 / 157 / 28 / 261</code>) all stay exactly as they are.</p>
+<h2 id="how-the-gripper-is-actually-driven">How the gripper is actually driven<a class="headerlink" href="#how-the-gripper-is-actually-driven" title="Permanent link">&para;</a></h2>
+<p>On the Gen3, the Robotiq 2F-85 is not a separate connection. In the
+<code>LOW_LEVEL_SERVOING</code> cyclic loop we already run at 1 kHz, the gripper rides
+inside the <strong>same</strong> <code>BaseCyclic::Command</code> packet as the arm, in its
+<code>interconnect.gripper_command</code> sub-message. Each cycle that we want to move the
+gripper, we add a motor command with a <strong>position setpoint in percent (0–100)</strong>;
+the gripper firmware closed-loops to it. The supervisor speaks 0–1, so the
+server maps <code>0–1 → 0–100</code>. Velocity and force are sent as fixed safe defaults
+(see Component 3) — not exposed over the wire (YAGNI).</p>
+<p>The gripper's measured position comes back the same way: in
+<code>BaseCyclic::Feedback</code>, the <code>interconnect.gripper_feedback</code> motor reports its
+actual position in percent.</p>
+<blockquote>
+<p><strong>Verify-at-implementation note:</strong> the exact KORTEX accessor names
+(<code>mutable_interconnect()</code>, <code>mutable_gripper_command()</code>, <code>add_motor_cmd()</code>,
+<code>set_position/set_velocity/set_force</code>, and the feedback side
+<code>interconnect().gripper_feedback().motor(0).position()</code>) must be confirmed
+against the real headers on <code>abra</code> before claiming the KORTEX build compiles.
+The approach (gripper embedded in the cyclic interconnect message) is the
+documented Gen3 low-level pattern; only the precise getters/setters are to be
+pinned down.</p>
+</blockquote>
+<h2 id="guiding-principles-consistent-with-the-socket-server-spec">Guiding principles (consistent with the socket-server spec)<a class="headerlink" href="#guiding-principles-consistent-with-the-socket-server-spec" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Gripper is orthogonal to arm control.</strong> It flows through a <code>Transport</code>
+   decorator, not through any <code>ControlMode</code>. Any present or future control mode
+   gets gripper support for free.</li>
+<li><strong>Touch the driver core minimally.</strong> The only edits to existing library files
+   are: two fields on <code>JointCommand</code>, one field on <code>JointFeedback</code>, the
+   <code>KortexTransport</code> read/write of the interconnect gripper, and the
+   <code>SimTransport</code> echo. No <code>RtExecutor</code> change; no <code>ControlMode</code> change.</li>
+<li><strong>Mirror existing patterns.</strong> <code>GripperInjector</code> is the command-path twin of
+   the already-shipped <code>FeedbackTap</code> (read-side decorator). Compose the two so
+   each decorator has a single responsibility.</li>
+</ol>
+<h2 id="data-flow">Data flow<a class="headerlink" href="#data-flow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>                          set_gripper(0..1)          stamp into JointCommand
+Python supervisor ─UDP─▶ rx thread ─────────▶ GripperInjector ──exchange()──▶ FeedbackTap ──▶ KortexTransport
+  POSE_TARGET.gripper                            (atomic target)                                  │ writes interconnect
+                                                                                                  │ gripper_command (0..100%)
+                                                                                                  ▼
+                                                                                            Robotiq 2F-85
+                                                                                                  │ gripper_feedback (0..100%)
+Python supervisor ◀─UDP─ feedback thread ◀── JointFeedback.gripper ◀── FeedbackTap.snap ◀─────────┘
+  FEEDBACK.gripper_state                       (actual position)
+</code></pre></div>
+<hr />
+<h2 id="component-1-jointcommand-jointfeedback-fields-includekinova_lowleveljoint_typesh">Component 1 — <code>JointCommand</code> / <code>JointFeedback</code> fields (<code>include/kinova_lowlevel/joint_types.h</code>)<a class="headerlink" href="#component-1-jointcommand-jointfeedback-fields-includekinova_lowleveljoint_typesh" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>JointCommand</code> gains:</li>
+<li><code>float gripper = 0.0f;</code> — target position, <strong>0–1</strong> (server-side units; the
+    transport converts to percent).</li>
+<li><code>bool gripper_active = false;</code> — when false, no gripper motor command is
+    emitted, so a command with no gripper intent never fights the gripper. The
+    teleop path always sets this true once a <code>POSE_TARGET</code> has been seen.</li>
+<li><code>JointFeedback</code> gains:</li>
+<li><code>float gripper = 0.0f;</code> — measured gripper position, <strong>0–1</strong> (transport
+    converts from percent on the way in).</li>
+</ul>
+<p>These default-initialize, so every existing <code>JointCommand{}</code> / <code>JointFeedback{}</code>
+construction (benchmarks, tests, other modes) keeps compiling unchanged with the
+gripper inert.</p>
+<h2 id="component-2-gripperinjector-decorator-appsteleop_socket_servercpp">Component 2 — <code>GripperInjector</code> decorator (<code>apps/teleop_socket_server.cpp</code>)<a class="headerlink" href="#component-2-gripperinjector-decorator-appsteleop_socket_servercpp" title="Permanent link">&para;</a></h2>
+<p>A <code>Transport</code> decorator, sibling of <code>FeedbackTap</code>, living in the same app file:</p>
+<ul>
+<li>Holds <code>std::atomic&lt;float&gt; gripper_{0.0f}</code> and <code>std::atomic&lt;bool&gt; active_{false}</code>.</li>
+<li><code>set_gripper(float g)</code> (called by the rx thread): stores the clamped target and
+  sets <code>active_ = true</code>.</li>
+<li><code>exchange(const JointCommand&amp; c, JointFeedback&amp; fb)</code>: copies <code>c</code>, stamps
+  <code>c2.gripper = gripper_</code>, <code>c2.gripper_active = active_</code>, forwards to inner.
+  Same for <code>send()</code>. (<code>JointCommand</code> is small/POD — the copy is RT-safe, no
+  alloc.)</li>
+<li>All other <code>Transport</code> methods forward verbatim, including <code>clear_faults()</code>.</li>
+</ul>
+<p>Composition in <code>main</code>: <code>KortexTransport</code>/<code>SimTransport</code> → <code>GripperInjector</code> →
+<code>FeedbackTap</code> → <code>RtExecutor</code>. (Injector inside, tap outside; order doesn't
+matter functionally since they touch disjoint directions, but this keeps the
+"command goes in, feedback comes out" reading.)</p>
+<h2 id="component-3-kortextransport-gripper-readwrite-srckortex_transportcpp">Component 3 — <code>KortexTransport</code> gripper read/write (<code>src/kortex_transport.cpp</code>)<a class="headerlink" href="#component-3-kortextransport-gripper-readwrite-srckortex_transportcpp" title="Permanent link">&para;</a></h2>
+<p>In <code>Impl::write_command(const JointCommand&amp; cmd)</code>, after the per-actuator loop,
+when <code>cmd.gripper_active</code>:
+- Get/create the interconnect gripper command, ensure one motor command exists,
+  and set:
+  - <code>position = clamp(cmd.gripper, 0, 1) * 100.0f</code> (percent),
+  - <code>velocity = kGripperVelocityPct</code> (default <strong>100%</strong> — full speed),
+  - <code>force = kGripperForcePct</code> (default <strong>50%</strong> — moderate; conservative for
+    bring-up, tune later).
+- The two force/velocity constants live in the anonymous namespace next to the
+  port constants, documented as tunable.</p>
+<p>In <code>Impl::fill_feedback(JointFeedback&amp; fb)</code>:
+- Read the interconnect gripper motor position (percent) and write
+  <code>fb.gripper = pos_pct / 100.0f</code>. Guard for the no-gripper case (a Gen3 with no
+  interconnect/gripper should report 0 and not crash) — confirm the
+  <code>interconnect().gripper_feedback().motor_size()</code> guard against the headers.</p>
+<p>No change to <code>exchange</code>/<code>send</code>/<code>receive</code> signatures — they already route through
+<code>write_command</code>/<code>fill_feedback</code>.</p>
+<h2 id="component-4-simtransport-gripper-echo-includekinova_lowlevelsim_transporth-srcsim_transportcpp">Component 4 — <code>SimTransport</code> gripper echo (<code>include/kinova_lowlevel/sim_transport.h</code>, <code>src/sim_transport.cpp</code>)<a class="headerlink" href="#component-4-simtransport-gripper-echo-includekinova_lowlevelsim_transporth-srcsim_transportcpp" title="Permanent link">&para;</a></h2>
+<p><code>SimTransport</code> already stores <code>last_cmd_</code>. On <code>exchange</code>/<code>send</code>, copy
+<code>last_cmd_.gripper</code> into <code>state_.gripper</code> so the echoed feedback reflects the
+last commanded gripper (there is no simulated gripper dynamics — instantaneous
+echo is the honest sim behavior). <code>receive()</code> returns the same <code>state_</code>. This
+keeps the <code>--sim</code> bring-up path showing a plausible <code>gripper_state</code>.</p>
+<h2 id="component-5-server-wiring-appsteleop_socket_servercpp">Component 5 — Server wiring (<code>apps/teleop_socket_server.cpp</code>)<a class="headerlink" href="#component-5-server-wiring-appsteleop_socket_servercpp" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Construct <code>GripperInjector injector(*base_transport);</code> then
+  <code>FeedbackTap transport(injector, snapshot);</code> (replacing the direct
+  <code>FeedbackTap transport(*base_transport, snapshot);</code>).</li>
+<li>In the <code>kPoseTarget</code> handler, replace the <code>TODO(gripper)</code> /
+  <code>last_gripper.store(...)</code> block with a single <code>injector.set_gripper(pkt.gripper);</code>.</li>
+<li>Feedback thread: set <code>pkt.gripper_state = fb.gripper;</code> (actual measured
+  position from the snapshot) instead of <code>last_gripper</code>.</li>
+<li>These two changes make the <code>last_gripper</code> atomic dead — <strong>delete it</strong> and its
+  declaration. The gripper target now lives in the injector; the reported value
+  now comes from the feedback snapshot.</li>
+</ul>
+<h2 id="component-6-tests">Component 6 — Tests<a class="headerlink" href="#component-6-tests" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Protocol parity unchanged.</strong> No new protocol test; the existing
+  <code>teleop_protocol_test.cpp</code> and its size asserts must still pass untouched
+  (regression guard that we did NOT alter the wire).</li>
+<li><strong><code>JointCommand</code>/<code>JointFeedback</code> defaults</strong> — extend the existing sim/unit
+  coverage minimally: a <code>SimTransport</code> test asserting that a commanded
+  <code>gripper</code> round-trips into <code>gripper</code> feedback through <code>exchange()</code>, and that
+  <code>gripper_active == false</code> leaves feedback gripper untouched. Mirror the style
+  of <code>tests/sim_transport_test.cpp</code>.</li>
+</ul>
+<h2 id="out-of-scope-deferred">Out of scope (deferred)<a class="headerlink" href="#out-of-scope-deferred" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Gripper velocity/force over the wire.</strong> Hardcoded defaults for now; exposing
+  them would need a protocol change, which we are explicitly avoiding.</li>
+<li><strong>Gripper force/grasp detection feedback</strong> (current, object-detected flags) —
+  the protocol has no field for it; not added.</li>
+<li><strong>Real-arm bring-up.</strong> Live gripper motion and the KORTEX-build run stay
+  deferred to an attended, in-person session per the integration runbook, same
+  posture as the socket-server spec. This sub-project delivers and verifies the
+  sim path + the KORTEX <em>build</em>.</li>
+</ul>
+<h2 id="acceptance-criteria">Acceptance criteria<a class="headerlink" href="#acceptance-criteria" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>No wire regression</strong> — <code>teleop_protocol_test</code> passes unchanged; the five
+   size <code>static_assert</code>s (<code>20 / 84 / 157 / 28 / 261</code>) still hold.</li>
+<li><strong>Sim path</strong> (<code>--sim</code>) — a <code>POSE_TARGET</code> with <code>gripper = g</code> results in
+   <code>FEEDBACK.gripper_state == g</code> (echo through <code>SimTransport</code>); <code>unit_tests</code>
+   (incl. the new sim gripper test) pass via CTest on <code>abra</code>.</li>
+<li><strong>KORTEX build</strong> — the <code>KINOVA_ENABLE_KORTEX</code> build compiles with the
+   interconnect gripper read/write against the real headers (accessor names
+   confirmed on <code>abra</code>).</li>
+<li><strong>Real-arm gripper motion</strong> — deferred to an attended session.</li>
+</ol>
+<h2 id="build-test-loop">Build / test loop<a class="headerlink" href="#build-test-loop" title="Permanent link">&para;</a></h2>
+<p>Same as the socket-server spec — builds and tests run <strong>on the Jetson <code>abra</code></strong>,
+not the Mac (KORTEX + Pinocchio are Linux-only). Use the gitignored
+<code>local_tools/</code> helpers:
+- Full build + tests: <code>bash local_tools/build_on_abra.sh</code>.
+- Fast iteration: <code>bash local_tools/sync_to_abra.sh &amp;&amp; ssh abra 'cd
+  ~/kinova-gen3-driver/build &amp;&amp; cmake --build . -j unit_tests teleop_socket_server
+  &amp;&amp; ./unit_tests'</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

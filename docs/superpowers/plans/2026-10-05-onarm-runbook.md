@@ -42,7 +42,39 @@ execution + feedforward + the gains contract on every surface.)
   `./build/benchmark_joint_impedance --sim --rate 1000 --duration 10 --track`
   (record; x86 said "noise floor" — confirm on the RT platform).
 
-## 2. Test matrix (escalating authority)
+## 1b. Workspace: ALREADY BUILT on abra (2026-10-04 evening)
+
+`/home/abra/v13-ws` holds all three feature branches, built inside a throwaway
+container from the `kinova-gen3-ros2:1.0.1` image (same toolchain the deployed
+node was built with: ROS 2 Humble + interfaces underlay + cmeel pinocchio +
+KORTEX 2.8.0 aarch64). The live checkout and the deployed images were not
+touched. To run the node from it:
+
+```sh
+docker run --rm -it --network host \
+  -v /home/abra/v13-ws:/module_ws \
+  ghcr.io/rammp-org/kinova-gen3-ros2:1.0.1 \
+  ros2 run kinova_gen3_ros2 kinova_gen3_node -- <flags>   # entrypoint sources /module_ws
+```
+(plus the RT flags from the repo Makefile when driving the real arm:
+`--cap-add SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1 --cpuset-cpus ...` —
+copy them from `make run`'s RUN variable verbatim.)
+
+The local .hil.yml files in all three repos now sync to `v13-ws/src/...`, so
+fix-edit-resync tomorrow is: edit locally → `hil sync` → rebuild in the
+container. They no longer point at /home/abra/kinova-gen3-driver (deliberate).
+
+## 2. Test matrix
+
+**Per Swapnil: the EE-trajectory visual eval (section C) runs FIRST after the
+hold sanity check A1-A2 — it is the headline. B and D follow.**
+
+Note on error tolerance: impedance GoTo now runs a RELAXED divergence guard
+(0.60 rad vs 0.35 for position) — tracking error up to the spring leash is the
+mode *working* (yielding), not the plan failing. If C-section runs still abort
+on contact, the next lever is disabling path tolerance for the eval
+(`path_tolerance: -1` via raw ExecuteJointTrajectory) and judging by eye +
+final error only.
 
 ### A. Hold + defaults sanity (gravity floor + medium profile)
 1. `execute_joint_trajectory` short move, `control_mode=1`, **gains empty**

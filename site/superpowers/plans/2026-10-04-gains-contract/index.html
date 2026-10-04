@@ -1,0 +1,1641 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Gains Contract (v1.3.0 Plan 1) Implementation Plan - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#gains-contract-v130-plan-1-implementation-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Gains Contract (v1.3.0 Plan 1) Implementation Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global-constraints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global Constraints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#review-focus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Focus
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Review Focus">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#task-1-gains-vocabulary-profile-table-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 1: Gains vocabulary, profile table, validation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-2-trajectory-goals-carry-gainsspec-gains-apply-on-every-impedance-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 2: Trajectory goals carry GainsSpec; gains apply on every impedance goal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-3-streams-open-with-gains-on_set_gains-sets-the-session-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 3: Streams open with gains; on_set_gains sets the session default
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-4-documentation-and-changelog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Task 4: Documentation and changelog
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="gains-contract-v130-plan-1-implementation-plan">Gains Contract (v1.3.0 Plan 1) Implementation Plan<a class="headerlink" href="#gains-contract-v130-plan-1-implementation-plan" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> One validated <code>GainsSpec</code> contract (named profiles + raw escape) on trajectory goals, stream opens, and <code>set_gains</code>, with no gain leakage, no partial resets, and no mode-switch gating.</p>
+<p><strong>Architecture:</strong> A new pure unit (<code>interface/gains.h|cpp</code>) owns the profile table, validation bounds, and spec→params resolution. The Supervisor keeps a mutex-guarded session default and applies resolved gains on every impedance goal execution and impedance stream open; <code>on_set_gains</code> un-stubs into "replace the session default." The RT path is untouched — all changes live on the backend/sampler threads.</p>
+<p><strong>Tech Stack:</strong> C++17, gtest, Eigen, Pinocchio (via <code>Dynamics</code>, test-only here). Sim-only x86 build (<code>./build</code> is configured; <code>cmake --build build -j</code>).</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-10-04-compliant-execution-everywhere-design.md</code></p>
+<h2 id="global-constraints">Global Constraints<a class="headerlink" href="#global-constraints" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Nothing in the RT path (<code>compute</code>, executor cycle) may allocate, lock, or block; this plan must not touch <code>compute()</code> or <code>RtExecutor</code>.</li>
+<li>Fail loud: invalid gains are <strong>rejected with a reason</strong>, never clamped.</li>
+<li>Breaking change is accepted and ships as v1.3.0 (spec §Compatibility); do not add back-compat shims for <code>has_gains</code>.</li>
+<li>Tests are one gtest binary <code>unit_tests</code>; run subsets with <code>--gtest_filter</code>.</li>
+<li><code>URDF_PATH</code> is compile-time injected and points at the 2F-85 (gripper) model — the worst case for gravity, which is what the floor derivation needs.</li>
+<li>Every commit message ends with the session attribution lines.</li>
+</ul>
+<h2 id="review-focus">Review Focus<a class="headerlink" href="#review-focus" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>zeta = 0 or negative</strong> (undamped/anti-damped spring; oscillates or diverges) → rejected. Test in Task 1.</li>
+<li><strong>torque_limit below the gravity floor</strong> (#64: clamp eats gravity, arm falls) → rejected, including the all-zeros message default. Tests in Tasks 1, 2, 3.</li>
+<li><strong>NaN smuggled through custom gains</strong> (NaN survives <code>std::clamp</code> in <code>compute</code>) → rejected at accept. Test in Task 1.</li>
+<li><strong>Gains supplied where they can't act</strong> (position goal, velocity/torque/position stream) → rejected loudly, not silently ignored. Tests in Tasks 2 and 3.</li>
+<li><strong><code>set_gains</code> with <code>kSessionDefault</code></strong> (circular: "set the default to the default") → rejected with a message. Test in Task 3.</li>
+</ol>
+<hr />
+<h3 id="task-1-gains-vocabulary-profile-table-validation">Task 1: Gains vocabulary, profile table, validation<a class="headerlink" href="#task-1-gains-vocabulary-profile-table-validation" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>include/kinova_lowlevel/interface/value_types.h:92-96</code> (add <code>GainsProfile</code>, <code>GainsSpec</code> next to <code>JointImpedanceGains</code>)
+- Create: <code>include/kinova_lowlevel/interface/gains.h</code>
+- Create: <code>src/interface/gains.cpp</code>
+- Create: <code>tests/interface/gains_test.cpp</code>
+- Modify: <code>CMakeLists.txt:106-109</code> (lib sources), <code>:356-360</code> (test sources)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>JointImpedanceParams</code> (<code>joint_impedance_mode.h:13</code>), <code>JointImpedanceGains</code> (<code>value_types.h:92</code>), <code>Dynamics</code> (test only).
+- Produces (later tasks and the ROS repo rely on these exact names):
+  - <code>enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom }</code>
+  - <code>struct GainsSpec { GainsProfile profile = GainsProfile::kSessionDefault; JointImpedanceGains custom{}; }</code> (both in <code>value_types.h</code>)
+  - <code>kinova::JointImpedanceParams profile_params(GainsProfile)</code> — named entries only; throws <code>std::invalid_argument</code> for <code>kCustom</code>/<code>kSessionDefault</code>
+  - <code>struct GainsCheck { bool ok = false; std::string message; }</code>
+  - <code>GainsCheck validate_custom(const JointImpedanceGains&amp;)</code>
+  - <code>JointImpedanceParams resolve_gains(const GainsSpec&amp;, const JointImpedanceParams&amp; session_default)</code>
+  - bounds constants: <code>kKqMin</code>, <code>kKqMax</code>, <code>kZetaMin</code>, <code>kZetaMax</code>, <code>kTorqueLimitFloor</code>, <code>kTorqueLimitCeil</code> (all in <code>kinova::interface</code>, declared in <code>gains.h</code>)</p>
+<ul>
+<li>[ ] <strong>Step 1: Add the spec types to <code>value_types.h</code></strong></li>
+</ul>
+<p>Directly below <code>JointImpedanceGains</code> (line 96):</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// How a command names its compliance. kSessionDefault = "whatever the session</span>
+<span class="c1">// default points at" (initially the kMedium profile); named profiles are</span>
+<span class="c1">// complete, core-owned parameter sets; kCustom overrides kq/zeta/torque_limit</span>
+<span class="c1">// on top of the session default and MUST pass validate_custom at accept time.</span>
+<span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">GainsProfile</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">kSessionDefault</span><span class="p">,</span><span class="w"> </span><span class="n">kSoft</span><span class="p">,</span><span class="w"> </span><span class="n">kMedium</span><span class="p">,</span><span class="w"> </span><span class="n">kStiff</span><span class="p">,</span><span class="w"> </span><span class="n">kCustom</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">GainsSpec</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">GainsProfile</span><span class="w"> </span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSessionDefault</span><span class="p">;</span>
+<span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">custom</span><span class="p">{};</span><span class="w">  </span><span class="c1">// read iff profile == kCustom</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing tests</strong> (<code>tests/interface/gains_test.cpp</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;gtest/gtest.h&gt;</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/dynamics.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/interface/gains.h"</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">kinova</span><span class="p">;</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">kinova</span><span class="o">::</span><span class="nn">interface</span><span class="p">;</span>
+
+<span class="k">namespace</span><span class="w"> </span><span class="p">{</span>
+<span class="n">JointImpedanceGains</span><span class="w"> </span><span class="nf">good</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span><span class="w"> </span><span class="mi">80</span><span class="p">,</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="mi">30</span><span class="p">,</span><span class="w"> </span><span class="mi">30</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.5</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="p">}</span><span class="w">  </span><span class="c1">// namespace</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsValidation</span><span class="p">,</span><span class="w"> </span><span class="n">AcceptsTheModeDefaults</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">good</span><span class="p">()).</span><span class="n">ok</span><span class="p">);</span><span class="w"> </span><span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsValidation</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsZeroTorqueLimit</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// THE #64 shape: a zero-filled message default. The clamp would eat gravity</span>
+<span class="w">  </span><span class="c1">// and the arm falls. Must be refused with a reason, never clamped.</span>
+<span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Zero</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">GainsCheck</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">c</span><span class="p">.</span><span class="n">ok</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">c</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">empty</span><span class="p">());</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsValidation</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsTorqueLimitBelowGravityFloor</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kTorqueLimitFloor</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.5</span><span class="p">;</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsValidation</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsNonFiniteAndNegativeFields</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">numeric_limits</span><span class="o">&lt;</span><span class="kt">double</span><span class="o">&gt;::</span><span class="n">quiet_NaN</span><span class="p">();</span><span class="w">  </span><span class="c1">// NaN survives std::clamp in compute()</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">;</span><span class="w">  </span><span class="c1">// undamped spring</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">-0.3</span><span class="p">;</span><span class="w">  </span><span class="c1">// anti-damped</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kKqMax</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">2.0</span><span class="p">;</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">;</span><span class="w">  </span><span class="c1">// no spring at all is not impedance</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsProfiles</span><span class="p">,</span><span class="w"> </span><span class="n">EveryNamedEntryPassesItsOwnValidation</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="n">GainsProfile</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">,</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">,</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">jp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>
+<span class="w">    </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="w">    </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jp</span><span class="p">.</span><span class="n">Kq</span><span class="p">;</span>
+<span class="w">    </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jp</span><span class="p">.</span><span class="n">zeta</span><span class="p">;</span>
+<span class="w">    </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jp</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">;</span>
+<span class="w">    </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">).</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="k">static_cast</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsProfiles</span><span class="p">,</span><span class="w"> </span><span class="n">MediumMatchesTheModeDefaults</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// "Switch to impedance, change nothing else" must behave exactly like the</span>
+<span class="w">  </span><span class="c1">// tuned constructor defaults everyone has been running.</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">m</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">);</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">d</span><span class="p">{};</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">m</span><span class="p">.</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">d</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">m</span><span class="p">.</span><span class="n">zeta</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">zeta</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">m</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">d</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">m</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">d</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsProfiles</span><span class="p">,</span><span class="w"> </span><span class="n">NamelessKindsThrow</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">EXPECT_THROW</span><span class="p">(</span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">),</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">invalid_argument</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_THROW</span><span class="p">(</span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSessionDefault</span><span class="p">),</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">invalid_argument</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsResolve</span><span class="p">,</span><span class="w"> </span><span class="n">SessionDefaultReturnsTheSessionDefault</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">def</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">);</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">resolve_gains</span><span class="p">(</span><span class="n">GainsSpec</span><span class="p">{},</span><span class="w"> </span><span class="n">def</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">def</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">def</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsResolve</span><span class="p">,</span><span class="w"> </span><span class="n">CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// No-partial-reset guarantee: leash/ramp/ref-speed come from the session</span>
+<span class="w">  </span><span class="c1">// default, NOT from a default-constructed params (the old mode-switch bug).</span>
+<span class="w">  </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">def</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">);</span><span class="w">  </span><span class="c1">// leash 0.45</span>
+<span class="w">  </span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">s</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">good</span><span class="p">();</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.8</span><span class="p">;</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">resolve_gains</span><span class="p">(</span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">def</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">zeta</span><span class="p">,</span><span class="w"> </span><span class="mf">0.8</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">kq_unused_sentinel_never_exists</span><span class="p">);</span><span class="w">  </span><span class="c1">// DELETE THIS LINE WHEN WRITING: see note</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">def</span><span class="p">.</span><span class="n">max_tracracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">GainsFloor</span><span class="p">,</span><span class="w"> </span><span class="n">FloorsCoverWorstCaseGravityWithMargin</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// The floor constants are hard-coded; THIS test keeps them honest against the</span>
+<span class="w">  </span><span class="c1">// URDF. Sample the joint space, record max |g_i|, require floor &gt;= 1.05x that (joint 1 worst-case gravity is 35.7 of a 39 ceiling: no room for more)</span>
+<span class="w">  </span><span class="c1">// and floor &lt;= ceil. On failure it prints the measured max so the constant</span>
+<span class="w">  </span><span class="c1">// can be re-pinned after a model change.</span>
+<span class="w">  </span><span class="n">Dynamics</span><span class="w"> </span><span class="nf">dyn</span><span class="p">(</span><span class="n">URDF_PATH</span><span class="p">);</span><span class="w">  </span><span class="c1">// 2F-85 model: worst-case payload</span>
+<span class="w">  </span><span class="n">JointVec</span><span class="w"> </span><span class="n">lo</span><span class="p">,</span><span class="w"> </span><span class="n">hi</span><span class="p">;</span>
+<span class="w">  </span><span class="n">dyn</span><span class="p">.</span><span class="n">joint_limits</span><span class="p">(</span><span class="n">lo</span><span class="p">,</span><span class="w"> </span><span class="n">hi</span><span class="p">);</span>
+<span class="w">  </span><span class="n">JointVec</span><span class="w"> </span><span class="n">max_g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Zero</span><span class="p">(),</span><span class="w"> </span><span class="n">g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Zero</span><span class="p">();</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">srand</span><span class="p">(</span><span class="mi">42</span><span class="p">);</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">n</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mi">20000</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">n</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">JointVec</span><span class="w"> </span><span class="n">q</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kNumJoints</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">lo</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">lo</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="o">-</span><span class="n">M_PI</span><span class="p">;</span>
+<span class="w">      </span><span class="k">const</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">hi</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">hi</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">M_PI</span><span class="p">;</span>
+<span class="w">      </span><span class="n">q</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">b</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">a</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">rand</span><span class="p">()</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="kt">double</span><span class="p">(</span><span class="n">RAND_MAX</span><span class="p">));</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">dyn</span><span class="p">.</span><span class="n">gravity</span><span class="p">(</span><span class="n">q</span><span class="p">,</span><span class="w"> </span><span class="n">g</span><span class="p">);</span>
+<span class="w">    </span><span class="n">max_g</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">max_g</span><span class="p">.</span><span class="n">cwiseMax</span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">cwiseAbs</span><span class="p">());</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kNumJoints</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">EXPECT_GE</span><span class="p">(</span><span class="n">kTorqueLimitFloor</span><span class="p">[</span><span class="n">i</span><span class="p">],</span><span class="w"> </span><span class="mf">1.05</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">max_g</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+<span class="w">        </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">"joint "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="s">": measured worst-case |gravity| = "</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">max_g</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+<span class="w">    </span><span class="n">EXPECT_LE</span><span class="p">(</span><span class="n">kTorqueLimitFloor</span><span class="p">[</span><span class="n">i</span><span class="p">],</span><span class="w"> </span><span class="n">kTorqueLimitCeil</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Note on <code>CustomOverridesOnly...</code>: the two marked lines are intentionally broken
+placeholders in THIS PLAN ONLY — when writing the file, assert instead:
+<code>EXPECT_TRUE(r.Kq.isApprox(s.custom.kq));</code>,
+<code>EXPECT_TRUE(r.torque_limit.isApprox(s.custom.torque_limit));</code>,
+<code>EXPECT_DOUBLE_EQ(r.max_tracking_error, def.max_tracking_error);</code>,
+<code>EXPECT_DOUBLE_EQ(r.gain_ramp_s, def.gain_ramp_s);</code>.</p>
+<ul>
+<li>[ ] <strong>Step 3: Write <code>gains.h</code></strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="cp">#pragma once</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;string&gt;</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/interface/value_types.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/joint_impedance_mode.h"</span>
+<span class="k">namespace</span><span class="w"> </span><span class="nn">kinova</span><span class="o">::</span><span class="nn">interface</span><span class="w"> </span><span class="p">{</span>
+
+<span class="c1">// Validation bounds. Rejection posture throughout: a value outside these is</span>
+<span class="c1">// REFUSED with a reason, never clamped -- clamping is how #64 dropped the arm.</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">kKqMin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span><span class="w">     </span><span class="c1">// N*m/rad; below this it is not a spring</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">kKqMax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">400.0</span><span class="p">;</span><span class="w">   </span><span class="c1">// 5x the default shoulder stiffness</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">kZetaMin</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span><span class="w">  </span><span class="c1">// an (almost) undamped spring oscillates</span>
+<span class="k">constexpr</span><span class="w"> </span><span class="kt">double</span><span class="w"> </span><span class="n">kZetaMax</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">2.0</span><span class="p">;</span>
+<span class="c1">// Gravity headroom per joint: the impedance clamp applies to the TOTAL torque,</span>
+<span class="c1">// gravity included, so a limit below worst-case |g_i(q)| lets the clamp eat</span>
+<span class="c1">// gravity and the arm falls (#64). Pinned constants; GainsFloor test re-derives</span>
+<span class="c1">// the worst case from the URDF and fails loudly if these go stale.</span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">JointVec</span><span class="w"> </span><span class="n">kTorqueLimitFloor</span><span class="p">;</span>
+<span class="k">extern</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">JointVec</span><span class="w"> </span><span class="n">kTorqueLimitCeil</span><span class="p">;</span><span class="w">  </span><span class="c1">// URDF effort limits</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">GainsCheck</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">ok</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">message</span><span class="p">;</span>
+<span class="p">};</span>
+<span class="c1">// Bounds-check raw (kCustom) gains. Pure; callable from any thread.</span>
+<span class="n">GainsCheck</span><span class="w"> </span><span class="nf">validate_custom</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceGains</span><span class="o">&amp;</span><span class="w"> </span><span class="n">g</span><span class="p">);</span>
+<span class="c1">// The complete parameter set a NAMED profile stands for. kCustom and</span>
+<span class="c1">// kSessionDefault are not names -- std::invalid_argument, fail loud.</span>
+<span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="nf">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="w"> </span><span class="n">p</span><span class="p">);</span>
+<span class="c1">// What a command's spec means, given the current session default:</span>
+<span class="c1">//   kSessionDefault -&gt; session_default verbatim</span>
+<span class="c1">//   named profile   -&gt; profile_params(p)</span>
+<span class="c1">//   kCustom         -&gt; session_default with kq/zeta/torque_limit overridden</span>
+<span class="c1">//                      (validate_custom MUST have accepted it upstream)</span>
+<span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="nf">resolve_gains</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GainsSpec</span><span class="o">&amp;</span><span class="w"> </span><span class="n">s</span><span class="p">,</span>
+<span class="w">                                           </span><span class="k">const</span><span class="w"> </span><span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="o">&amp;</span><span class="w"> </span><span class="n">session_default</span><span class="p">);</span>
+<span class="p">}</span><span class="w">  </span><span class="c1">// namespace kinova::interface</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 4: Write <code>gains.cpp</code></strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/interface/gains.h"</span>
+
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;cmath&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;stdexcept&gt;</span>
+<span class="k">namespace</span><span class="w"> </span><span class="nn">kinova</span><span class="o">::</span><span class="nn">interface</span><span class="w"> </span><span class="p">{</span>
+
+<span class="c1">// PROVISIONAL floors -- Step 6 pins them from the GainsFloor test's measured</span>
+<span class="c1">// worst-case gravity (1.2x margin, rounded up to one decimal).</span>
+<span class="k">const</span><span class="w"> </span><span class="n">JointVec</span><span class="w"> </span><span class="n">kTorqueLimitFloor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">25</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="mf">0.5</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="k">const</span><span class="w"> </span><span class="n">JointVec</span><span class="w"> </span><span class="n">kTorqueLimitCeil</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+
+<span class="n">GainsCheck</span><span class="w"> </span><span class="nf">validate_custom</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceGains</span><span class="o">&amp;</span><span class="w"> </span><span class="n">g</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">auto</span><span class="w"> </span><span class="n">fail</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[](</span><span class="k">const</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">&amp;</span><span class="w"> </span><span class="n">m</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">GainsCheck</span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">m</span><span class="p">};</span><span class="w"> </span><span class="p">};</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="p">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kZetaMin</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">kZetaMax</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">fail</span><span class="p">(</span><span class="s">"zeta must be finite and in ["</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kZetaMin</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">", "</span><span class="w"> </span><span class="o">+</span>
+<span class="w">                </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kZetaMax</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"]"</span><span class="p">);</span>
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kNumJoints</span><span class="p">;</span><span class="w"> </span><span class="o">++</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kKqMin</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">kq</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">kKqMax</span><span class="p">)</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">fail</span><span class="p">(</span><span class="s">"kq["</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"] must be finite and in ["</span><span class="w"> </span><span class="o">+</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kKqMin</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">", "</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kKqMax</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"]"</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">std</span><span class="o">::</span><span class="n">isfinite</span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">kTorqueLimitFloor</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">||</span>
+<span class="w">        </span><span class="n">g</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">kTorqueLimitCeil</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">fail</span><span class="p">(</span><span class="s">"torque_limit["</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">i</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">"] must be finite and in ["</span><span class="w"> </span><span class="o">+</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kTorqueLimitFloor</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="s">", "</span><span class="w"> </span><span class="o">+</span>
+<span class="w">                  </span><span class="n">std</span><span class="o">::</span><span class="n">to_string</span><span class="p">(</span><span class="n">kTorqueLimitCeil</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="w"> </span><span class="o">+</span>
+<span class="w">                  </span><span class="s">"]: below the floor the clamp eats gravity and the arm falls"</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="s">""</span><span class="p">};</span>
+<span class="p">}</span>
+
+<span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="nf">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="w"> </span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">jp</span><span class="p">;</span><span class="w">  </span><span class="c1">// defaults ARE the medium tuning</span>
+<span class="w">  </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kMedium</span><span class="p">:</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">jp</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kSoft</span><span class="p">:</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">Kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">40</span><span class="p">,</span><span class="w"> </span><span class="mi">40</span><span class="p">,</span><span class="w"> </span><span class="mi">40</span><span class="p">,</span><span class="w"> </span><span class="mi">40</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">,</span><span class="w"> </span><span class="mi">15</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.4</span><span class="p">;</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.45</span><span class="p">;</span><span class="w">  </span><span class="c1">// softer spring, longer leash</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">jp</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kStiff</span><span class="p">:</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">Kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">160</span><span class="p">,</span><span class="w"> </span><span class="mi">160</span><span class="p">,</span><span class="w"> </span><span class="mi">160</span><span class="p">,</span><span class="w"> </span><span class="mi">160</span><span class="p">,</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span><span class="w"> </span><span class="mi">60</span><span class="p">,</span><span class="w"> </span><span class="mi">60</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.7</span><span class="p">;</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.25</span><span class="p">;</span><span class="w">  </span><span class="c1">// stiffer spring, tighter leash</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">jp</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kCustom</span><span class="p">:</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kSessionDefault</span><span class="p">:</span>
+<span class="w">      </span><span class="k">break</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="k">throw</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">invalid_argument</span><span class="p">(</span><span class="s">"profile_params: not a named profile"</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="nf">resolve_gains</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GainsSpec</span><span class="o">&amp;</span><span class="w"> </span><span class="n">s</span><span class="p">,</span>
+<span class="w">                                           </span><span class="k">const</span><span class="w"> </span><span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="o">&amp;</span><span class="w"> </span><span class="n">session_default</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kSessionDefault</span><span class="p">:</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">session_default</span><span class="p">;</span>
+<span class="w">    </span><span class="k">case</span><span class="w"> </span><span class="no">GainsProfile</span><span class="o">::</span><span class="no">kCustom</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="n">kinova</span><span class="o">::</span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">jp</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">session_default</span><span class="p">;</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">Kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">kq</span><span class="p">;</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">zeta</span><span class="p">;</span>
+<span class="w">      </span><span class="n">jp</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">torque_limit</span><span class="p">;</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">jp</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">default</span><span class="o">:</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+<span class="p">}</span><span class="w">  </span><span class="c1">// namespace kinova::interface</span>
+</code></pre></div>
+<p>Initial profile values above are the shipped starting point; the on-arm tuning
+pass (spec §5) is the authority and may retune them.</p>
+<ul>
+<li>[ ] <strong>Step 5: Wire CMake and build</strong></li>
+</ul>
+<p>Add <code>src/interface/gains.cpp</code> to the library source list (after
+<code>src/interface/streaming_session.cpp</code>, line 109) and
+<code>tests/interface/gains_test.cpp</code> to the test list (line 360). Then:</p>
+<p>Run: <code>cmake --build build -j &amp;&amp; ./build/unit_tests --gtest_filter='Gains*'</code>
+Expected: <code>GainsFloor.FloorsCoverWorstCaseGravityWithMargin</code> may FAIL, printing
+the measured per-joint worst-case gravity; everything else PASSES.</p>
+<ul>
+<li>[ ] <strong>Step 6: Pin the floors from the measured numbers</strong></li>
+</ul>
+<p>Take each printed <code>measured worst-case |gravity|</code>, multiply by 1.05, round UP to
+one decimal, and replace the provisional <code>kTorqueLimitFloor</code> values. If a floor
+would exceed its ceil (it should not on this arm), stop and flag it — that
+would mean the URDF cannot be held compliantly at that joint.</p>
+<p>Run: <code>./build/unit_tests --gtest_filter='Gains*'</code>
+Expected: ALL PASS.</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>include/kinova_lowlevel/interface/value_types.h<span class="w"> </span>include/kinova_lowlevel/interface/gains.h<span class="w"> </span><span class="se">\</span>
+<span class="w">        </span>src/interface/gains.cpp<span class="w"> </span>tests/interface/gains_test.cpp<span class="w"> </span>CMakeLists.txt
+git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"feat(interface): GainsSpec vocabulary, profile table, accept-time validation (#63, #64)"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-2-trajectory-goals-carry-gainsspec-gains-apply-on-every-impedance-goal">Task 2: Trajectory goals carry GainsSpec; gains apply on every impedance goal<a class="headerlink" href="#task-2-trajectory-goals-carry-gainsspec-gains-apply-on-every-impedance-goal" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>include/kinova_lowlevel/interface/value_types.h:98-112</code> (<code>TrajectoryGoal</code>)
+- Modify: <code>include/kinova_lowlevel/interface/supervisor.h</code> (members + helper; <code>#include gains.h</code>)
+- Modify: <code>src/interface/supervisor.cpp:238-248</code> (drain), <code>:344-363</code> (<code>on_trajectory_goal</code>)
+- Modify: <code>include/kinova_lowlevel/joint_impedance_mode.h:94</code> (make <code>params()</code> public)
+- Modify: <code>tests/interface/supervisor_test.cpp:33,326,413</code> (old-field sites) + new tests</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>GainsSpec</code>, <code>validate_custom</code>, <code>resolve_gains</code>, <code>profile_params</code> (Task 1).
+- Produces:
+  - <code>TrajectoryGoal.gains</code> is now <code>GainsSpec</code> (no <code>has_gains</code>) — the ROS mapping (Plan 4) builds against this.
+  - <code>Supervisor::apply_impedance_gains(const GainsSpec&amp;)</code> (private) — Task 3 reuses it at stream open.
+  - <code>Supervisor</code> member <code>session_default_params_</code> + <code>gains_mtx_</code> — Task 3's <code>on_set_gains</code> writes it.
+  - <code>JointImpedanceMode::params()</code> public — tests and diagnostics read the live tuning.</p>
+<ul>
+<li>[ ] <strong>Step 1: Swap the goal fields</strong></li>
+</ul>
+<p>In <code>TrajectoryGoal</code> replace</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="n">JointImpedanceGains</span><span class="w"> </span><span class="n">gains</span><span class="p">{};</span>
+<span class="w">  </span><span class="kt">bool</span><span class="w"> </span><span class="n">has_gains</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span>
+</code></pre></div>
+<p>with</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Which compliance this goal runs under when control_mode == kImpedance.</span>
+<span class="w">  </span><span class="c1">// Defaults to the session default (initially the kMedium profile). A</span>
+<span class="w">  </span><span class="c1">// position goal carrying a non-default spec is REJECTED: gains that cannot</span>
+<span class="w">  </span><span class="c1">// act are a caller bug, surfaced loudly, not ignored.</span>
+<span class="w">  </span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">gains</span><span class="p">{};</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Make <code>JointImpedanceMode::params()</code> public</strong></li>
+</ul>
+<p>Move the declaration from the private section (<code>joint_impedance_mode.h:94</code>) to
+the public section (below <code>last_damping()</code>), with the comment:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Snapshot of the live parameter set (RT-safe copy). For tests, diagnostics</span>
+<span class="w">  </span><span class="c1">// and gain read-back -- the one way to see what tuning is actually in force.</span>
+<span class="w">  </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="nf">params</span><span class="p">()</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="k">noexcept</span><span class="p">;</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 3: Write the failing tests</strong> (append to <code>tests/interface/supervisor_test.cpp</code>; also fix the three old-field sites: line 33 becomes <code>EXPECT_EQ(g.gains.profile, interface::GainsProfile::kSessionDefault);</code>, lines 326/413 become <code>gi.gains.profile = interface::GainsProfile::kCustom; gi.gains.custom = &lt;the gains the test was setting&gt;;</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="k">namespace</span><span class="w"> </span><span class="p">{</span>
+<span class="n">interface</span><span class="o">::</span><span class="n">TrajectoryGoal</span><span class="w"> </span><span class="nf">imp_goal</span><span class="p">(</span><span class="kt">double</span><span class="w"> </span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">spec</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{})</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">TrajectoryGoal</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">trajectory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ramp7</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="n">to</span><span class="p">,</span><span class="w"> </span><span class="mf">0.3</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">path_tolerance</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Constant</span><span class="p">(</span><span class="mf">-1.0</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">gains</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">spec</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="p">}</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">run_goal</span><span class="p">(</span><span class="n">SupFix</span><span class="o">&amp;</span><span class="w"> </span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">TrajectoryGoal</span><span class="o">&amp;</span><span class="w"> </span><span class="n">g</span><span class="p">,</span><span class="w"> </span><span class="kt">uint8_t</span><span class="w"> </span><span class="n">id0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GoalId</span><span class="w"> </span><span class="n">id</span><span class="p">{};</span>
+<span class="w">  </span><span class="n">id</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">id0</span><span class="p">;</span>
+<span class="w">  </span><span class="n">ASSERT_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_trajectory_goal</span><span class="p">(</span><span class="n">g</span><span class="p">),</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GoalResponse</span><span class="o">::</span><span class="n">kAccept</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_trajectory_accepted</span><span class="p">(</span><span class="n">id</span><span class="p">,</span><span class="w"> </span><span class="n">g</span><span class="p">);</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">this_thread</span><span class="o">::</span><span class="n">sleep_for</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">milliseconds</span><span class="p">(</span><span class="mi">900</span><span class="p">));</span><span class="w">  </span><span class="c1">// run + settle</span>
+<span class="p">}</span>
+<span class="p">}</span><span class="w">  </span><span class="c1">// namespace</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">ImpedanceGoalWithoutSpecRunsTheSessionDefault</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.04</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">want</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">CustomGainsDoNotLeakIntoTheNextGoal</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">s</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">kq</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Constant</span><span class="p">(</span><span class="mf">50.0</span><span class="p">);</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">zeta</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.9</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">custom</span><span class="p">.</span><span class="n">torque_limit</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">JointVec</span><span class="p">()</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="mi">9</span><span class="p">).</span><span class="n">finished</span><span class="p">();</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.03</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_NEAR</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="w"> </span><span class="mf">50.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1e-12</span><span class="p">);</span><span class="w">  </span><span class="c1">// custom took effect...</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.06</span><span class="p">),</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w">                  </span><span class="c1">// ...and a bare goal resets to default</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">GainsApplyEvenWithoutAModeSwitch</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// Old bug: gains sat inside the mode-switch branch, so the second impedance</span>
+<span class="w">  </span><span class="c1">// goal's gains were silently ignored.</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.03</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">  </span><span class="c1">// enter impedance with defaults</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">s</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">;</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.06</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">),</span><span class="w"> </span><span class="mi">2</span><span class="p">);</span><span class="w">  </span><span class="c1">// same mode, new gains</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">want</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsInvalidCustomGainsAtAccept</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span><span class="w">  </span><span class="c1">// no threads needed: on_trajectory_goal is a pure pre-check</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">s</span><span class="p">;</span>
+<span class="w">  </span><span class="n">s</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">;</span><span class="w">  </span><span class="c1">// all-zero custom = #64 shape</span>
+<span class="w">  </span><span class="n">EXPECT_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_trajectory_goal</span><span class="p">(</span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span><span class="w"> </span><span class="n">s</span><span class="p">)),</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GoalResponse</span><span class="o">::</span><span class="n">kReject</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsGainsOnAPositionGoal</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">TrajectoryGoal</span><span class="w"> </span><span class="n">g</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">trajectory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ramp7</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.05</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4</span><span class="p">);</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kPosition</span><span class="p">;</span>
+<span class="w">  </span><span class="n">g</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">;</span><span class="w">  </span><span class="c1">// cannot act in position mode</span>
+<span class="w">  </span><span class="n">EXPECT_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_trajectory_goal</span><span class="p">(</span><span class="n">g</span><span class="p">),</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GoalResponse</span><span class="o">::</span><span class="n">kReject</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 4: Run tests to verify they fail</strong></li>
+</ul>
+<p>Run: <code>cmake --build build -j 2&gt;&amp;1 | tail -5</code>
+Expected: compile errors in <code>supervisor.cpp</code> (<code>has_gains</code> gone) — that is the
+point; proceed to Step 5.</p>
+<ul>
+<li>[ ] <strong>Step 5: Rewire the Supervisor</strong></li>
+</ul>
+<p><code>supervisor.h</code>: add <code>#include "kinova_lowlevel/interface/gains.h"</code>; in the
+private section add:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Resolve a command's GainsSpec against the session default and push it into</span>
+<span class="w">  </span><span class="c1">// imp_. gains_mtx_ makes the two writer sites (sampler drain, backend stream</span>
+<span class="w">  </span><span class="c1">// open) mutually exclusive on imp_.set_gains' single-writer double-buffer --</span>
+<span class="w">  </span><span class="c1">// they are already mutually exclusive by the goal/stream gating, but that</span>
+<span class="w">  </span><span class="c1">// argument is three files wide; the mutex makes it local. Never on the RT path.</span>
+<span class="w">  </span><span class="kt">void</span><span class="w"> </span><span class="nf">apply_impedance_gains</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GainsSpec</span><span class="o">&amp;</span><span class="w"> </span><span class="n">s</span><span class="p">);</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="w"> </span><span class="n">gains_mtx_</span><span class="p">;</span><span class="w">  </span><span class="c1">// guards session_default_params_ + serialises set_gains</span>
+<span class="w">  </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">session_default_params_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">profile_params</span><span class="p">(</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">);</span>
+</code></pre></div>
+<p><code>supervisor.cpp</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="kt">void</span><span class="w"> </span><span class="nf">Supervisor::apply_impedance_gains</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GainsSpec</span><span class="o">&amp;</span><span class="w"> </span><span class="n">s</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="o">&gt;</span><span class="w"> </span><span class="n">l</span><span class="p">(</span><span class="n">gains_mtx_</span><span class="p">);</span>
+<span class="w">  </span><span class="n">imp_</span><span class="p">.</span><span class="n">set_gains</span><span class="p">(</span><span class="n">resolve_gains</span><span class="p">(</span><span class="n">s</span><span class="p">,</span><span class="w"> </span><span class="n">session_default_params_</span><span class="p">));</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>In <code>on_trajectory_goal</code>, after the kVelocity/kTorque rejection (line 356):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Gains that cannot act are a caller bug -- reject loudly, don't ignore.</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kPosition</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<span class="w">      </span><span class="n">g</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSessionDefault</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">GoalResponse</span><span class="o">::</span><span class="n">kReject</span><span class="p">;</span>
+<span class="w">  </span><span class="c1">// Custom gains are bounds-checked at ACCEPT, so a bad request dies with the</span>
+<span class="w">  </span><span class="c1">// goal response instead of reaching the arm (#64).</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<span class="w">      </span><span class="n">g</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">!</span><span class="n">validate_custom</span><span class="p">(</span><span class="n">g</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">custom</span><span class="p">).</span><span class="n">ok</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">GoalResponse</span><span class="o">::</span><span class="n">kReject</span><span class="p">;</span>
+</code></pre></div>
+<p>In the drain, replace the gains block inside the mode-switch branch (lines
+238-248): delete the <code>if (in.goal.has_gains) { ... imp_.set_gains(p); }</code> block
+entirely, and immediately BEFORE the <code>if (in.goal.control_mode != traj_bound_kind_ || ...)</code>
+rebind check (line 228) insert:</p>
+<div class="highlight"><pre><span></span><code><span class="w">      </span><span class="c1">// EVERY impedance goal applies its resolved gains -- mode switch or not.</span>
+<span class="w">      </span><span class="c1">// Resolution happens here (execution), not at accept: the session default</span>
+<span class="w">      </span><span class="c1">// is whatever it is when the goal RUNS. No goal's gains outlive it: the</span>
+<span class="w">      </span><span class="c1">// next bare goal resolves kSessionDefault and overwrites them.</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">in</span><span class="p">.</span><span class="n">goal</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="p">)</span>
+<span class="w">        </span><span class="n">apply_impedance_gains</span><span class="p">(</span><span class="n">in</span><span class="p">.</span><span class="n">goal</span><span class="p">.</span><span class="n">gains</span><span class="p">);</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 6: Run the tests</strong></li>
+</ul>
+<p>Run: <code>cmake --build build -j &amp;&amp; ./build/unit_tests --gtest_filter='SupervisorGains*:Gains*'</code>
+Expected: ALL PASS.</p>
+<p>Run: <code>ctest --test-dir build --output-on-failure</code>
+Expected: PASS (the full binary, including <code>rt_safety_test</code>'s steady-state
+assertions — the RT path is untouched, prove it rather than assume it).</p>
+<ul>
+<li>[ ] <strong>Step 7: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>-A<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"feat(interface): trajectory goals carry GainsSpec; gains apply per goal, validated at accept (#63)"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-3-streams-open-with-gains-on_set_gains-sets-the-session-default">Task 3: Streams open with gains; on_set_gains sets the session default<a class="headerlink" href="#task-3-streams-open-with-gains-on_set_gains-sets-the-session-default" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>include/kinova_lowlevel/interface/value_types.h:29-34</code> (<code>StreamOpenRequest</code>), <code>:140-143</code> (<code>GainsRequest</code>)
+- Modify: <code>src/interface/supervisor.cpp:417</code> (<code>on_set_gains</code>), <code>:509-575</code> (<code>on_stream_open</code>)
+- Modify: <code>tests/interface/supervisor_test.cpp</code> (new tests), <code>tests/interface/arbiter_test.cpp</code> (any <code>GainsRequest{...}</code> literal gains a <code>.spec</code> instead of <code>.gains</code>)</p>
+<p><strong>Interfaces:</strong>
+- Consumes: <code>apply_impedance_gains</code>, <code>session_default_params_</code>, <code>gains_mtx_</code> (Task 2); <code>validate_custom</code>, <code>resolve_gains</code> (Task 1).
+- Produces:
+  - <code>StreamOpenRequest.gains</code> (<code>GainsSpec</code>) — Plan 4's <code>OpenStream.srv</code> maps onto it.
+  - <code>GainsRequest.spec</code> (<code>GainsSpec</code>, replaces the <code>gains</code> member) — Plan 4's <code>SetGains.srv</code> maps onto it.
+  - <code>on_set_gains</code> semantics: validates, replaces the session default, touches no live mode; next bare impedance command picks it up.</p>
+<ul>
+<li>[ ] <strong>Step 1: Extend the request types</strong></li>
+</ul>
+<p><code>StreamOpenRequest</code> gains a field after <code>timeout_s</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Compliance for an impedance session, resolved and applied AT OPEN. A</span>
+<span class="w">  </span><span class="c1">// non-default spec on a non-impedance open is REJECTED. Mid-session gain</span>
+<span class="w">  </span><span class="c1">// changes are deliberately out of scope for v1.3.0: close and re-open.</span>
+<span class="w">  </span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">gains</span><span class="p">{};</span>
+</code></pre></div>
+<p><code>GainsRequest</code> becomes:</p>
+<div class="highlight"><pre><span></span><code><span class="k">struct</span><span class="w"> </span><span class="nc">GainsRequest</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">GainsSpec</span><span class="w"> </span><span class="n">spec</span><span class="p">{};</span>
+<span class="w">  </span><span class="n">Token</span><span class="w"> </span><span class="n">token</span><span class="p">{};</span>
+<span class="p">};</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 2: Write the failing tests</strong> (append to <code>supervisor_test.cpp</code>)</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">ImpedanceStreamOpensWithRequestedProfile</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">StreamOpenRequest</span><span class="w"> </span><span class="n">r</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">SetpointKind</span><span class="o">::</span><span class="n">kJointPosition</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">timeout_s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">;</span>
+<span class="w">  </span><span class="n">ASSERT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_open</span><span class="p">(</span><span class="n">r</span><span class="p">).</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_close</span><span class="p">({});</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">StreamGainsDoNotLeakAcrossSessions</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">StreamOpenRequest</span><span class="w"> </span><span class="n">r</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">SetpointKind</span><span class="o">::</span><span class="n">kJointPosition</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">timeout_s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kStiff</span><span class="p">;</span>
+<span class="w">  </span><span class="n">ASSERT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_open</span><span class="p">(</span><span class="n">r</span><span class="p">).</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_close</span><span class="p">({});</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{};</span><span class="w">  </span><span class="c1">// bare re-open: session default, not the last session's stiff</span>
+<span class="w">  </span><span class="n">ASSERT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_open</span><span class="p">(</span><span class="n">r</span><span class="p">).</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_close</span><span class="p">({});</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kMedium</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">RejectsGainsOnANonImpedanceStream</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">StreamOpenRequest</span><span class="w"> </span><span class="n">r</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">kind</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">SetpointKind</span><span class="o">::</span><span class="n">kJointVelocity</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kVelocity</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">timeout_s</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span><span class="p">;</span>
+<span class="w">  </span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">;</span><span class="w">  </span><span class="c1">// cannot act here</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_stream_open</span><span class="p">(</span><span class="n">r</span><span class="p">).</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">SetGainsReplacesTheSessionDefault</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">start</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">run_rt</span><span class="p">();</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsRequest</span><span class="w"> </span><span class="n">gr</span><span class="p">;</span>
+<span class="w">  </span><span class="n">gr</span><span class="p">.</span><span class="n">spec</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">;</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_set_gains</span><span class="p">(</span><span class="n">gr</span><span class="p">).</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">run_goal</span><span class="p">(</span><span class="n">f</span><span class="p">,</span><span class="w"> </span><span class="n">imp_goal</span><span class="p">(</span><span class="mf">0.04</span><span class="p">),</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">  </span><span class="c1">// bare goal now resolves to soft</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">stop</span><span class="p">();</span>
+<span class="w">  </span><span class="n">f</span><span class="p">.</span><span class="n">teardown</span><span class="p">();</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">JointImpedanceParams</span><span class="w"> </span><span class="n">want</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">profile_params</span><span class="p">(</span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSoft</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_TRUE</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">Kq</span><span class="p">.</span><span class="n">isApprox</span><span class="p">(</span><span class="n">want</span><span class="p">.</span><span class="n">Kq</span><span class="p">));</span>
+<span class="w">  </span><span class="n">EXPECT_DOUBLE_EQ</span><span class="p">(</span><span class="n">f</span><span class="p">.</span><span class="n">imp</span><span class="p">.</span><span class="n">params</span><span class="p">().</span><span class="n">max_tracking_error</span><span class="p">,</span><span class="w"> </span><span class="n">want</span><span class="p">.</span><span class="n">max_tracking_error</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">TEST</span><span class="p">(</span><span class="n">SupervisorGains</span><span class="p">,</span><span class="w"> </span><span class="n">SetGainsRejectsCircularAndInvalidSpecs</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SupFix</span><span class="w"> </span><span class="n">f</span><span class="p">;</span>
+<span class="w">  </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsRequest</span><span class="w"> </span><span class="n">gr</span><span class="p">;</span><span class="w">  </span><span class="c1">// kSessionDefault: "set the default to the default"</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsResult</span><span class="w"> </span><span class="n">r1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_set_gains</span><span class="p">(</span><span class="n">gr</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">r1</span><span class="p">.</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">r1</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">empty</span><span class="p">());</span>
+<span class="w">  </span><span class="n">gr</span><span class="p">.</span><span class="n">spec</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">;</span><span class="w">  </span><span class="c1">// all-zero custom: #64 shape</span>
+<span class="w">  </span><span class="k">const</span><span class="w"> </span><span class="n">interface</span><span class="o">::</span><span class="n">GainsResult</span><span class="w"> </span><span class="n">r2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">f</span><span class="p">.</span><span class="n">sup</span><span class="p">.</span><span class="n">on_set_gains</span><span class="p">(</span><span class="n">gr</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">r2</span><span class="p">.</span><span class="n">accepted</span><span class="p">);</span>
+<span class="w">  </span><span class="n">EXPECT_FALSE</span><span class="p">(</span><span class="n">r2</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">empty</span><span class="p">());</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li>[ ] <strong>Step 3: Run to verify failure</strong></li>
+</ul>
+<p>Run: <code>cmake --build build -j &amp;&amp; ./build/unit_tests --gtest_filter='SupervisorGains.ImpedanceStreamOpens*:SupervisorGains.StreamGains*:SupervisorGains.Rejects*:SupervisorGains.SetGains*'</code>
+Expected: the stream tests FAIL (gains ignored → medium where stiff expected;
+non-impedance open accepted); the set-gains tests FAIL (<code>on_set_gains</code> returns
+<code>{}</code> → <code>accepted == false</code> with an EMPTY message — the reject tests fail on the
+non-empty-message assertion).</p>
+<ul>
+<li>[ ] <strong>Step 4: Implement</strong></li>
+</ul>
+<p><code>on_stream_open</code>, immediately after the <code>pair_supported</code> rejection (line 523):</p>
+<div class="highlight"><pre><span></span><code><span class="w">  </span><span class="c1">// Gains that cannot act are a caller bug -- reject loudly, don't ignore.</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="w"> </span><span class="o">&amp;&amp;</span>
+<span class="w">      </span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSessionDefault</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">result_code</span><span class="o">::</span><span class="n">kStreamRejected</span><span class="p">,</span><span class="w"> </span><span class="s">"gains supplied for a non-impedance stream"</span><span class="p">};</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">control_mode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kImpedance</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">const</span><span class="w"> </span><span class="n">GainsCheck</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">validate_custom</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">.</span><span class="n">custom</span><span class="p">);</span>
+<span class="w">      </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">c</span><span class="p">.</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">result_code</span><span class="o">::</span><span class="n">kStreamRejected</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">message</span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// Applied BEFORE the mode switch so the first impedance cycle already runs</span>
+<span class="w">    </span><span class="c1">// this session's tuning. If session_.open later refuses, the gains stay on</span>
+<span class="w">    </span><span class="c1">// imp_ harmlessly: every next impedance command applies its own resolution,</span>
+<span class="w">    </span><span class="c1">// so nothing can run under them.</span>
+<span class="w">    </span><span class="n">apply_impedance_gains</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">gains</span><span class="p">);</span>
+<span class="w">  </span><span class="p">}</span>
+</code></pre></div>
+<p>Replace the <code>on_set_gains</code> stub (line 428):</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Sets the SESSION DEFAULT -- what kSessionDefault resolves to from now on. It</span>
+<span class="c1">// deliberately touches no live mode: a running impedance session keeps the</span>
+<span class="c1">// tuning it opened with (open-time-only semantics, spec open item resolved);</span>
+<span class="c1">// the next bare command picks the new default up.</span>
+<span class="n">GainsResult</span><span class="w"> </span><span class="nf">Supervisor::on_set_gains</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">GainsRequest</span><span class="o">&amp;</span><span class="w"> </span><span class="n">r</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">spec</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kSessionDefault</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="s">"set_gains needs a named profile or custom gains"</span><span class="p">};</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">spec</span><span class="p">.</span><span class="n">profile</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">GainsProfile</span><span class="o">::</span><span class="n">kCustom</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">const</span><span class="w"> </span><span class="n">GainsCheck</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">validate_custom</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">spec</span><span class="p">.</span><span class="n">custom</span><span class="p">);</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">c</span><span class="p">.</span><span class="n">ok</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">false</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">.</span><span class="n">message</span><span class="p">};</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">lock_guard</span><span class="o">&lt;</span><span class="n">std</span><span class="o">::</span><span class="n">mutex</span><span class="o">&gt;</span><span class="w"> </span><span class="n">l</span><span class="p">(</span><span class="n">gains_mtx_</span><span class="p">);</span>
+<span class="w">  </span><span class="n">session_default_params_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">resolve_gains</span><span class="p">(</span><span class="n">r</span><span class="p">.</span><span class="n">spec</span><span class="p">,</span><span class="w"> </span><span class="n">session_default_params_</span><span class="p">);</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="nb">true</span><span class="p">,</span><span class="w"> </span><span class="s">""</span><span class="p">};</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Fix any <code>arbiter_test.cpp</code> compile breaks: <code>GainsRequest</code> literals change from
+<code>.gains</code> to <code>.spec</code> (the Arbiter itself only reads <code>.token</code> — no logic change).</p>
+<ul>
+<li>[ ] <strong>Step 5: Run the full suite</strong></li>
+</ul>
+<p>Run: <code>cmake --build build -j &amp;&amp; ctest --test-dir build --output-on-failure</code>
+Expected: ALL PASS.</p>
+<ul>
+<li>[ ] <strong>Step 6: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>-A<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"feat(interface): streams open with gains; on_set_gains sets the session default (#63)"</span>
+</code></pre></div>
+<hr />
+<h3 id="task-4-documentation-and-changelog">Task 4: Documentation and changelog<a class="headerlink" href="#task-4-documentation-and-changelog" title="Permanent link">&para;</a></h3>
+<p><strong>Files:</strong>
+- Modify: <code>docs/interface.md</code> (gains contract section), <code>docs/guide/control-modes.md</code> (profiles table), <code>docs/reference/api.md</code> (GainsSpec, validation bounds, on_set_gains semantics), <code>CHANGELOG.md</code> (unreleased v1.3.0 section, breaking-change note)</p>
+<p><strong>Interfaces:</strong> none (prose).</p>
+<ul>
+<li>[ ] <strong>Step 1: Write the docs</strong></li>
+</ul>
+<p>Cover, in the matching layer: the three-way <code>GainsSpec</code> (profile / custom /
+absent-means-session-default), the soft/medium/stiff table with its initial
+values and the note that the arm pass may retune them, the validation bounds
+(incl. the gravity-floor rationale), the no-leak and apply-per-command
+guarantees, open-time-only stream gains, <code>set_gains</code> = set-the-default, and the
+breaking field changes (<code>has_gains</code> gone; <code>GainsRequest.spec</code>). CHANGELOG gets
+an Unreleased entry flagging the breaking API change per the spec's
+compatibility section.</p>
+<ul>
+<li>[ ] <strong>Step 2: Verify the docs build</strong></li>
+</ul>
+<p>Run: <code>mkdocs build 2&gt;&amp;1 | tail -3</code> (skip if mkdocs is not installed locally —
+no new pages are added, so no <code>nav:</code> change is needed).
+Expected: no errors.</p>
+<ul>
+<li>[ ] <strong>Step 3: Commit</strong></li>
+</ul>
+<div class="highlight"><pre><span></span><code>git<span class="w"> </span>add<span class="w"> </span>docs<span class="w"> </span>CHANGELOG.md<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"docs: gains contract -- profiles, validation bounds, set_gains semantics"</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

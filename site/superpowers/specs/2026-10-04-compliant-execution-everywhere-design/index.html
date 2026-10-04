@@ -1,0 +1,1230 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Compliant Execution Everywhere — Design Spec (v1.3.0) - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#compliant-execution-everywhere-design-spec-v130" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Compliant Execution Everywhere — Design Spec (v1.3.0)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approved-design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approved design decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Approved design decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-the-gains-contract-gainsspec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The gains contract: GainsSpec
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Surfaces
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-compliant-velocity-and-twist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Compliant velocity and twist
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-target-feedforward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Target feedforward
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-defaults-as-a-deliverable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Defaults as a deliverable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-execution-semantics-and-hygiene" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Execution semantics and hygiene
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility-and-versioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility and versioning
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decomposition-for-planning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomposition (for planning)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-items-resolved-during-planning-not-blockers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open items (resolved during planning, not blockers)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="compliant-execution-everywhere-design-spec-v130">Compliant Execution Everywhere — Design Spec (v1.3.0)<a class="headerlink" href="#compliant-execution-everywhere-design-spec-v130" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-10-04
+<strong>Status:</strong> Approved for planning
+<strong>Scope:</strong> Joint impedance as a first-class option on every interface surface —
+trajectories, the GoTo actions, and every streaming controller where compliance
+makes sense — behind one gains contract, with defaults good enough that
+switching to impedance requires no further configuration. Realizes GitHub
+issue <strong>#63</strong> (milestone v1.3.0); its prerequisite bug is <strong>#64</strong>.</p>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>A caller on any surface picks <code>position</code> or <code>impedance</code> per command. Picking
+<code>impedance</code> and saying nothing else gets tuned, validated default gains and
+behaves well — identically on every surface, every time, regardless of what the
+previous caller did. Callers who <em>want</em> to tune can, from a small named menu or
+with raw numbers, and nothing they send can put the arm into a dangerous
+configuration silently.</p>
+<p><strong>The guiding principle (the release's acceptance test):</strong> <em>switch to
+impedance, change nothing else, and it works.</em></p>
+<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>v1.2.0</strong> (speed scale, <code>56e7c61</code>) — the base. All work branches from it.</li>
+<li><strong>Issue #64</strong> — gain validation. Lands first; everything else builds on a
+  core that refuses bad gains.</li>
+<li><strong><code>feat/target-feedforward</code></strong> (3 commits, based on an Aug 14 commit) — ported,
+  not cherry-picked blind; it predates the 1.1.1 velocity rework.</li>
+<li><strong><code>rammp_arm_interfaces</code></strong> — the GoTo and trajectory message changes live
+  there; <code>kinova-gen3-ros2</code> follows. Same cross-repo pattern as the
+  arbitration round.</li>
+</ul>
+<h2 id="out-of-scope">Out of scope<a class="headerlink" href="#out-of-scope" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>CartesianImpedanceMode</code> in the Supervisor</strong>, the <code>kEeWrench</code> setpoint
+  kind, and the <code>cartesian_impedance</code> stream controller. Cartesian impedance
+  stays teleop-only this release. (Per #63; the streaming spec already calls
+  the wiring mechanical.)</li>
+<li><strong>Impedance as the default.</strong> Every surface defaults to position, exactly as
+  today. Revisit after the gains plumbing has soaked on the real arm.</li>
+<li><strong><code>query_state</code>.</strong> Stays stubbed.</li>
+<li><strong>Gripper.</strong> <code>GripperController</code> decorates the Transport and is orthogonal.</li>
+</ul>
+<h2 id="approved-design-decisions">Approved design decisions<a class="headerlink" href="#approved-design-decisions" title="Permanent link">&para;</a></h2>
+<h3 id="1-the-gains-contract-gainsspec">1. The gains contract: <code>GainsSpec</code><a class="headerlink" href="#1-the-gains-contract-gainsspec" title="Permanent link">&para;</a></h3>
+<p>Every command that can run impedance carries one optional <code>GainsSpec</code>:</p>
+<ul>
+<li><strong>A profile name</strong> — <code>soft</code>, <code>medium</code>, <code>stiff</code> (exact menu fixed during
+  planning; small). <strong>Names describe the gains</strong> — there is no profile named
+  <code>default</code>. "Default" is a <em>pointer</em> to a profile (initially <code>medium</code>), never
+  a profile itself, so a caller reading back the session state always sees
+  which gains they are actually getting. The table lives <strong>in the driver
+  core</strong>, each entry a <em>complete</em> <code>JointImpedanceParams</code> — not just
+  <code>{kq, zeta, torque_limit}</code> but leash, ramp, and ref-speed too. One menu, one
+  meaning, every front-end.</li>
+<li><strong><code>custom</code> + raw gains</strong> — the escape hatch for teleop and learned-policy
+  clients that genuinely tune. Same validation as everything else.</li>
+<li><strong>Absent</strong> — whatever the session default points at (initially <code>medium</code>).</li>
+</ul>
+<p>Three core-enforced guarantees:</p>
+<ol>
+<li><strong>Validated at accept time (#64).</strong> Non-finite values, out-of-range
+   stiffness or damping ratio, and torque limits too low to carry gravity are
+   <strong>rejected with a reason</strong> — never clamped into something that drops the
+   arm. Validation lives in the core, below every surface, so it protects raw
+   and profile callers alike. The ROS mapping bug that stamps
+   <code>has_gains = true</code> with message-default zeros on every impedance goal dies
+   with the old fields.</li>
+<li><strong>No leakage.</strong> Each command and each stream session resolves its own
+   <code>GainsSpec</code> at accept/open. A goal or stream without gains gets the session
+   default — <em>not</em> whatever the previous caller left on the shared
+   <code>JointImpedanceMode</code>. (Today a trajectory goal's gains silently persist
+   into later <code>joint_impedance</code> streams.)</li>
+<li><strong>No partial resets, no switch-gating.</strong> Applying gains never resets the
+   params it doesn't name (today the mode-switch branch rebuilds
+   <code>JointImpedanceParams</code> from scratch, discarding leash/ramp/ref-speed), and
+   gains apply even when the mode doesn't change (today a second impedance
+   goal's gains are ignored).</li>
+</ol>
+<p><strong><code>on_set_gains</code> un-stubs</strong> into "set the session default": profile or raw,
+same validation, already Arbiter-gated. A <code>SetGains</code> ROS service sits on top.
+This matches the original interface spec's intent (goal gains authoritative;
+set-gains sets the defaults).</p>
+<h3 id="2-surfaces">2. Surfaces<a class="headerlink" href="#2-surfaces" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TrajectoryGoal</code> / <code>ExecuteJointTrajectory</code></td>
+<td><code>has_gains + gains</code> replaced by <code>GainsSpec</code>. Mode choice unchanged.</td>
+</tr>
+<tr>
+<td><code>StreamOpenRequest</code> / <code>open_stream</code></td>
+<td>Gains at open: <code>GainsSpec</code> added. Impedance streams stop inheriting leftovers.</td>
+</tr>
+<tr>
+<td>GoTo ee-pose / joint-config / preset</td>
+<td>Grow <code>control_mode</code> + <code>GainsSpec</code>. Default stays position — pure opt-in, no behavior change for existing clients.</td>
+</tr>
+<tr>
+<td><code>set_gains</code></td>
+<td>Real <code>CommandSink::on_set_gains</code> + new ROS service, token-gated.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>CommandSink</code>/<code>StreamSink</code> signature changes break <code>kinova-gen3-ros2</code>;
+message changes land in <code>rammp_arm_interfaces</code>. Both follow in lockstep.</p>
+<h3 id="3-compliant-velocity-and-twist">3. Compliant velocity and twist<a class="headerlink" href="#3-compliant-velocity-and-twist" title="Permanent link">&para;</a></h3>
+<p><code>JointVelocityMode</code> stays stiff by contract and untouched. The 1.1.1 mechanism
+— integrate the velocity command into a held, leashed position reference — is
+<strong>factored out of <code>JointVelocityMode</code> into a shared integrator</strong> and reused in
+front of <code>JointImpedanceMode</code>'s <code>JointTargetSink</code>. Twist goes through the same
+damped-least-squares resolution it uses today, then the same integrator.</p>
+<p>New valid pairs: <code>joint velocity × kImpedance</code>, <code>EE twist × kImpedance</code>. New
+ROS controllers: <code>joint_velocity_impedance</code>, <code>ee_twist_impedance</code>. The pair
+table and <code>pair_supported()</code> keep refusing everything else at open.</p>
+<h3 id="4-target-feedforward">4. Target feedforward<a class="headerlink" href="#4-target-feedforward" title="Permanent link">&para;</a></h3>
+<p>Port <code>feat/target-feedforward</code>: joint-space targets become <code>{q, qd, qdd}</code>, and
+<code>JointImpedanceMode</code> damps toward the reference velocity
+(<code>tau = Kq·e + Dq·(qd_ref − qd) + …</code>) instead of toward zero. This removes the
+steady-state tracking lag (<code>≈ 2ζ·qd·√(M/Kq)</code>) that would otherwise force
+default stiffness up — it is what makes "default gains are good enough"
+physically achievable. The trajectory executor forwards the sampled <code>qd</code> (and
+<code>qdd</code> where the profile has it) instead of discarding them.</p>
+<p>Per-cycle cost is <strong>measured</strong> before and after (p50/p99/p99.9/max, overruns,
+faults), per the RT mandate. No benchmark binary exercises
+<code>JointImpedanceMode</code> today — adding <code>benchmark_joint_impedance</code> (sibling of
+<code>benchmark_cartesian_impedance</code>) is part of this work, and it lands <em>before</em>
+the feedforward change so the baseline is real. No RT-path allocation, locking, or blocking is introduced;
+<code>rt_safety_test</code> gates as usual.</p>
+<h3 id="5-defaults-as-a-deliverable">5. Defaults as a deliverable<a class="headerlink" href="#5-defaults-as-a-deliverable" title="Permanent link">&para;</a></h3>
+<p>The <code>medium</code> profile — what the session default ships pointing at — is tuned
+on the real arm and shipped with written acceptance criteria:</p>
+<ul>
+<li><strong>Hold:</strong> no visible droop or drift holding a commanded posture (the known
+  torque-mode droop is the benchmark of what <em>not</em> to ship).</li>
+<li><strong>Track:</strong> documented tracking-error bound on a standard test trajectory at
+  default speed scale.</li>
+<li><strong>Give:</strong> visible, bounded compliance on contact — the point of the mode.</li>
+</ul>
+<p>Conformance checks (ROS repo) assert the no-leak guarantee: an impedance goal
+with no gains behaves identically before and after a custom-gains goal.</p>
+<h3 id="6-execution-semantics-and-hygiene">6. Execution semantics and hygiene<a class="headerlink" href="#6-execution-semantics-and-hygiene" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Impedance-aware completion/abort (#17):</strong> divergence thresholds and
+  completion checks account for the spring leash instead of inheriting
+  position-mode semantics. Exact thresholds set during planning, validated on
+  the arm.</li>
+<li><strong>Mode-switch cost (#6/#59):</strong> measured during this work; a blocking switch
+  cost is a finding, not a silent regression.</li>
+<li><strong>Docs in the same change:</strong> <code>guide/control-modes.md</code>, <code>guide/streaming.md</code>,
+  <code>docs/interface.md</code>, <code>reference/api.md</code>, deep-dive where the feedforward
+  math changes, CHANGELOG. The stale <code>stream_check.cpp</code> error strings get
+  fixed in passing.</li>
+</ul>
+<h2 id="compatibility-and-versioning">Compatibility and versioning<a class="headerlink" href="#compatibility-and-versioning" title="Permanent link">&para;</a></h2>
+<p>This <strong>is</strong> a breaking change, in two places:</p>
+<ul>
+<li><strong>Driver C++ API:</strong> <code>TrajectoryGoal</code> drops <code>has_gains</code>/<code>gains</code> for
+  <code>GainsSpec</code>, <code>StreamOpenRequest</code> grows a field, and <code>on_set_gains</code> goes from
+  stub to real. Every consumer recompiles; code touching the old fields edits.</li>
+<li><strong>ROS messages (<code>rammp_arm_interfaces</code>):</strong> <code>ExecuteJointTrajectory</code> swaps
+  its gains fields; the GoTo actions grow fields. Any <code>.msg</code> change breaks
+  ROS 2 type compatibility, so old and new nodes cannot talk regardless of
+  how additive the change looks — it is a coordinated-rebuild event for
+  every publisher of these actions, not just <code>kinova-gen3-ros2</code>.</li>
+</ul>
+<p>The consumer set is closed and version-pinned (<code>kinova_gen3.repos</code> pins exact
+driver tags; the deployment chain pins images), and precedent exists: the
+arbitration round broke <code>CommandSink</code> and shipped inside a minor, with
+<code>kinova-gen3-ros2</code> following in lockstep. <strong>Decided (2026-10-04): ships as
+driver v1.3.0</strong> under that same practice, with a coordinated chain release
+(interfaces → driver → ros2 → deployments) exactly like lock/via/speed on
+2026-10-02 — acknowledged breaking, accepted because the pinned chain absorbs
+it. (Standing reminder for future projects: stay on 0.x until truly stable.)</p>
+<p>We deliberately do <strong>not</strong> keep the old gains fields alongside <code>GainsSpec</code> for
+compatibility: ROS 2's type hashing gives no wire-compat reward for it, and
+keeping <code>has_gains</code> alive preserves exactly the zero-filled-gains footgun
+(#64) this release exists to kill.</p>
+<h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Unit (core):</strong> gain validation (rejects, reasons), profile resolution,
+  no-leak across goal→stream and goal→goal, gains-without-mode-switch, no
+  partial resets, shared integrator parity with <code>JointVelocityMode</code> behavior,
+  feedforward math.</li>
+<li><strong>RT:</strong> <code>rt_safety_test</code> unchanged and green; benchmark before/after
+  percentiles recorded in the PR.</li>
+<li><strong>Conformance (ROS repo):</strong> new-controller availability, gains-at-open,
+  no-leak, GoTo opt-in impedance, <code>SetGains</code> service gating.</li>
+<li><strong>Real arm:</strong> the §5 acceptance criteria, run before release.</li>
+</ul>
+<h2 id="decomposition-for-planning">Decomposition (for planning)<a class="headerlink" href="#decomposition-for-planning" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>#64 validation</strong> — standalone, lands first.</li>
+<li><strong>Core gains contract</strong> — <code>GainsSpec</code>, profiles, no-leak/no-reset
+   semantics, <code>on_set_gains</code>.</li>
+<li><strong>Target feedforward port</strong> — with before/after benchmarks.</li>
+<li><strong>Shared integrator + impedance velocity/twist pairs.</strong></li>
+<li><strong>Interfaces + ROS</strong> — messages, GoTo fields, stream controllers,
+   <code>SetGains</code> service, conformance.</li>
+<li><strong>Default-profile tuning on the arm</strong> — last, gated on 2–4.</li>
+</ol>
+<h2 id="open-items-resolved-during-planning-not-blockers">Open items (resolved during planning, not blockers)<a class="headerlink" href="#open-items-resolved-during-planning-not-blockers" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Exact profile menu and each profile's full parameter set.</li>
+<li>Validation bounds (per-joint torque-limit floors vs. a gravity-headroom
+  check).</li>
+<li>Whether <code>GainsSpec</code> on <code>StreamOpenRequest</code> warrants a mid-session
+  <code>set_gains</code> path too, or open-time only is enough for v1.3.0.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1631 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Streaming Setpoints — Design Spec (the reactive tier) - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#streaming-setpoints-design-spec-the-reactive-tier" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Streaming Setpoints — Design Spec (the reactive tier)
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dependencies
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out of scope
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#approved-design-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approved design decisions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Approved design decisions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-two-axes-what-you-send-how-it-executes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Two axes: what you send × how it executes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-sessions-are-explicit-and-mutually-exclusive-with-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Sessions are explicit, and mutually exclusive with goals
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-all-kinematics-live-in-the-modes-in-loop-the-session-is-a-conduit" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. All kinematics live in the modes, in-loop; the session is a conduit
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-setpoints-are-written-to-the-sink-directly-by-the-backend-thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Setpoints are written to the sink directly, by the backend thread
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-velocity-mode-is-stiff-and-says-so" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Velocity mode is stiff, and says so
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-one-deadline-two-enforcement-levels-per-mode-safe-stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. One deadline, two enforcement levels, per-mode safe-stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-streaming-gets-its-own-port" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Streaming gets its own port
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-typed-setpoint-methods-not-a-tagged-union" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Typed setpoint methods, not a tagged union
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#9-twist-is-vector6-in-the-base-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Twist is Vector6 in the base frame
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#10-gravitycomptorquemode-is-removed-benchmark_grav_comp-is-retargeted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. GravityCompTorqueMode is removed; benchmark_grav_comp is retargeted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-1-streamsink-and-the-value-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 1 — StreamSink and the value types
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-2-streamingsession" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 2 — StreamingSession
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-3-jointpositionmode-gains-a-pose-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 3 — JointPositionMode gains a pose path
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-4-jointvelocitymode-new" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 4 — JointVelocityMode (new)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-5-jointtorquemode-rebased-pr-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 5 — JointTorqueMode (rebased, PR #3)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#component-6-the-write-handoff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Component 6 — the write handoff
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rt-safety-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RT-safety invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Testing strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-decisions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Open decisions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#accepted-gaps-and-risks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accepted gaps and risks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decomposition-three-plans-in-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decomposition — three plans, in order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="streaming-setpoints-design-spec-the-reactive-tier">Streaming Setpoints — Design Spec (the reactive tier)<a class="headerlink" href="#streaming-setpoints-design-spec-the-reactive-tier" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-08-26
+<strong>Status:</strong> Approved for planning
+<strong>Scope:</strong> The low-latency streaming command tier in the driver core — the
+"reactive" input the v1 interface spec deferred. First client is <strong>visual
+servoing</strong>; teleop and learned policies are the obvious next ones. The ROS2
+frontend is <strong>out of scope</strong>: this spec defines the core seams a transport binds
+to.</p>
+<p>This fills the second of the two deferrals in
+<a href="../2026-08-10-arm-driver-interface-design/"><code>2026-08-10-arm-driver-interface-design.md</code></a>:</p>
+<blockquote>
+<p><strong>Streaming-setpoint input</strong> (the low-latency reactive tier: teleop, IMU
+closed-loop, learned policies) — a separate command input behind the same
+ports, designed later.</p>
+</blockquote>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>Let an owner stream commands at its own rate — position, velocity, or torque, in
+joint space or task space — into a running control mode, with a bounded and
+explicit safety story when the stream stops.</p>
+<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Arbitration (PR #25)</strong> — every streaming call carries a <code>Token</code> and is gated
+  by the <code>Arbiter</code>. Streaming is the surface that made arbitration urgent; it
+  assumes that layer exists.</li>
+<li><strong><code>JointTorqueMode</code> (PR #3, 97 commits behind main)</strong> — torque streaming needs
+  it. Rebased and landed <strong>first, as its own change</strong> (see <em>Decomposition</em>).</li>
+</ul>
+<h2 id="out-of-scope">Out of scope<a class="headerlink" href="#out-of-scope" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The ROS2 frontend.</strong> Topics, QoS, message types, node wiring.</li>
+<li><strong>Cartesian wrench streaming</strong> (<code>tau = gravity(q) + Jᵀ F</code>). A deliberate
+  future sibling, tracked separately; PR #3's own non-goals already identify the
+  seam, so it slots into the same clamp-and-watchdog path without redesign.</li>
+<li><strong><code>CartesianImpedanceMode</code>.</strong> It implements <code>PoseTargetSink</code> and could accept
+  streamed poses, but the joint-space modes are the v1 targets; adding it is
+  wiring, not design.</li>
+<li><strong>Client-side smoothing.</strong> The caller owns command smoothness. The driver
+  owns rate limiting and the safe-stop, nothing more.</li>
+</ul>
+<h2 id="approved-design-decisions">Approved design decisions<a class="headerlink" href="#approved-design-decisions" title="Permanent link">&para;</a></h2>
+<h3 id="1-two-axes-what-you-send-how-it-executes">1. Two axes: what you send × how it executes<a class="headerlink" href="#1-two-axes-what-you-send-how-it-executes" title="Permanent link">&para;</a></h3>
+<p>A streaming session is a pair — a <strong>setpoint shape</strong> and a <strong>control mode</strong>.
+Valid pairs are a table; anything off it is refused at open.</p>
+<table>
+<thead>
+<tr>
+<th>setpoint shape</th>
+<th>permitted <code>control_mode</code></th>
+<th>mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>joint position</td>
+<td><code>kPosition</code>, <code>kImpedance</code></td>
+<td>existing <code>JointTargetSink</code></td>
+</tr>
+<tr>
+<td>EE pose</td>
+<td><code>kPosition</code>, <code>kImpedance</code></td>
+<td><code>PoseTargetSink</code> + in-loop IK</td>
+</tr>
+<tr>
+<td>joint velocity</td>
+<td><code>kVelocity</code></td>
+<td>native input of the new mode</td>
+</tr>
+<tr>
+<td>EE twist</td>
+<td><code>kVelocity</code></td>
+<td><code>J(q) qd = V</code>, damped least squares, in-loop</td>
+</tr>
+<tr>
+<td>joint torque</td>
+<td><code>kTorque</code></td>
+<td><code>JointTorqueMode::set_torque</code> (feedforward)</td>
+</tr>
+</tbody>
+</table>
+<p><code>control_mode</code> is required even where it is implied, and validated. A client
+that believes it is streaming twist into impedance mode must be told, not
+quietly corrected.</p>
+<p><strong><code>ControlModeKind</code> must be extended.</strong> It carries <code>kPosition</code> and <code>kImpedance</code>
+today; this work adds <code>kVelocity</code> and <code>kTorque</code>. That enum is also read by
+<code>TrajectoryGoal</code>, so the trajectory tier must explicitly <strong>reject</strong> the two new
+values — a planned trajectory into a velocity or torque mode is not a supported
+combination, and it must fail loud rather than fall through to a default.</p>
+<h3 id="2-sessions-are-explicit-and-mutually-exclusive-with-goals">2. Sessions are explicit, and mutually exclusive with goals<a class="headerlink" href="#2-sessions-are-explicit-and-mutually-exclusive-with-goals" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> An owner must explicitly <code>on_stream_open</code> before setpoints are
+accepted. Open is refused while a trajectory goal is in flight; a goal is refused
+while a session is open; a second open is refused (close first — no implicit
+replace).</p>
+<p><strong>Rejected.</strong> <em>A setpoint implicitly preempts an in-flight goal</em> — convenient,
+but one stray packet from a half-dead client silently kills a planned move, and
+there is no moment where the client declares "I am driving now."
+<em>Let the sink resolve it latest-setter-wins</em> — a trap: the sampler re-sets the
+target at 250 Hz from the executor while setpoints arrive independently, so the
+two alternate rather than one winning, and the arm judders between references.</p>
+<p><strong>Dividend.</strong> Mutual exclusion is what makes decision 4 sound.</p>
+<h3 id="3-all-kinematics-live-in-the-modes-in-loop-the-session-is-a-conduit">3. All kinematics live in the modes, in-loop; the session is a conduit<a class="headerlink" href="#3-all-kinematics-live-in-the-modes-in-loop-the-session-is-a-conduit" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> Pose → <code>q</code> (IK) and twist → <code>qd</code> (damped least squares) are
+evaluated <strong>inside <code>compute()</code> at 1 kHz</strong>, not once per setpoint. The
+<code>StreamingSession</code> forwards the raw target and touches no <code>Dynamics</code> at all.</p>
+<p><strong>Why.</strong> The arm moves between setpoints. A Jacobian evaluated when the setpoint
+<em>arrived</em> is stale by the time it is used, so re-solving each cycle with the same
+twist is not redundant work — it is the closed loop. <code>JointImpedanceMode</code>
+already runs its IK in-loop for exactly this reason; this is symmetry with a
+proven pattern, and it keeps <code>Dynamics</code> behind the mode boundary.</p>
+<h3 id="4-setpoints-are-written-to-the-sink-directly-by-the-backend-thread">4. Setpoints are written to the sink directly, by the backend thread<a class="headerlink" href="#4-setpoints-are-written-to-the-sink-directly-by-the-backend-thread" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> A setpoint reaches the mode's target sink the moment it arrives, on
+the caller's thread. No sampler quantisation; the client streams as fast as it
+likes.</p>
+<p><strong>Why it is safe.</strong> The <code>*TargetSink</code> contract is <em>single writer</em>, not <em>specific
+thread</em>. Because sessions and goals are mutually exclusive (decision 2), the
+sampler writes no targets while a session is open. So the invariant becomes
+<strong>exactly one writer at a time, and which thread that is depends on session
+state</strong> — sampler when closed, backend when open.</p>
+<p><strong>Rejected.</strong> <em>Route setpoints through the sampler tick</em> — one writer forever,
+trivially safe, but imposes a latency floor of one sampler period (≤4 ms at
+<code>sampler_hz = 250</code>) and caps useful streaming at the sampler rate.
+<em>Raise <code>sampler_hz</code> during a session</em> — keeps the simple invariant but burns a
+non-RT thread spinning near RT rates on the same CPU as the 1 kHz loop, which is
+exactly the shape of thing that shows up as jitter.</p>
+<p><strong>Cost.</strong> A subtler invariant, whose handoff must be right at three moments
+(§ Component 6) and which requires a genuine concurrency test.</p>
+<h3 id="5-velocity-mode-is-stiff-and-says-so">5. Velocity mode is stiff, and says so<a class="headerlink" href="#5-velocity-mode-is-stiff-and-says-so" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> <code>JointVelocityMode</code> commands <code>ActuatorMode::kVelocity</code> and tracks
+the commanded velocity as accurately as the actuator servo allows. It is <strong>not</strong>
+compliant.</p>
+<p><strong>Why.</strong> A mode's name is its contract. <code>JointPositionMode</code> does not apologise
+for being stiff. A velocity mode that quietly delivered compliance via a torque
+law would be a silent semantic difference of exactly the kind this repo rejects.
+Compliant velocity tracking is a <em>different promise</em> and belongs in a different
+mode, added later if wanted.</p>
+<p><strong>Consequence — we inherit the safety envelope.</strong> In a torque law a bad <code>qd</code>
+near a singularity produces a <em>bounded</em> torque, and <code>torque_limit</code> is a free
+backstop. In velocity mode whatever we compute goes to the actuators. So a
+per-joint velocity clamp (seeded from the URDF, as <code>JointPositionParams</code> already
+does) and damped least squares that stiffens near singularities are <strong>required
+parts of the design</strong>, not refinements.</p>
+<blockquote>
+<p><strong>Superseded in part, 2026-09-22 (1.1.1).</strong> The mode is still stiff, and the
+clamp and DLS damping still stand. But it no longer commands
+<code>ActuatorMode::kVelocity</code>: the actuator's velocity servo does not reject
+gravity at a zero command (joint 2 crept ~0.038 rad/s,
+<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/34">#34</a>), so the
+mode integrates the limited velocity into a position reference at the RT rate
+and runs the actuators in <code>kPosition</code>, with a 0.1 rad leash on the reference.
+"No integration anywhere" (Component 3) is therefore no longer true for this
+mode; the twist map is still solved at 1 kHz against the measured <code>q</code>.</p>
+</blockquote>
+<h3 id="6-one-deadline-two-enforcement-levels-per-mode-safe-stop">6. One deadline, two enforcement levels, per-mode safe-stop<a class="headerlink" href="#6-one-deadline-two-enforcement-levels-per-mode-safe-stop" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> The client declares one <code>timeout_s</code> at open. It is pushed into the
+active mode's params and enforced twice:</p>
+<ul>
+<li><strong>Mode level (RT, 1 kHz) — make the output safe.</strong> Only the mode knows what
+  safe means for its actuator contract, and only the RT thread can ramp.</li>
+<li><strong>Session level (sampler) — lifecycle.</strong> Close the session, stop admitting
+  setpoints, report why, <strong>retain the ownership grant</strong> so a client that hiccuped
+  reopens rather than renegotiating with the orchestrator.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>mode</th>
+<th>safe-on-stale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>torque</td>
+<td>ramp <code>tau_ff → 0</code> over <code>cmd_decay_s</code>, revert to gravity comp</td>
+</tr>
+<tr>
+<td>velocity</td>
+<td>command zero velocity</td>
+</tr>
+<tr>
+<td>position / impedance</td>
+<td>freeze the reference at measured <code>q</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why per-mode.</strong> "Hold at measured q" is not universal — it is meaningless in
+torque mode, which has no position loop. Making the safe-stop part of each
+mode's contract is decision 5 applied to failure.</p>
+<p><strong>Mechanism, reused not reinvented.</strong> <code>JointTorqueMode</code> already tracks staleness
+by summing <code>dt_s</code> in <code>compute()</code> and comparing a monotonic <code>write_count_</code> bumped
+by the setter — <strong>no clock call on the RT thread</strong>. That mechanism becomes the
+pattern for the other streaming-capable modes.</p>
+<h3 id="7-streaming-gets-its-own-port">7. Streaming gets its own port<a class="headerlink" href="#7-streaming-gets-its-own-port" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> A new <code>StreamSink</code> driving port, not more <code>CommandSink</code> methods.</p>
+<p><strong>Why.</strong> <code>CommandSink</code> is already six methods after <code>on_halt</code>; adding open,
+close and five setpoint shapes would make it a twelve-method god-interface.
+<code>ArbitrationSink</code> set the precedent — a distinct concern gets a distinct port,
+and a backend implements only what it supports.</p>
+<h3 id="8-typed-setpoint-methods-not-a-tagged-union">8. Typed setpoint methods, not a tagged union<a class="headerlink" href="#8-typed-setpoint-methods-not-a-tagged-union" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> One method per setpoint shape.</p>
+<p><strong>Why.</strong> A single <code>Setpoint{kind, q, pose, qd, twist, tau}</code> makes an invalid
+state representable — "kind says pose, pose field is garbage." Typed methods make
+it impossible to send a twist labelled a pose, and the session rejects a method
+that does not match the kind declared at open.</p>
+<h3 id="9-twist-is-vector6-in-the-base-frame">9. Twist is <code>Vector6</code> in the base frame<a class="headerlink" href="#9-twist-is-vector6-in-the-base-frame" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> <code>[linear; angular]</code>, base frame, no frame field in v1.</p>
+<p><strong>Why.</strong> A wrist-camera client already knows its own extrinsics and can
+transform. Carrying a frame enum would require the driver to know the camera
+transform, which is not its business.</p>
+<h3 id="10-gravitycomptorquemode-is-removed-benchmark_grav_comp-is-retargeted">10. <code>GravityCompTorqueMode</code> is removed; <code>benchmark_grav_comp</code> is retargeted<a class="headerlink" href="#10-gravitycomptorquemode-is-removed-benchmark_grav_comp-is-retargeted" title="Permanent link">&para;</a></h3>
+<p><strong>Decision.</strong> The <strong>mode</strong> is deleted as part of the PR #3 rebase. The
+<strong>benchmark binary is kept</strong> and retargeted to <code>JointTorqueMode</code> with zero
+feedforward.</p>
+<p><strong>Why the mode goes.</strong> <code>GravityCompParams</code> is <code>{scale, damping, torque_limit}</code>;
+<code>JointTorqueParams</code> is that plus the watchdog fields, over the same law. So
+<code>JointTorqueMode</code> with <code>tau_ff = 0</code> <strong>is</strong> <code>GravityCompTorqueMode</code> — a degenerate
+configuration wearing a mode's clothes. Modes are named for their actuator
+contract, not for one output they happen to produce.</p>
+<p><strong>Why the binary stays.</strong> It is not only a benchmark: it backs the on-robot
+procedure in <code>docs/integration/grav_comp_static_check.md</code> (put the arm in torque
+mode with zero feedforward, confirm gravity compensation holds it up), and is
+referenced from <code>scripts/rt_setup.sh</code>, <code>docs/rt-tuning.md</code>,
+<code>docs/getting-started.md</code> and <code>docs/integration-runbook.md</code>. Nothing else
+provides that check. Retargeted, it also becomes the <strong>torque-path benchmark</strong>,
+sitting alongside <code>benchmark_cartesian_impedance</code> for the Cartesian torque path.
+Its name stays accurate: with zero feedforward, gravity compensation is exactly
+what it measures.</p>
+<p><strong>Consequence.</strong> <strong>Issue #18</strong> (the documented invocation throws — the default EE
+frame is absent from the bare-arm URDF) becomes something to <strong>fix</strong>, not to
+close as moot.</p>
+<h2 id="component-1-streamsink-and-the-value-types">Component 1 — <code>StreamSink</code> and the value types<a class="headerlink" href="#component-1-streamsink-and-the-value-types" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="k">enum</span><span class="w"> </span><span class="k">class</span><span class="w"> </span><span class="nc">SetpointKind</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">kJointPosition</span><span class="p">,</span><span class="w"> </span><span class="n">kEePose</span><span class="p">,</span><span class="w"> </span><span class="n">kJointVelocity</span><span class="p">,</span><span class="w"> </span><span class="n">kEeTwist</span><span class="p">,</span><span class="w"> </span><span class="n">kJointTorque</span><span class="w"> </span><span class="p">};</span>
+
+<span class="k">struct</span><span class="w"> </span><span class="nc">StreamOpenRequest</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="n">SetpointKind</span><span class="w">    </span><span class="n">kind</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="n">SetpointKind</span><span class="o">::</span><span class="n">kJointPosition</span><span class="p">;</span>
+<span class="w">  </span><span class="n">ControlModeKind</span><span class="w"> </span><span class="n">control_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ControlModeKind</span><span class="o">::</span><span class="n">kPosition</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">double</span><span class="w">          </span><span class="n">timeout_s</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mf">0.1</span><span class="p">;</span><span class="w">   </span><span class="c1">// &lt;= 0 is REJECTED; the deadline is mandatory</span>
+<span class="w">  </span><span class="n">Token</span><span class="w">           </span><span class="n">token</span><span class="p">{};</span>
+<span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">StreamOpenResult</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">accepted</span><span class="o">=</span><span class="nb">false</span><span class="p">;</span><span class="w"> </span><span class="kt">int</span><span class="w"> </span><span class="n">error_code</span><span class="o">=</span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="w"> </span><span class="n">message</span><span class="p">;</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">StreamCloseRequest</span><span class="p">{</span><span class="w"> </span><span class="n">Token</span><span class="w"> </span><span class="n">token</span><span class="p">{};</span><span class="w"> </span><span class="p">};</span>
+
+<span class="c1">// One struct, three meanings -- the METHOD disambiguates, never a tag field.</span>
+<span class="c1">// Units are per-method: rad (position), rad/s (velocity), N*m (feedforward torque).</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">JointSetpoint</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">JointVec</span><span class="w"> </span><span class="n">values</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JointVec</span><span class="o">::</span><span class="n">Zero</span><span class="p">();</span><span class="w"> </span><span class="n">Token</span><span class="w"> </span><span class="n">token</span><span class="p">{};</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">PoseSetpoint</span><span class="w">   </span><span class="p">{</span><span class="w"> </span><span class="n">Pose</span><span class="w">     </span><span class="n">pose</span><span class="p">{};</span><span class="w">               </span><span class="n">Token</span><span class="w"> </span><span class="n">token</span><span class="p">{};</span><span class="w"> </span><span class="p">};</span>
+<span class="k">struct</span><span class="w"> </span><span class="nc">TwistSetpoint</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="n">Vector6</span><span class="w">  </span><span class="n">twist</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Vector6</span><span class="o">::</span><span class="n">Zero</span><span class="p">();</span><span class="w"> </span><span class="n">Token</span><span class="w"> </span><span class="n">token</span><span class="p">{};</span><span class="w"> </span><span class="p">};</span><span class="w">  </span><span class="c1">// [linear; angular], base frame</span>
+
+<span class="k">class</span><span class="w"> </span><span class="nc">StreamSink</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="n">StreamOpenResult</span><span class="w"> </span><span class="nf">on_stream_open</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">StreamOpenRequest</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_stream_close</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">StreamCloseRequest</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_setpoint_joint_position</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">JointSetpoint</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_setpoint_joint_velocity</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">JointSetpoint</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_setpoint_joint_torque</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">JointSetpoint</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_setpoint_pose</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">PoseSetpoint</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">virtual</span><span class="w"> </span><span class="kt">void</span><span class="w">             </span><span class="nf">on_setpoint_twist</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">TwistSetpoint</span><span class="o">&amp;</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+<span class="p">};</span>
+</code></pre></div>
+<p><code>Vector6</code> and <code>Jacobian6</code> already exist in <code>cartesian_types.h</code>.</p>
+<p>A setpoint whose method does not match the kind declared at open is <strong>rejected</strong>,
+counted, and does not reach the sink. <code>timeout_s &lt;= 0</code> is refused at open: an
+unbounded stream has no safe-stop, so the deadline is not optional.</p>
+<p><strong>Arbitration.</strong> The <code>Arbiter</code> decorates <code>StreamSink</code> as it decorates
+<code>CommandSink</code> — a token compare per setpoint, nanoseconds, and the
+lock-across-delegation property already guarantees no setpoint lands after a
+revoke.</p>
+<h2 id="component-2-streamingsession">Component 2 — <code>StreamingSession</code><a class="headerlink" href="#component-2-streamingsession" title="Permanent link">&para;</a></h2>
+<p>A new interface-layer unit. Holds the declared <code>(kind, control_mode, timeout_s)</code>,
+the owner's last-write counter, and nothing else. It touches no <code>Dynamics</code>, no
+<code>Transport</code>, and no Pinocchio; it is unit-testable over injected time against a
+fake sink.</p>
+<p>States are <strong>closed</strong> and <strong>open</strong>. Transitions:</p>
+<table>
+<thead>
+<tr>
+<th>event</th>
+<th>from</th>
+<th>to</th>
+<th>effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on_stream_open</code></td>
+<td>closed</td>
+<td>open</td>
+<td>validate pair; refuse if a goal is in flight; mode switch; push <code>timeout_s</code> into mode params; mark open <strong>last</strong></td>
+</tr>
+<tr>
+<td><code>on_stream_open</code></td>
+<td>open</td>
+<td>open</td>
+<td>refused — close first</td>
+</tr>
+<tr>
+<td><code>on_stream_close</code></td>
+<td>open</td>
+<td>closed</td>
+<td>mark closed <strong>first</strong>, then mode safe-stop</td>
+</tr>
+<tr>
+<td>watchdog expiry</td>
+<td>open</td>
+<td>closed</td>
+<td>mark closed <strong>first</strong>, then mode safe-stop; report; <strong>grant retained</strong></td>
+</tr>
+<tr>
+<td><code>on_halt</code> (revoke/e-stop)</td>
+<td>open</td>
+<td>closed</td>
+<td>mark closed <strong>first</strong>, then the Supervisor's halt path runs</td>
+</tr>
+</tbody>
+</table>
+<p><code>Supervisor::on_trajectory_goal</code> gains one atomic check (<code>stream_open_</code>) in its
+existing fast pre-check.</p>
+<h2 id="component-3-jointpositionmode-gains-a-pose-path">Component 3 — <code>JointPositionMode</code> gains a pose path<a class="headerlink" href="#component-3-jointpositionmode-gains-a-pose-path" title="Permanent link">&para;</a></h2>
+<p>Mirrors <code>JointImpedanceMode</code> rather than inventing anything:</p>
+<ol>
+<li>Hold a <code>DiffIkSolver ik_</code>; add <code>DiffIkParams ik</code> to <code>JointPositionParams</code>.</li>
+<li>Implement <code>PoseTargetSink::set_target(const Pose&amp;)</code> with a double-buffer.</li>
+<li>Widen the target source from the current bool (<code>has_ext_target_</code>) to the
+   three-way <code>TargetSource{kEntryPose, kPose, kJoint}</code> impedance already uses, so
+   <strong>IK runs only when a pose target is live</strong> — a joint target or a trajectory
+   pays nothing.</li>
+<li>In <code>compute()</code>, when the source is <code>kPose</code>: <code>q_d = ik_.solve(target, q_ref_)</code>,
+   warm-started from the current reference. The output then feeds the mode's
+   <strong>existing</strong> pipeline unchanged — <code>rate_limit → leash → wrap → clamp</code> — so the
+   whole safety envelope comes along for free.</li>
+</ol>
+<p><strong>IK failure policy.</strong> <code>IkResult</code> reports <code>{pos_err, rot_err, iters, converged}</code>.
+A single non-converged solve is <strong>not</strong> a fault: a momentarily unreachable pose
+is normal while a client servos toward something. <strong>Sustained non-convergence
+is.</strong> The threshold is expressed in <strong>time, not cycles</strong> — <code>ik_fault_s</code>, default
+<code>0.1</code> — and accumulated the same clock-free way as the staleness watchdog: sum
+<code>dt_s</code> while <code>!converged</code>, reset on any converged solve. (Cycles would have been
+the wrong unit: IK runs in <code>compute()</code> at 1 kHz per decision 3, so a
+cycle-count threshold silently means something different at a different loop
+rate.)</p>
+<p><strong>How the fault reaches the session.</strong> The mode cannot end a session — modes know
+nothing about the interface layer. So <code>JointPositionMode</code> publishes an atomic
+<code>ik_faulted_</code> flag (RT writer, non-RT reader, same discipline as the existing
+<code>reference()</code>/<code>last_ik()</code> accessors but synchronised because it crosses threads).
+The sampler observes it on its next tick and tears the session down with a
+distinct reason. The mode meanwhile does the safe thing immediately at 1 kHz —
+it freezes the reference — so the arm is already safe before the lifecycle
+teardown catches up. Same fast-path/slow-path split as decision 6.</p>
+<p>Position mode is stiff; holding a stale reference while its client believes it is
+tracking is precisely the silent divergence this repo exists to fail loud on.</p>
+<p><strong>Docstring debt.</strong> The mode currently advertises <em>"runs no dynamics at all — no
+gravity term, no mass matrix, no IK… the cheapest control path in the driver."</em>
+That becomes conditional and the comment must say so: with a joint target it is
+still the cheapest path; only a live pose target pulls in IK.</p>
+<h2 id="component-4-jointvelocitymode-new">Component 4 — <code>JointVelocityMode</code> (new)<a class="headerlink" href="#component-4-jointvelocitymode-new" title="Permanent link">&para;</a></h2>
+<p><code>ActuatorMode::kVelocity</code>. Accepts a joint-velocity target (native) and an EE
+twist through a new <code>TwistTargetSink</code>.</p>
+<p>Per RT cycle, when the source is a twist:</p>
+<ol>
+<li><code>J = dyn_.jacobian(q)</code> (already RT-safe).</li>
+<li>Solve <code>J qd = V</code> by <strong>damped least squares</strong>, damping rising near
+   singularities. This is a single 6×7 solve — <strong>not</strong> <code>DiffIkSolver</code>, which is
+   iterative Gauss-Newton position IK and the wrong tool.</li>
+<li>Add a <strong>null-space posture term</strong>, or the redundant DOF drifts and the elbow
+   wanders while the tool tracks fine.</li>
+<li>Clamp per joint to <code>max_qd</code>, seeded from the URDF velocity limits exactly as
+   <code>JointPositionParams::seed_limits()</code> does — non-finite entries filled from the
+   URDF, finite entries clamped down to it.</li>
+<li>Staleness per decision 6 → command zero velocity.</li>
+</ol>
+<p>Singularity behaviour is a <strong>required test</strong>, not an aspiration: at a
+straight-arm configuration the commanded <code>qd</code> must stay bounded.</p>
+<h2 id="component-5-jointtorquemode-rebased-pr-3">Component 5 — <code>JointTorqueMode</code> (rebased, PR #3)<a class="headerlink" href="#component-5-jointtorquemode-rebased-pr-3" title="Permanent link">&para;</a></h2>
+<p>Lands <strong>before</strong> this work, as its own change. Beyond the rebase itself:</p>
+<ul>
+<li><strong><code>torque_limit</code> becomes per-joint.</strong> It is currently a scalar <code>39.0</code>, and
+  <code>JointImpedanceParams</code> already documents why that is wrong: <em>"The URDF gives
+  joints 5-7 an effort limit of 9 N·m; the single scalar … would overrun the
+  wrist by 4x."</em> Torque mode has the bug the impedance mode was written to avoid.</li>
+<li><strong>Remove <code>GravityCompTorqueMode</code></strong> (decision 10); <code>benchmark_grav_comp</code> is
+  kept and retargeted, not removed. <code>rt_safety_test.cpp</code> lines 32 and 242
+  retarget to <code>JointTorqueMode</code>.</li>
+<li>Streaming then wires <code>set_torque</code> to a setpoint path; the mode's existing
+  watchdog is already the right shape.</li>
+</ul>
+<h2 id="component-6-the-write-handoff">Component 6 — the write handoff<a class="headerlink" href="#component-6-the-write-handoff" title="Permanent link">&para;</a></h2>
+<p><strong>Invariant:</strong> exactly one thread writes targets at any instant. Sampler when the
+session is closed; backend thread when it is open.</p>
+<p>All three transitions use the same <strong>mark-then-act</strong> ordering the <code>Arbiter</code>
+already uses for revoke:</p>
+<ul>
+<li><strong>Open</strong> — refuse if a goal is in flight, do the mode switch, then mark open
+  <strong>last</strong>, so no setpoint can land mid-switch.</li>
+<li><strong>Close</strong> — mark closed <strong>first</strong>; further setpoints are rejected from that
+  instant; then the safe-stop runs.</li>
+<li><strong>Timeout</strong> — the watchdog marks closed, then acts. This is the sharp one:
+  setpoints may still be arriving from a client that is not actually dead, and
+  the mark is what makes the subsequent write exclusive.</li>
+</ul>
+<p>An arbitration halt marks the session closed before the Supervisor's halt path
+does anything else, so streaming stops admitting before the hold is latched —
+symmetric with how goals stop being admitted.</p>
+<h2 id="rt-safety-invariants">RT-safety invariants<a class="headerlink" href="#rt-safety-invariants" title="Permanent link">&para;</a></h2>
+<ul>
+<li>No clock call, allocation, lock or blocking call in any <code>compute()</code>. Staleness
+  is tracked by summing <code>dt_s</code> against a monotonic write counter.</li>
+<li><code>JointVelocityMode</code> adds per-cycle work (Jacobian + a 6×7 DLS solve). This is
+  <strong>new RT cost</strong> and must be measured, not assumed.</li>
+<li>Setpoint publication uses the established double-buffer + atomic-index pattern;
+  the RT reader always observes a whole target, never a torn one.</li>
+</ul>
+<h2 id="testing-strategy">Testing strategy<a class="headerlink" href="#testing-strategy" title="Permanent link">&para;</a></h2>
+<p><strong>Tier 1 — units</strong> (no robot, no URDF, no threads). <code>StreamingSession</code> over
+injected time against a fake sink: the valid-pair table, refusal while a goal is
+in flight, goal refusal while open, second-open refusal, watchdog firing at the
+deadline, identical teardown from all three callers. Per-mode safe-stop driven by
+hand-called <code>compute()</code> cycles, including a monotone-decay case for torque.
+<code>JointVelocityMode</code>: twist → <code>qd</code> correctness, null-space posture holding, the
+per-joint clamp biting, and <strong>bounded <code>qd</code> at a singular configuration</strong>.
+<code>JointPositionMode</code>: IK output feeding the existing pipeline, and N consecutive
+non-converged solves faulting the session.</p>
+<p><strong>Tier 2 — concurrency.</strong> The handoff cannot be proven behaviourally. A writer
+thread streaming setpoints against a thread closing the session or tripping the
+watchdog, asserting no setpoint write lands after the closed-mark and that the
+safe-stop is the final write, over many iterations. Plus a one-off build under
+<code>-fsanitize=thread</code> rather than trusting iteration count alone.</p>
+<p><strong>Tier 3 — sim integration.</strong> <code>SimTransport</code> is a static echo, so velocity mode
+produces no motion as-is. Add an <strong>ideal velocity plant</strong> (<code>q += qd_cmd * dt</code>) —
+the same trick <code>execution_integration_test.cpp</code> already uses for position — which
+makes twist → motion testable end to end with no hardware.</p>
+<p><strong>Tier 4 — RtSafety.</strong> New <code>RtSafety.&lt;Mode&gt;NoMajorFaultsSteadyState</code> entries for
+<code>JointVelocityMode</code> and <code>JointTorqueMode</code>, plus a supervisor-in-loop variant with
+a session open. Zero major page faults, zero dropped samples.</p>
+<p><strong>Tier 5 — attended hardware. A gate, not a check.</strong>
+<code>ActuatorMode::kVelocity</code> has <strong>never been exercised on this arm</strong>, and
+<code>JointTorqueMode</code> has not run since June. Probe first: actuators into <code>kVelocity</code>,
+command a small constant joint velocity on one joint, observe whether it tracks,
+ignores, or faults. If it faults or no-ops, the twist path needs rethinking — so
+this runs before the velocity work is called done.</p>
+<h2 id="open-decisions">Open decisions<a class="headerlink" href="#open-decisions" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>How to measure <code>JointVelocityMode</code>'s per-cycle cost.</strong> Retargeting
+  <code>benchmark_grav_comp</code> (decision 10) covers the joint-torque path and
+  <code>benchmark_cartesian_impedance</code> covers the Cartesian torque path, but <strong>neither
+  exercises velocity mode</strong>, whose per-cycle Jacobian and DLS solve is the one
+  genuinely new RT cost in this work. Either add a mode flag to an existing
+  benchmark or write a small dedicated one. The project bar requires RT changes
+  to be measured, so this must be resolved in Plan 2, not left open.</li>
+</ul>
+<h2 id="accepted-gaps-and-risks">Accepted gaps and risks<a class="headerlink" href="#accepted-gaps-and-risks" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>kVelocity</code> is unproven firmware.</strong> <code>KortexTransport</code> maps it, but no
+  <code>ControlMode</code> has ever used it, and <code>joint_position_mode.h</code> already records
+  that Kinova's own driver computes a velocity command and declines to send it
+  (<em>"Velocity command interface not implemented properly in the kortex api"</em>).
+  That comment is about the velocity field in <strong>position</strong> servoing, a different
+  path — but it is the reason Tier 5 is a gate.</li>
+<li><strong>Two enforcement points for one deadline.</strong> Deliberate (decision 6), but it is
+  two places to get wrong; the mode-level and session-level values must be sourced
+  from the same number.</li>
+<li><strong>Streaming has no rate audit.</strong> The driver does not measure or report the
+  client's actual stream rate. A client silently streaming at 5 Hz will simply
+  feel sluggish. Worth revisiting once there is a real consumer.</li>
+</ul>
+<h2 id="decomposition-three-plans-in-order">Decomposition — three plans, in order<a class="headerlink" href="#decomposition-three-plans-in-order" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong><code>JointTorqueMode</code> rebase</strong> — PR #3 onto main, per-joint <code>torque_limit</code>,
+   remove <code>GravityCompTorqueMode</code>, retarget <code>benchmark_grav_comp</code> and the
+   RtSafety tests to <code>JointTorqueMode</code>, fix issue #18. Stands alone; no
+   streaming content.</li>
+<li><strong>Mode work</strong> — <code>JointVelocityMode</code> (with the DLS twist map, null-space term
+   and URDF-seeded clamp) and <code>JointPositionMode</code>'s pose path. Both testable
+   without any streaming surface.</li>
+<li><strong>The streaming tier</strong> — <code>StreamSink</code>, <code>StreamingSession</code>, the write handoff,
+   per-mode safe-stop wiring, and the concurrency test.</li>
+</ol>
+<h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
+<ul>
+<li>v1 interface spec (the deferral this fills):
+  <code>2026-08-10-arm-driver-interface-design.md</code></li>
+<li>Arbitration (dependency): <code>2026-08-25-arm-arbitration-design.md</code></li>
+<li><code>JointTorqueMode</code> design (PR #3): <code>2026-06-17-joint-torque-mode-design.md</code></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

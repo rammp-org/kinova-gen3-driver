@@ -1,0 +1,1410 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+        <link rel="prev" href="../trajectory-interpolation/">
+      
+      
+        <link rel="next" href="../../rt-tuning/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Velocity-Mode Twist Map - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#deep-dive-the-velocity-mode-twist-map" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Velocity-Mode Twist Map
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-velocity-mode-needs-a-different-safety-story" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why velocity mode needs a different safety story
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-dls-twist-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The DLS twist map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The DLS twist map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-this-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this comes from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#damping-scheduled-on-manipulability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Damping scheduled on manipulability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Damping scheduled on manipulability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#measured-not-guessed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured, not guessed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#getting-w-for-free" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting w for free
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-projector-free-null-space-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The projector-free null-space form
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#real-time-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-time safety
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saturation-preserves-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saturation preserves direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-velocity-mode-needs-a-different-safety-story" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why velocity mode needs a different safety story
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-dls-twist-map" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The DLS twist map
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The DLS twist map">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-this-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where this comes from
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#damping-scheduled-on-manipulability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Damping scheduled on manipulability
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Damping scheduled on manipulability">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#measured-not-guessed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured, not guessed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#getting-w-for-free" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting w for free
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-projector-free-null-space-form" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The projector-free null-space form
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#real-time-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-time safety
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#saturation-preserves-direction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saturation preserves direction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="deep-dive-the-velocity-mode-twist-map">Deep Dive: The Velocity-Mode Twist Map<a class="headerlink" href="#deep-dive-the-velocity-mode-twist-map" title="Permanent link">&para;</a></h1>
+<p>This page derives the damped-least-squares (DLS) twist map used by
+<code>JointVelocityMode::set_twist_target</code>, explains why the damping is scheduled on
+manipulability rather than fixed, and works through the projector-free
+null-space posture form actually implemented in <code>solve_twist</code>. For the
+conceptual overview and the stiffness/staleness contract see the
+<a href="../../guide/control-modes/">Control Modes guide</a> and the
+<a href="../../guide/streaming/#jointvelocitymode-specifics">Streaming guide</a>; for exact
+signatures, the <a href="../../reference/api/#jointvelocitymode-joint_velocity_modeh">API Reference</a>.</p>
+<p>The canonical design record is the spec and plan under <code>docs/superpowers/</code>.</p>
+<h2 id="why-velocity-mode-needs-a-different-safety-story">Why velocity mode needs a different safety story<a class="headerlink" href="#why-velocity-mode-needs-a-different-safety-story" title="Permanent link">&para;</a></h2>
+<p>The impedance and torque laws in this driver command <strong>torque</strong>. A bad solve
+there still produces a <em>bounded</em> torque, clamped per joint before it reaches
+the actuator — the worst case is a hard shove, not an unbounded motion.
+Velocity mode has no torque clamp behind it: whatever <code>solve_twist</code> computes is
+integrated straight into the position reference the actuator servo tracks,
+and the servo tracks it at full authority. That fact drives every design
+choice below — in particular, damping near a singularity is not a refinement
+here, it is what keeps the <em>solve</em> well-conditioned rather than returning an
+enormous <code>qd</code> in the direction the arm has just lost.</p>
+<p>Two things stand between the solve and the motor, and it is worth being exact
+about which does what. <code>limit()</code> (below) bounds the <strong>velocity</strong>, so the
+reference can move no faster than the URDF rating. The <strong>leash</strong> — 0.1 rad on
+every joint, a constant in <code>joint_velocity_mode.cpp</code> — bounds how far the
+reference may lead the <em>measured</em> position, so a blocked joint or a solve the
+arm cannot follow winds the reference up by at most that much. The mode
+originally commanded <code>ActuatorMode::kVelocity</code> directly; it moved to an
+integrated position reference in 1.1.1 because the actuator's velocity servo
+does not reject gravity at a zero command
+(<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/34">#34</a>).</p>
+<div class="admonition note">
+<p class="admonition-title">What actually bounds the command</p>
+<p>Damping is about <strong>conditioning</strong>, not about bounding. What bounds the
+command is <code>limit()</code>: a uniform scale so the fastest joint just reaches its
+<code>max_qd</code> cap, followed by a hard per-joint clamp, applied on <strong>every</strong> cycle
+regardless of <code>w</code>. And because <code>w_threshold</code> sits at roughly one tenth of a
+nominal <code>w</code>, <code>limit()</code> is in practice the <em>primary</em> bound across most of the
+near-singular band — an undamped solve there runs straight into the clamp.</p>
+<p>The behaviour you observe near a singularity is therefore the EE <strong>slowing
+down</strong>: the uniform scale shrinks the whole command while preserving its
+direction. It is not tracking degrading in one direction. If the tool feels
+sluggish, that is <code>limit()</code> scaling, and reaching for <code>dls_damping_max</code> will
+make it worse, not better.</p>
+<p>Both halves are pinned by test:
+<code>JointVelocityModeTwist.DampingNotTheLimiterIsWhatBoundsTheSolveNearASingularity</code>
+and <code>…TheDampingRampIsWhatSeparatesTheseTwoSolves</code>, which measure a
+near-singular pose (<code>w = 0.00031</code>, inside the ramp) with the schedule on and
+off: flat, the solve pins a joint exactly at its 1.3963 rad/s URDF cap;
+ramped, it stays at 0.31 rad/s and gives up tracking instead.</p>
+</div>
+<h2 id="the-dls-twist-map">The DLS twist map<a class="headerlink" href="#the-dls-twist-map" title="Permanent link">&para;</a></h2>
+<p>Given the measured configuration <code>q</code> and a commanded EE twist <code>V</code> (linear
+velocity stacked on angular velocity, base frame), the task is to find a
+joint-velocity command <code>qd</code> such that <code>J(q) · qd ≈ V</code>, where <code>J</code> is the 6×7
+frame Jacobian (<code>jacobian()</code>, <code>LOCAL_WORLD_ALIGNED</code>, same convention as
+<a href="../impedance/#frames">Cartesian impedance</a>).</p>
+<p><code>J</code> is 6×7 — more columns than rows — so the system is underdetermined; a
+6-DOF task on a 7-DOF arm has a whole line of joint-velocity solutions for any
+achievable <code>V</code>, differing only in what they do with the null-space (redundant)
+direction. The <strong>damped least-squares</strong> solution is the minimum-norm task
+solution plus a Tikhonov regularizer:</p>
+<div class="highlight"><pre><span></span><code>qd_task = Jᵀ (J Jᵀ + λ²I)⁻¹ V
+</code></pre></div>
+<h3 id="where-this-comes-from">Where this comes from<a class="headerlink" href="#where-this-comes-from" title="Permanent link">&para;</a></h3>
+<p>Minimizing <code>‖J·qd − V‖² + λ²‖qd‖²</code> over <code>qd</code> (task tracking, regularized by
+command magnitude) and setting the gradient to zero gives the normal equations</p>
+<div class="highlight"><pre><span></span><code>(JᵀJ + λ²I) qd = Jᵀ V
+</code></pre></div>
+<p>Applying the push-through identity <code>Jᵀ(JJᵀ + λ²I) = (JᵀJ + λ²I)Jᵀ</code> lets this be
+solved as a 6×6 system instead of a 7×7 one — the same trick used in
+<a href="../impedance/#damping-for-singularity-robustness">Cartesian impedance's nullspace projector</a>,
+here applied to the primal task solve rather than a projector:</p>
+<div class="highlight"><pre><span></span><code>qd = Jᵀ (J Jᵀ + λ²I)⁻¹ V
+</code></pre></div>
+<p><code>A = J Jᵀ + λ²I</code> is 6×6, symmetric, and — because of the <code>λ²I</code> term — strictly
+positive definite for <strong>any</strong> <code>J</code>, including a rank-deficient one at a
+singularity. That is what makes the fixed-size Cholesky solve below always
+well-defined, with no special-casing for "is this Jacobian singular right
+now?"</p>
+<p>At <code>λ = 0</code> this is the Moore–Penrose pseudo-inverse solution — exact task
+tracking, minimum joint-velocity norm. <code>λ &gt; 0</code> trades a small amount of task
+tracking error for a bounded solution as <code>J</code> loses rank.</p>
+<h2 id="damping-scheduled-on-manipulability">Damping scheduled on manipulability<a class="headerlink" href="#damping-scheduled-on-manipulability" title="Permanent link">&para;</a></h2>
+<p>A single fixed <code>λ</code> is either too small to bound the solution near a
+singularity or too large to track accurately everywhere else. Instead <code>λ</code> is
+<strong>scheduled</strong> on Yoshikawa's manipulability measure</p>
+<div class="highlight"><pre><span></span><code>w = sqrt(det(J Jᵀ))
+</code></pre></div>
+<p>— a scalar that is large in well-conditioned configurations and goes to
+<strong>exactly zero</strong> at a true kinematic singularity (<code>J</code> loses rank, <code>det(JJᵀ) =
+0</code>). Below a threshold <code>w_threshold</code>, damping ramps from the baseline
+<code>dls_damping</code> up to <code>dls_damping_max</code> quadratically in how far past the
+threshold the arm is:</p>
+<div class="highlight"><pre><span></span><code>r = 1 − w / w_threshold           # 0 at the threshold, 1 exactly at a singularity
+λ = dls_damping + (dls_damping_max − dls_damping) · r²
+</code></pre></div>
+<p>The quadratic ease keeps damping near-baseline (and tracking near-exact) until
+the arm is genuinely close to degenerate, then rises steeply right as it
+matters — a linear schedule would cost tracking accuracy across a much wider
+band of otherwise-fine configurations for the same worst-case bound.</p>
+<h3 id="measured-not-guessed">Measured, not guessed<a class="headerlink" href="#measured-not-guessed" title="Permanent link">&para;</a></h3>
+<p><code>w_threshold</code>'s default (<code>0.0033</code>) is grounded in two measurements on this
+URDF (<code>JointVelocityModeTwist.ManipulabilityIsLowerAtTheSingularity</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Configuration</th>
+<th><code>w = sqrt(det(J Jᵀ))</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nominal_q()</code> — elbow-up, comfortably posed</td>
+<td><strong>0.0325</strong></td>
+</tr>
+<tr>
+<td><code>straight_q()</code> — arm fully extended</td>
+<td><strong>0.0000</strong> — a true singularity, not a near one</td>
+</tr>
+</tbody>
+</table>
+<p><code>straight_q()</code> is the classic wrist/elbow singularity for this arm: fully
+extended, the wrist axes align and the Jacobian loses rank exactly, not
+approximately — <code>det(J Jᵀ)</code> prints to six decimal places as zero. With that
+range established, <code>w_threshold</code> is set to roughly one tenth of the nominal
+value: comfortably inside "normal operation" territory so ordinary teleop
+motion never triggers extra damping, while still leaving headroom before the
+arm reaches the actual singularity.</p>
+<p><code>w</code> is <strong>unit-mixed and scale-dependent</strong> — <code>J</code> stacks linear (m/rad) on angular
+(rad/rad) rows, so <code>det(J Jᵀ)</code> has no clean physical dimension and its magnitude
+depends on the arm's link lengths and on where the EE frame sits. Changing the
+URDF or the EE frame — the 2F-85 gripper model moves the EE frame — changes the
+numbers in the table above, and <code>w_threshold</code> must be re-derived from a fresh
+measurement rather than carried over.</p>
+<h3 id="getting-w-for-free">Getting <code>w</code> for free<a class="headerlink" href="#getting-w-for-free" title="Permanent link">&para;</a></h3>
+<p>Manipulability is <code>sqrt(det(J Jᵀ))</code>, and <code>solve_twist</code> needs a factorization of
+<code>J Jᵀ</code> (or the damped version of it) anyway to solve the DLS system. Rather
+than compute <code>det</code> separately, <code>solve_twist</code> factors the <strong>undamped</strong> <code>A = J
+Jᵀ</code> first with a Cholesky decomposition, reads <code>det(A)</code> off the product of the
+diagonal factor (<code>LLT</code>/<code>LDLT</code> hand you the determinant as a byproduct of the
+factorization, at no extra cost over the factorization itself), then adds
+<code>λ²I</code> to the diagonal and re-factors for the actual damped solve. Two
+factorizations, not two independent computations of "condition of J" and "the
+solve" — <code>w</code> is a side effect of work the solve needs regardless.</p>
+<h2 id="the-projector-free-null-space-form">The projector-free null-space form<a class="headerlink" href="#the-projector-free-null-space-form" title="Permanent link">&para;</a></h2>
+<p>The Gen3's redundant DOF (7 joints, 6-D task) needs somewhere to go, or the
+elbow drifts while the tool tracks the twist perfectly — the same problem
+<a href="../impedance/#nullspace-posture-redundancy-resolution">Cartesian impedance's nullspace term</a>
+solves for torque. Here the secondary objective is a posture-seeking joint
+velocity</p>
+<div class="highlight"><pre><span></span><code>b = posture_gain · (q_rest − q)     # per joint, wrapped to (−π, π] on continuous joints
+</code></pre></div>
+<p>and the textbook way to add it without disturbing the task is to project it
+through the null-space projector <code>N = I − Jᵀ(JJᵀ+λ²I)⁻¹J</code> (7×7) and add <code>N·b</code>
+to the task solution. <code>solve_twist</code> never forms <code>N</code>:</p>
+<div class="highlight"><pre><span></span><code>qd = qd_task + b − Jᵀ (J Jᵀ + λ²I)⁻¹ (J b)
+   = qd_task + N·b
+</code></pre></div>
+<p>Expanding <code>N·b = b − Jᵀ(JJᵀ+λ²I)⁻¹J·b</code> shows the two forms are identical —
+the projector-free version just reorders the arithmetic so that <code>J</code> and the
+already-factored <code>(JJᵀ+λ²I)</code> (its Cholesky factor is already sitting in memory
+from the task solve) act on the 7×1 vector <code>b</code>, rather than materializing the
+7×7 matrix <code>N</code> and multiplying it out. Same result, no 7×7 temporary, and the
+6×6 factorization is <strong>reused</strong> — <code>ldlt_.solve(J * bias_)</code> is one more
+triangular solve against the same factor, not a second decomposition. This is
+the same "solve, don't invert-and-multiply" discipline the RT-safety section
+below depends on.</p>
+<p>Continuous joints (<code>std::isfinite(lo) == false</code> and <code>std::isfinite(hi) ==
+false</code> on the URDF, i.e. joints 1/3/5/7) take the posture error's <strong>short</strong>
+way around: <code>wrap_to_pi(q_rest[i] − q[i])</code>, not the raw difference. Without
+this, a rest angle just past ±π drives the joint most of a turn the wrong way
+to reach it — a plain subtraction has no notion of "the long way round" on an
+unbounded joint.</p>
+<h2 id="real-time-safety">Real-time safety<a class="headerlink" href="#real-time-safety" title="Permanent link">&para;</a></h2>
+<p><code>compute()</code> — and therefore <code>solve_twist</code> — runs on the 1 kHz RT thread and
+must never allocate, lock, or block.</p>
+<ul>
+<li><strong>No heap.</strong> Every quantity is fixed-size: <code>Jacobian6</code> (6×7), the 6×6 damped
+  matrix <code>A_</code>, <code>Vector6</code>, <code>JointVec</code> (7×1). The two decompositions
+  (<code>ldlt_.compute(A_)</code>, once undamped for manipulability and once damped for
+  the solve) reuse a single preallocated <code>Eigen::LDLT&lt;Matrix&lt;double,6,6&gt;&gt;</code>
+  member — <code>compute()</code> on a fixed-size Eigen matrix factors in place, no
+  dynamic storage. <code>Dynamics</code> preallocates Pinocchio's <code>Data</code> in its
+  constructor, so <code>jacobian()</code> allocates nothing per call.</li>
+<li><strong>Empirically verified.</strong> <code>RtSafety.JointVelocityModeTwistNoMajorFaultsSteadyState</code>
+  drives the mode through the executor on the sim transport with a live,
+  non-zero twist target — so the Jacobian, both LDLT factorizations, and the
+  null-space solve run every single cycle of the measured window, not a
+  zero-target short-circuit — and asserts <strong>zero major page faults</strong> and zero
+  dropped telemetry samples in steady state.</li>
+<li><strong>Measured cost, on a Jetson AGX Orin (<code>benchmark_joint_velocity --sim
+  --rate 1000 --duration 5</code>):</strong></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>--kind joint</code> (native, pass-through)</th>
+<th><code>--kind twist</code> (DLS + null-space)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>compute_ns</code> p50</td>
+<td>64 ns</td>
+<td>1024 ns</td>
+</tr>
+<tr>
+<td><code>compute_ns</code> p99</td>
+<td>256 ns</td>
+<td>4096 ns</td>
+</tr>
+<tr>
+<td><code>compute_ns</code> max</td>
+<td>1440 ns</td>
+<td>17279 ns</td>
+</tr>
+<tr>
+<td>overruns / faults / dropped</td>
+<td>0 / 0 / 0</td>
+<td>0 / 0 / 0</td>
+</tr>
+</tbody>
+</table>
+<p>The DLS + null-space solve costs roughly <strong>~1 µs</strong> more per cycle at the
+  median and <strong>~4 µs</strong> at p99 than the native pass-through path — both
+  comfortably inside the 1 ms budget at 1 kHz, with no overruns, faults, or
+  dropped samples in either mode. These numbers predate the 1.1.1 integrator
+  (seven multiply-adds and a leash per cycle); see the 1.1.1 changelog entry
+  for the re-measurement. This closes the Open Decision on measuring
+  <code>JointVelocityMode</code>'s per-cycle cost from the <code>docs/superpowers/</code> design spec
+  for this plan.</p>
+<h2 id="saturation-preserves-direction">Saturation preserves direction<a class="headerlink" href="#saturation-preserves-direction" title="Permanent link">&para;</a></h2>
+<p>Once <code>qd</code> is computed (task plus posture), <code>limit()</code> scales it <strong>uniformly</strong> —
+finding the single scale factor that brings the fastest-saturating joint down
+to its <code>max_qd</code> cap, and applying that same factor to every joint — rather
+than clamping each joint independently. A per-joint clamp would silently
+rotate the achieved EE twist the moment any one joint saturates, which is
+exactly the failure mode a mode named "velocity" must not have: the operator
+commanded a <em>direction</em>, and saturation should make it slower, never sideways.
+A hard per-joint clamp still runs afterward as a backstop for degenerate
+inputs (e.g. a zero entry in <code>max_qd</code>, where the scale factor is undefined),
+but in the normal case it is a no-op — the uniform scale already brought every
+joint inside its cap.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../guide/control-modes/">Control Modes guide</a> — conceptual overview.</li>
+<li><a href="../../guide/streaming/#jointvelocitymode-specifics">Streaming guide</a> — the
+  stiffness and staleness contract for streamed velocity/twist setpoints.</li>
+<li><a href="../../reference/api/#jointvelocitymode-joint_velocity_modeh">API Reference</a> —
+  exact signatures.</li>
+<li><a href="../impedance/">Deep Dive: Cartesian Impedance</a> — the sibling derivation for
+  the torque-domain damped pseudo-inverse and its null-space projector.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

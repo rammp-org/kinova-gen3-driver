@@ -1,0 +1,1313 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Joint-Space Position Control — Hardware Check - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#joint-space-position-control-hardware-check" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Joint-Space Position Control — Hardware Check
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-negative-degree-question-resolved-2026-08-11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The negative-degree question — RESOLVED 2026-08-11
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-map-0-indexed-as-the-cli-takes-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint map (0-indexed, as the CLI takes them)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#global-abort-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global abort criteria
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-1-read-only-survey-nothing-moves" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 1 — Read-only survey. Nothing moves.
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-2-hold-at-the-entry-configuration-the-decisive-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 2 — Hold at the entry configuration. The decisive test.
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-3-scripted-visual-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 3 — Scripted visual check
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Step 3 — Scripted visual check">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-joint-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-joint variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-4-rate-limit-and-the-hardware-speed-ceiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 4 — Rate limit, and the hardware speed ceiling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-5-continuous-joint-across-the-wrap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 5 — Continuous joint across the wrap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-6-joint-limit-clamp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 6 — Joint-limit clamp
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-7-following-error-leash-optional-do-last" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 7 — Following-error leash (optional, do last)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#step-8-compute-timing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Step 8 — Compute timing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-does-not-cover" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What this does NOT cover
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recording-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recording results
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="joint-space-position-control-hardware-check">Joint-Space Position Control — Hardware Check<a class="headerlink" href="#joint-space-position-control-hardware-check" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>Robot-in-the-loop procedure. <strong>Run together, robot present, e-stop in reach.</strong>
+Do this AFTER the prerequisites in
+<a href="../../integration-runbook/"><code>../integration-runbook.md</code></a> (aarch64 KORTEX SDK
+installed, real path built with <code>-DKINOVA_ENABLE_KORTEX=ON</code>).</p>
+<p><strong>First hardware run: 2026-08-11 — passed.</strong> The <code>--sequence</code> visual check ran
+correctly on the arm: the settle phase produced no motion, each joint moved
+alone in the commanded direction, and the arm returned home.</p>
+<p><strong>No tuning was performed.</strong> Every parameter is still at its shipped default
+(<code>max_ref_speed</code> 0.5 rad/s, <code>max_following_error</code> 0.35 rad, URDF position
+limits). Nothing was measured or characterised — see
+<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">issue #6</a>. "It moved
+correctly" is not "it is tuned".</p>
+</blockquote>
+<p><strong>Position mode has no compliance.</strong> Unlike the impedance modes there is no
+spring to absorb a mistake: the actuator's own servo chases whatever is
+commanded at full authority. It will not yield to contact — it will push
+through until the actuator faults. Every step below is ordered so the cheapest
+failure comes first.</p>
+<p>Everything here runs through <code>joint_position_check</code>. Steps 1–2 are the ones that
+matter most; if step 2 is clean, the rest is characterisation.</p>
+<hr />
+<h2 id="the-negative-degree-question-resolved-2026-08-11">The negative-degree question — RESOLVED 2026-08-11<a class="headerlink" href="#the-negative-degree-question-resolved-2026-08-11" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>KORTEX accepts negative degree setpoints in POSITION mode. No fix needed.</strong></p>
+</blockquote>
+<p><code>KortexTransport::write_command</code> sends <code>rad_to_deg(cmd.position)</code> <strong>unwrapped</strong>
+(<code>src/kortex_transport.cpp:117</code>), while <code>fill_feedback</code> wraps every measured
+angle to (−π, π] (<code>src/kortex_transport.cpp:83</code>). So any joint past 180° in
+KORTEX's frame is read back as a <strong>negative</strong> degree value, and that is what we
+send. <code>kPosition</code> is the first code path that ever sends our own wrapped angle
+back to the arm — torque mode passes through the <strong>raw</strong> KORTEX value
+(<code>kortex_transport.cpp:124</code>) and bypasses the wrap entirely.</p>
+<p><strong>Measured:</strong> <code>local_tools/probe_negative_angle.sh</code> held the measured
+configuration with <strong>five joints commanded negative</strong>, including j2 at −134.78°
+and j3 at −114.93°. Zero motion was requested and none occurred — worst
+deviation 0.0001 rad (0.006°), which is encoder noise.</p>
+<p>Note the scope is wider than "continuous joints past half a turn": <strong>any</strong> joint
+at a negative URDF angle qualifies, because KORTEX reports in [0, 360) and we
+wrap back to (−π, π]. That makes this path routine rather than exotic, which is
+why it was worth settling deliberately rather than inferring from a run that
+happened not to break.</p>
+<p>Step 2 below still commands zero motion — it remains the cheapest way to catch a
+regression here.</p>
+<hr />
+<h2 id="joint-map-0-indexed-as-the-cli-takes-them">Joint map (0-indexed, as the CLI takes them)<a class="headerlink" href="#joint-map-0-indexed-as-the-cli-takes-them" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>Kinova name</th>
+<th>Limits (rad)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>j0</code></td>
+<td>joint 1</td>
+<td>continuous</td>
+</tr>
+<tr>
+<td><code>j1</code></td>
+<td>joint 2</td>
+<td>±2.41</td>
+</tr>
+<tr>
+<td><code>j2</code></td>
+<td>joint 3</td>
+<td>continuous ← <em>the one that spun under impedance</em></td>
+</tr>
+<tr>
+<td><code>j3</code></td>
+<td>joint 4</td>
+<td>±2.66</td>
+</tr>
+<tr>
+<td><code>j4</code></td>
+<td>joint 5</td>
+<td>continuous</td>
+</tr>
+<tr>
+<td><code>j5</code></td>
+<td>joint 6</td>
+<td>±2.23</td>
+</tr>
+<tr>
+<td><code>j6</code></td>
+<td>joint 7</td>
+<td>continuous</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ol>
+<li><code>rt_setup.sh</code> has been re-run since the last reboot (it does not persist).</li>
+<li>Built with KORTEX:
+   <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>..<span class="w"> </span>-DKINOVA_ENABLE_KORTEX<span class="o">=</span>ON<span class="w"> </span>-DKORTEX_HW_DIR<span class="o">=</span>/path/to/kortex_hardware<span class="w"> </span><span class="se">\</span>
+<span class="w">         </span>-DCMAKE_PREFIX_PATH<span class="o">=</span>/usr/local/lib/python3.10/dist-packages/cmeel.prefix
+cmake<span class="w"> </span>--build<span class="w"> </span>.<span class="w"> </span>-j
+</code></pre></div></li>
+<li>Nothing else is talking to the arm — stop <code>teleop_socket_server</code> first.</li>
+</ol>
+<h2 id="global-abort-criteria">Global abort criteria<a class="headerlink" href="#global-abort-criteria" title="Permanent link">&para;</a></h2>
+<p>Hit the e-stop and stop the run if <strong>any</strong> of these occur:</p>
+<ul>
+<li>Motion during a step that requests none.</li>
+<li>A joint that starts turning and does not stop, or accelerates.</li>
+<li>Any joint moving in a direction the step did not ask for.</li>
+<li><code>faults=</code> non-zero in the console line.</li>
+<li>Sustained <code>overruns=</code>, or a growing <code>dropped=</code>.</li>
+<li>Any noise you have not heard from this arm before.</li>
+</ul>
+<hr />
+<h2 id="step-1-read-only-survey-nothing-moves">Step 1 — Read-only survey. <strong>Nothing moves.</strong><a class="headerlink" href="#step-1-read-only-survey-nothing-moves" title="Permanent link">&para;</a></h2>
+<p>Never enters low-level servoing, never commands anything.</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--dry-run<span class="w"> </span>--duration<span class="w"> </span><span class="m">20</span>
+</code></pre></div>
+<p><strong>Do this first:</strong> with the arm still under its own control, use the pendant or
+web app to park it so that <strong>at least one continuous joint reads a negative
+degree value</strong>. That deliberately forces the open question instead of hoping to
+stumble into it later.</p>
+<p><strong>Look for:</strong>
+- The <code>NOTE: n joint(s) would be commanded as a NEGATIVE degree value</code> line.
+  Write down which joints. Those are the ones to watch in step 2.
+- Measured angles that match the pendant's display. A mismatch here means a joint
+  mapping or unit problem and everything downstream is meaningless — stop.</p>
+<hr />
+<h2 id="step-2-hold-at-the-entry-configuration-the-decisive-test">Step 2 — Hold at the entry configuration. <strong>The decisive test.</strong><a class="headerlink" href="#step-2-hold-at-the-entry-configuration-the-decisive-test" title="Permanent link">&para;</a></h2>
+<p>No target is given, so the mode commands exactly where the arm already is. A
+correct implementation produces <strong>no motion at all</strong>.</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--duration<span class="w"> </span><span class="m">5</span>
+</code></pre></div>
+<p>This is the sharpest possible form of the format question: there is no commanded
+motion to confuse the picture, so if KORTEX misreads a negative setpoint the arm
+jumps on the <strong>first commanded cycle</strong> and nothing else can be blamed.</p>
+<p><strong>Expected:</strong> arm perfectly still. <code>faults=0</code>, <code>overruns=0</code>, <code>majflt+=0</code>, all
+residuals ≈ 0.</p>
+<p><strong>ABORT on any motion whatsoever.</strong> If it jumps, the negative-degree hypothesis
+is confirmed — record which joints moved and how far, and stop. The fix is in the
+transport (map to [0, 360) before sending), not in the mode, and it needs its own
+test before anything else here is run.</p>
+<p>Repeat step 2 with the arm parked in <strong>two or three</strong> different configurations,
+including at least one where a continuous joint is negative and one where it is
+not. Holding still in every one of them is what clears the question.</p>
+<hr />
+<h2 id="step-3-scripted-visual-check">Step 3 — Scripted visual check<a class="headerlink" href="#step-3-scripted-visual-check" title="Permanent link">&para;</a></h2>
+<p>This is the confidence pass: one joint at a time, each returning to start, then
+home. Wrist-first, because the distal joints are the lightest and least able to
+hurt anything if a direction is wrong.</p>
+<p><strong>Read the plan before running it.</strong> <code>--dry-run</code> prints exactly what will happen,
+computed from the arm's current configuration, and commands nothing:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--sequence<span class="w"> </span>--dry-run
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>[dry-run] sequence plan (8 waypoints, joints j4..j6 at 0.2 rad/s):
+   1. [  3.0s] settle — NOTHING should move here
+   2. [  4.7s] j6 +0.200 rad (+11.5 deg) — ONLY this joint should move
+   3. [  6.4s] j6 back to start
+   ...
+   8. [ 16.2s] HOME — compare against where the arm started
+</code></pre></div>
+<p>Waypoints are clamped to the URDF limits in the plan as well as in the mode, so
+what is printed is what will actually happen — not what was asked for.</p>
+<p>Then run it:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--sequence
+</code></pre></div>
+<p><strong>What to watch for</strong> (the app prints this too):</p>
+<ul>
+<li><strong>Step 1: the arm does not move at all.</strong> Any twitch here is a bug.</li>
+<li><strong>Each move: only the named joint turns</strong>, in the direction printed.</li>
+<li><strong>Each return: that joint goes back</strong>, and the others never moved.</li>
+<li><strong>At the end: the arm is visibly where it started</strong>, and every residual in the
+  report reads <code>~0.0000</code>. That is the reference being exact.</li>
+<li><strong>Throughout: motion is smooth and rate-limited</strong>, never a snap.</li>
+</ul>
+<p>Sim baseline on abra: all 7 residuals <code>+0.0000</code>, <code>majflt+=0</code>, <code>overruns=0</code>.</p>
+<p>Once the wrist passes, widen to the whole arm — <strong>only with the workspace clear</strong>:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--sequence<span class="w"> </span>--from-joint<span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+<p><code>--from-joint 0</code> includes the base joint. There is no reason to need it for this
+check, and it swings the most mass.</p>
+<h3 id="single-joint-variant">Single-joint variant<a class="headerlink" href="#single-joint-variant" title="Permanent link">&para;</a></h3>
+<p>For isolating one joint, or checking sign symmetry:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">5</span><span class="w"> </span>--delta<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--speed<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--duration<span class="w"> </span><span class="m">8</span>
+./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">5</span><span class="w"> </span>--delta<span class="w"> </span>-0.2<span class="w"> </span>--speed<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--duration<span class="w"> </span><span class="m">8</span>
+</code></pre></div>
+<p>Expect a smooth ~1 s move of about 11° each way, then hold. Final residual ≈ 0.</p>
+<hr />
+<h2 id="step-4-rate-limit-and-the-hardware-speed-ceiling">Step 4 — Rate limit, and the hardware speed ceiling<a class="headerlink" href="#step-4-rate-limit-and-the-hardware-speed-ceiling" title="Permanent link">&para;</a></h2>
+<p>Two claims to check.</p>
+<p><strong>(a) The commanded speed is respected.</strong> Same distance, half the speed, twice
+the time:</p>
+<p><div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">5</span><span class="w"> </span>--delta<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span>--speed<span class="w"> </span><span class="m">0</span>.1<span class="w"> </span>--duration<span class="w"> </span><span class="m">12</span>
+</code></pre></div>
+Should take ≈ 5 s of travel (the app prints its own estimate). Time it.</p>
+<p><strong>(b) A caller cannot exceed the URDF limit.</strong> Ask for something absurd:</p>
+<p><div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">5</span><span class="w"> </span>--delta<span class="w"> </span><span class="m">0</span>.5<span class="w"> </span>--speed<span class="w"> </span><span class="m">5</span>.0<span class="w"> </span>--duration<span class="w"> </span><span class="m">8</span>
+</code></pre></div>
+The <code>effective speed after URDF clamp:</code> line must report the <strong>URDF</strong> value
+(≈1.22 rad/s at the wrist), not 5.0. Travel time must not drop below what that
+implies. If the line prints 5.0, the clamp is not working — stop and report.</p>
+<hr />
+<h2 id="step-5-continuous-joint-across-the-wrap">Step 5 — Continuous joint across the wrap<a class="headerlink" href="#step-5-continuous-joint-across-the-wrap" title="Permanent link">&para;</a></h2>
+<p>This is the failure that already happened once on this arm, in impedance mode:
+reference and measurement both live in (−π, π], so a target on the far side of
+the wrap reads as a ~2π error and the joint walks most of a full turn.</p>
+<p>Park a continuous joint (<code>j2</code> is the historically interesting one; <code>j6</code> is the
+safest since it carries nothing) close to ±π using the pendant — say −175°.
+Confirm with <code>--dry-run</code>. Then command a small step across the wrap:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">6</span><span class="w"> </span>--delta<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--speed<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--duration<span class="w"> </span><span class="m">10</span>
+</code></pre></div>
+<p><strong>Expected:</strong> a few degrees of travel the short way round, crossing ±180°.</p>
+<p><strong>ABORT if the joint begins a long rotation.</strong> That is the wrap bug, and the
+short-way logic in <code>JointPositionMode::compute</code> is not doing its job on hardware
+even though it does in the unit test.</p>
+<hr />
+<h2 id="step-6-joint-limit-clamp">Step 6 — Joint-limit clamp<a class="headerlink" href="#step-6-joint-limit-clamp" title="Permanent link">&para;</a></h2>
+<p>Ask for a target a full radian past the stop on a bounded joint:</p>
+<div class="highlight"><pre><span></span><code>./joint_position_check<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--joint<span class="w"> </span><span class="m">5</span><span class="w"> </span>--delta<span class="w"> </span><span class="m">3</span>.0<span class="w"> </span>--speed<span class="w"> </span><span class="m">0</span>.2<span class="w"> </span>--duration<span class="w"> </span><span class="m">20</span>
+</code></pre></div>
+<p><strong>Expected:</strong> the arm travels to the ±2.23 limit and <strong>parks there</strong>, no stall
+current, no fault. The end-of-run report is the evidence — <code>target</code> shows the
+raw request, <code>final_ref</code> shows the clamped value, and <code>residual</code> shows the
+difference the clamp absorbed.</p>
+<p>Start from near zero so the travel is long enough to observe, and keep the run
+short enough that you can abort.</p>
+<hr />
+<h2 id="step-7-following-error-leash-optional-do-last">Step 7 — Following-error leash <em>(optional, do last)</em><a class="headerlink" href="#step-7-following-error-leash-optional-do-last" title="Permanent link">&para;</a></h2>
+<p>The leash caps how far the reference may lead the <strong>measured</strong> position, so a
+blocked arm cannot let the reference march away and then snap when it frees.</p>
+<p>The unit tests cover the binding behaviour exactly (<code>FollowingErrorLeashStops
+ARunawayReference</code>). On hardware the useful check is the opposite one: confirm
+it does <strong>not</strong> bind during normal motion — in steps 3–6 the reported residuals
+should all be far below the 0.35 rad leash. If a residual sits pinned at 0.35
+during a free move, the arm is not tracking and something else is wrong.</p>
+<p><strong>Deliberately obstructing the arm to watch the leash bite is not recommended.</strong>
+Position mode has full authority and will push through. If you do it anyway:
+soft obstacle only (foam block, never a hand), <code>--speed 0.05</code>, e-stop already in
+your hand, and expect the actuator to fault before anything interesting happens.</p>
+<hr />
+<h2 id="step-8-compute-timing">Step 8 — Compute timing<a class="headerlink" href="#step-8-compute-timing" title="Permanent link">&para;</a></h2>
+<p>Read off the end-of-run report from any of the steps above.</p>
+<p>Position mode runs <strong>no dynamics at all</strong> — no RNEA, no CRBA, no IK — so it is
+the cheapest control path in the driver. Sim baseline on abra:
+<code>compute p50=128ns p99=256ns</code>, <code>majflt+=0</code>, <code>overruns=0</code>.</p>
+<p><strong>On hardware <code>cycle_ns</code> is dominated by the KORTEX round-trip, not by compute.</strong>
+That is the expected shape; a <code>compute_ns</code> anywhere near <code>comm_ns</code> would be the
+surprise.</p>
+<p><strong>Acceptance:</strong> <code>overruns=0</code>, <code>majflt+=0</code>, <code>dropped=0</code> over a ≥60 s run. Use
+<code>--csv /tmp/jpos.csv</code> and keep the file.</p>
+<blockquote>
+<p><code>NanoHistogram::percentile</code> returns the lower bound of a log2 bucket, so the
+printed p99 reads low (3000 ns shows as 2048). Use the CSV for anything
+conclusive.</p>
+</blockquote>
+<hr />
+<h2 id="what-this-does-not-cover">What this does NOT cover<a class="headerlink" href="#what-this-does-not-cover" title="Permanent link">&para;</a></h2>
+<p>Both belong to <a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">issue #6</a>
+and neither is runnable today:</p>
+<ul>
+<li><strong><code>JointImpedanceMode</code> compute timing.</strong> <code>teleop_socket_server</code> creates a
+  <code>SampleRing</code> but never drains it (<code>apps/teleop_socket_server.cpp:520-522</code>), so
+  there is no timing report from the joint-impedance path at all. The incoming
+  transport layer owns the RT loop and can consume the ring — measure it there
+  rather than instrumenting a server that is about to be replaced.</li>
+<li><strong>Impedance controller performance</strong> — step response, tracking error vs
+  commanded velocity, whether <code>Dq = 2ζ√(Kq·M_ii(q))</code> delivers the intended ζ
+  across the workspace. Needs a target generator driving known joint-space steps
+  and sweeps, which does not exist yet.</li>
+</ul>
+<p>Also unresolved by design: mode-switch cost. <code>RtExecutor</code> calls
+<code>set_actuator_modes</code> inline on the RT thread at a mode change
+(<code>src/rt_executor.cpp:103</code>), which on KORTEX is 7 × <code>SetControlMode</code> plus 17
+<code>pump()</code> round-trips. Nothing today switches modes mid-run, so the cost only
+shows up as a one-off at startup. It becomes measurable — and worth measuring —
+once the transport layer switches between torque and position live.</p>
+<hr />
+<h2 id="recording-results">Recording results<a class="headerlink" href="#recording-results" title="Permanent link">&para;</a></h2>
+<p>Paste the end-of-run report block and the <code>NOTE:</code> line from step 1 into
+<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">issue #6</a>, and attach
+the CSV. The negative-degree outcome from step 2 is the single most useful thing
+to write down — it either closes the question or opens a transport bug.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

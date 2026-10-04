@@ -1,0 +1,1736 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+        <link rel="prev" href="../../getting-started/">
+      
+      
+        <link rel="next" href="../gripper/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Control Modes - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#control-modes" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Control Modes
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-mode-fits-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a mode fits in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gravity-compensation-jointtorquemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gravity Compensation — JointTorqueMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cartesian-impedance-cartesianimpedancemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cartesian Impedance — CartesianImpedanceMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cartesian Impedance — CartesianImpedanceMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tuning-starting-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning starting points
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-space-impedance-jointimpedancemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint-Space Impedance — JointImpedanceMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Joint-Space Impedance — JointImpedanceMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tuning-starting-points_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning starting points
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gain-profiles-and-the-gainsspec-contract-v13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gain profiles and the GainsSpec contract (v1.3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#target-feedforward-v13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target feedforward (v1.3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-space-position-jointpositionmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint-Space Position — JointPositionMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-velocity-jointvelocitymode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint Velocity — JointVelocityMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-your-own-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding your own mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-mode-fits-in" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How a mode fits in
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gravity-compensation-jointtorquemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gravity Compensation — JointTorqueMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cartesian-impedance-cartesianimpedancemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cartesian Impedance — CartesianImpedanceMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cartesian Impedance — CartesianImpedanceMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tuning-starting-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning starting points
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-space-impedance-jointimpedancemode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint-Space Impedance — JointImpedanceMode
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Joint-Space Impedance — JointImpedanceMode">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tuning-starting-points_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning starting points
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gain-profiles-and-the-gainsspec-contract-v13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gain profiles and the GainsSpec contract (v1.3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#target-feedforward-v13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target feedforward (v1.3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-space-position-jointpositionmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint-Space Position — JointPositionMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#joint-velocity-jointvelocitymode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Joint Velocity — JointVelocityMode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choosing-a-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adding-your-own-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding your own mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="control-modes">Control Modes<a class="headerlink" href="#control-modes" title="Permanent link">&para;</a></h1>
+<p>A <strong>control mode</strong> is the driver's unit of "what the arm does." It's a pure,
+real-time-safe control law: each 1 kHz cycle the executor hands it the latest
+joint feedback and a <code>dt</code>, and it fills in a joint command. Swapping the control
+law never touches the transport or the RT machinery — modes are how you give the
+arm a new behavior.</p>
+<p>This page explains the shipped modes conceptually. For exact signatures see
+the <a href="../../reference/api/">API Reference</a>; for the impedance math and RT-safety
+design see the <a href="../../deep-dive/impedance/">Deep Dive</a>.</p>
+<h2 id="how-a-mode-fits-in">How a mode fits in<a class="headerlink" href="#how-a-mode-fits-in" title="Permanent link">&para;</a></h2>
+<p>Every mode implements the same small interface (<code>ControlMode</code>):</p>
+<ul>
+<li><strong><code>required_modes()</code></strong> — which actuator mode each joint needs (e.g. all torque).
+  The executor applies these before the loop starts.</li>
+<li><strong><code>on_enter(feedback)</code></strong> — runs once, on the RT thread, when the mode is adopted.
+  Every shipped mode uses it to "hold where you are" by capturing the entry state.</li>
+<li><strong><code>compute(feedback, dt, command)</code></strong> — the control law, every cycle. It must be
+  RT-safe: no allocation, no locks, no blocking.</li>
+<li><strong><code>on_exit()</code></strong> — cleanup hook.</li>
+</ul>
+<p>You hand a mode to the executor with <code>request_mode(&amp;mode)</code>; it's adopted at the
+next cycle boundary (an atomic-pointer swap). You keep ownership — the mode must
+outlive its time as the active mode.</p>
+<p>Every shipped mode also echoes the measured joint position back in the command
+(<em>position passthrough</em>), so the robot's own low-level safety can fall back to a
+position hold if it ever flags a following-error fault while in torque mode. This
+holds for every mode, including the ones that do not command position — the field
+is never left holding a previous mode's setpoint, and it is never written as zero
+(zero is not "unset", it is "all joints at 0 rad").</p>
+<p>Three modes implement <code>PoseTargetSink</code> (a single <code>set_target(Pose)</code> method) —
+both impedance modes and <code>JointPositionMode</code> — so anything that drives the arm
+from a stream of Cartesian targets — the teleop server, for one — works against
+any of them without knowing which is live.</p>
+<p>Everything is <strong>SI units / radians</strong>. Degrees and N·m conversions happen only at
+the transport boundary.</p>
+<p>The gripper is deliberately <strong>not</strong> one of these modes — it's a field on the
+outgoing frame, stamped by a <code>Transport</code> decorator, so it works alongside
+whichever mode below is active rather than competing with it. See the
+<a href="../gripper/">Gripper guide</a>.</p>
+<h2 id="gravity-compensation-jointtorquemode">Gravity Compensation — <code>JointTorqueMode</code><a class="headerlink" href="#gravity-compensation-jointtorquemode" title="Permanent link">&para;</a></h2>
+<p>Cancels the arm's own weight so it becomes weightless and back-drivable — push it
+and it stays where you leave it.</p>
+<p>There is no separate gravity-comp mode. <code>JointTorqueMode</code> computes
+<code>tau = scale·gravity(q) − damping·q̇ + tau_ff</code>; with <code>tau_ff</code> never set (or
+decayed to zero by the staleness watchdog — see below) it <strong>is</strong> gravity
+compensation. <code>benchmark_grav_comp</code> runs exactly this zero-feedforward path.</p>
+<ul>
+<li><strong>Law (conceptually):</strong> command the joint torques that exactly oppose gravity,
+  optionally scaled, with light velocity damping, plus an optional feedforward
+  torque, clamped per joint to <code>torque_limit</code>.</li>
+<li><strong><code>scale</code></strong> — fraction of gravity to apply. <code>1.0</code> floats the arm; <code>0.5</code> makes it
+  sag gently. Start at <code>0.5</code> on new hardware: a gentle, predictable sag confirms
+  the torque sign and magnitude before you trust full compensation.</li>
+<li><strong><code>damping</code></strong> — adds a little joint-velocity damping to take the edge off.</li>
+<li><strong><code>tau_ff</code></strong> — an optional feedforward torque published via <code>set_torque()</code> from
+  a single non-RT supervisor thread. If no fresh command arrives within
+  <code>cmd_timeout_s</code>, a watchdog ramps it to zero over <code>cmd_decay_s</code>, reverting to
+  plain gravity-compensation hold — this is the mode's fail-safe, not something
+  you need to drive to use gravity comp.</li>
+<li><strong>When to use it:</strong> teaching/lead-through, a safe first hardware bring-up, or as
+  the gravity term other torque laws build on.</li>
+</ul>
+<p>The single biggest correctness requirement is that the <strong>URDF matches the mounted
+hardware</strong>, including any tool. The bare-arm model with a gripper attached
+under-compensates by the tool's weight and the arm sags — use
+<code>models/gen3_7dof_2f85.urdf</code> for the Robotiq 2F-85.</p>
+<h2 id="cartesian-impedance-cartesianimpedancemode">Cartesian Impedance — <code>CartesianImpedanceMode</code><a class="headerlink" href="#cartesian-impedance-cartesianimpedancemode" title="Permanent link">&para;</a></h2>
+<p>Makes the <strong>tool frame</strong> behave like a 6-DOF spring-damper about a target pose:
+push the arm away and it springs back; release and it settles. This is the
+headline mode that application developers build on.</p>
+<ul>
+<li><strong>Law (conceptually):</strong> a stiffness pulls the tool toward the target pose and a
+  damper resists tool velocity, producing a 6-D wrench (force + torque) that is
+  mapped to joint torques. Gravity compensation is added on top so the arm holds
+  itself up. (The exact equations and frames are in the
+  <a href="../../deep-dive/impedance/">Deep Dive</a>.)</li>
+<li><strong>Stiffness <code>Kx</code> / damping <code>Dx</code></strong> — 6-vectors laid out <code>[x y z | rx ry rz]</code>:
+  three translational and three rotational gains, in world-aligned axes at the
+  tool. Higher <code>Kx</code> = stiffer spring. Defaults are reasonable starting points;
+  <strong>tune on hardware.</strong></li>
+<li><strong>Holds the entry pose by default.</strong> On entry it captures the current tool pose
+  as the target, so the arm holds where it is and never jumps. Call <code>set_target</code>
+  to move the target (the arm springs toward it) and <code>set_gains</code> to retune — both
+  are safe to call live from a non-RT thread.</li>
+<li><strong>Nullspace posture (on by default).</strong> A 7-DOF arm doing a 6-DOF task has one
+  redundant degree of freedom — without handling it, the elbow drifts. A gentle
+  joint-space posture term holds a rest posture <em>without disturbing the tool</em>
+  (it's projected into the task's nullspace). Turn it off with <code>nullspace_on =
+  false</code>; tune with <code>nullspace_kp</code> / <code>nullspace_kd</code>.</li>
+<li><strong>Entry ramp.</strong> The spring/damper fade in over <code>gain_ramp_s</code> (default 0.5 s) so
+  there's no torque jolt at the moment you enter the mode — while gravity is
+  applied in full from the very first cycle, so the arm never sags during fade-in.</li>
+<li><strong>Torque limit.</strong> Every joint is clamped to <code>±torque_limit</code> as a hard safety
+  bound.</li>
+<li><strong>When to use it:</strong> compliant interaction, contact tasks, assembly,
+  hand-guiding with a virtual fixture, anything where you want the tool to be
+  springy about a commanded pose rather than rigidly position-controlled.</li>
+</ul>
+<h3 id="tuning-starting-points">Tuning starting points<a class="headerlink" href="#tuning-starting-points" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Knob</th>
+<th>Default</th>
+<th>Effect / how to tune</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Kx</code> (trans / rot)</td>
+<td>300 N/m / 30 N·m/rad</td>
+<td>Spring stiffness. Raise for tighter tracking, lower for softer compliance. Too high → buzzing/instability.</td>
+</tr>
+<tr>
+<td><code>Dx</code> (trans / rot)</td>
+<td>35 / 5</td>
+<td>Damping. Raise if the spring oscillates; roughly scale with √<code>Kx</code>.</td>
+</tr>
+<tr>
+<td><code>nullspace_kp</code> / <code>kd</code></td>
+<td>0 / 8</td>
+<td>How firmly the elbow holds its rest posture. <code>kp = 0</code> means pure damping — resist null-space motion without snapping back. Keep modest.</td>
+</tr>
+<tr>
+<td><code>gain_ramp_s</code></td>
+<td>0.5 s</td>
+<td>Longer = gentler entry.</td>
+</tr>
+<tr>
+<td><code>torque_limit</code></td>
+<td>39 N·m</td>
+<td>Lower it for a more conservative cap during bring-up.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="joint-space-impedance-jointimpedancemode">Joint-Space Impedance — <code>JointImpedanceMode</code><a class="headerlink" href="#joint-space-impedance-jointimpedancemode" title="Permanent link">&para;</a></h2>
+<p>Same idea as Cartesian impedance, but the spring lives in <strong>joint space</strong>: the
+mode solves IK for the commanded tool pose to get a full 7-joint reference
+configuration, then runs an independent spring-damper on every joint.</p>
+<ul>
+<li><strong>Why it exists.</strong> Cartesian impedance commands a 6-DOF task with a 7-DOF arm,
+  so one degree of freedom is never commanded — the null-space term biases it but
+  cannot constrain it. Over a teleop session the elbow drifts, and near limits or
+  singularities it reaches configurations the operator can't undo by moving the
+  controller. Solving IK moves redundancy resolution to the <em>reference</em>: the arm
+  configuration is chosen deterministically instead of drifting.</li>
+<li><strong>Law (conceptually):</strong> each cycle, a bounded IK step nudges the reference
+  configuration toward the commanded pose (warm-started from last cycle, so
+  solutions stay continuous). Then per-joint stiffness pulls the measured
+  configuration toward that reference and per-joint damping resists joint
+  velocity. Gravity compensation is added on top, always in full.</li>
+<li><strong>Holds the entry joint configuration by default.</strong> <code>on_enter</code> captures all
+  seven measured joint angles. Until an explicit target arrives, the reference
+  stays at that configuration; IK does not run, so its posture and limit-avoidance
+  terms cannot move the reference during mode entry. Displaced feedback does not
+  re-capture the hold point. Re-entry discards targets from the previous session.
+  An explicit <code>set_target(Pose)</code> enables IK (including secondary objectives,
+  even for the entry pose); <code>set_target(JointVec)</code> commands joints directly.
+  The existing gain ramp, torque limits and command watchdog still apply.</li>
+<li><strong>Damping is derived, not dialed in.</strong> <code>Dq_i = 2·zeta·sqrt(Kq_i · M_ii(q))</code>,
+  using the joint-space mass matrix. A flat damping vector cannot be right at more
+  than one configuration: on this arm the effective inertia at joint 1 swings ~38x
+  between extended (0.015 kg·m²) and elbow-up (0.573), so any constant is far too
+  high at one end and too low at the other. You set a damping <em>ratio</em> (<code>zeta</code>) and
+  it stays honest as the arm moves and as you retune <code>Kq</code>.</li>
+<li><strong>The tradeoff.</strong> Tool-frame stiffness is no longer what you dial in — it
+  becomes <code>J⁻ᵀ Kq J⁻¹</code>, which varies with configuration and is not diagonal in the
+  task frame. For teleop that's usually the right trade: predictable posture beats
+  a precisely shaped compliance ellipsoid. For contact-rich tasks where you care
+  about <em>how</em> the tool yields along each axis, prefer Cartesian impedance.</li>
+<li><strong>Redundancy resolution.</strong> Inside the IK, a null-space posture bias pulls toward
+  <code>ik.q_rest</code> (set it to your preferred elbow-up config) and a limit-avoidance
+  term pushes away from hard stops; the reference is then hard-clamped to the URDF
+  limits. Continuous joints (1/3/5/7) are unlimited and their posture error wraps
+  to ±π, so a rest angle near ±π never drives a joint the long way round.</li>
+<li><strong>Leash (<code>max_tracking_error</code>).</strong> Caps the position error the spring sees, so
+  spring torque saturates at <code>Kq × leash</code>. Unlike the total torque clamp, this
+  leaves gravity compensation untouched — the arm can't sag when the spring
+  saturates. This is your main "how hard will it shove" safety dial.</li>
+<li><strong>Reference speed limit (<code>max_ref_speed</code>).</strong> Bounds how fast the reference may
+  move, so a teleop pose jump (tracking glitch, clutch re-engage) ramps in instead
+  of slamming. Per-joint, seeded from the URDF velocity limits — set below hand
+  speed it silently accumulates lag that only unwinds when the operator slows.</li>
+<li><strong>If it feels mushy / disconnected from your hand</strong>, that is velocity-
+  proportional tracking lag, not softness. With gravity compensated, holding a
+  joint at speed <code>qdot</code> needs <code>Kq·lag = Dq·qdot</code>, so <code>lag = 2·zeta·qdot·sqrt(M/Kq)</code>.
+  Reach for <code>zeta</code> first (lag scales linearly with it), then <code>Kq</code> (only
+  <code>1/sqrt</code>), then check <code>max_ref_speed</code> is not binding.</li>
+<li><strong>Per-joint torque limits.</strong> Defaults <code>(39, 39, 39, 39, 9, 9, 9)</code> N·m, matching
+  the URDF — the wrist joints are rated 9 N·m, not 39.</li>
+<li><strong>When to use it:</strong> VR/Quest teleop and any pose-streaming application where the
+  arm keeps wandering into awkward configurations.</li>
+</ul>
+<h3 id="tuning-starting-points_1">Tuning starting points<a class="headerlink" href="#tuning-starting-points_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Knob</th>
+<th>Default</th>
+<th>Effect / how to tune</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Kq</code></td>
+<td>80 ×4, 30 ×3 (N·m/rad)</td>
+<td>Joint stiffness. Raise for tighter tracking; too high → buzzing. Wrist joints are weaker, keep them lower.</td>
+</tr>
+<tr>
+<td><code>zeta</code></td>
+<td>0.5</td>
+<td>Damping <strong>ratio</strong>, not damping. <code>1.0</code> = critically damped; lower = livelier and more overshoot.</td>
+</tr>
+<tr>
+<td><code>max_ref_speed</code></td>
+<td>URDF velocity limits</td>
+<td>Per-joint reference rate cap. Seeded from the model so it can never sit silently below what the hardware can do.</td>
+</tr>
+<tr>
+<td><code>max_tracking_error</code></td>
+<td>0.35 rad</td>
+<td>The leash. Lower it to make the arm gentler when it's far from the reference.</td>
+</tr>
+<tr>
+<td><code>ik.q_rest</code></td>
+<td>elbow-up placeholder</td>
+<td><strong>Tune on hardware</strong> — posture bias for explicit Cartesian targets.</td>
+</tr>
+<tr>
+<td><code>ik.posture_gain</code></td>
+<td>0.15</td>
+<td>How strongly the elbow returns to <code>q_rest</code>. Raise if it still wanders; lower if it fights you.</td>
+</tr>
+<tr>
+<td><code>ik.max_iters</code></td>
+<td>4</td>
+<td>IK iterations per cycle. Per-cycle cost is <strong>unmeasured</strong> — see <a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">issue #6</a>. Nothing has timed this path, in sim or on hardware.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The gains above were tuned by feel during live teleop, not measured. Treat them
+as a working starting point rather than characterised values —
+<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">issue #6</a>.</p>
+</blockquote>
+<h3 id="gain-profiles-and-the-gainsspec-contract-v13">Gain profiles and the <code>GainsSpec</code> contract (v1.3)<a class="headerlink" href="#gain-profiles-and-the-gainsspec-contract-v13" title="Permanent link">&para;</a></h3>
+<p>Through the interface layer (trajectory goals, stream opens, <code>set_gains</code>), a
+caller does not pass <code>JointImpedanceParams</code> — it passes a <strong><code>GainsSpec</code></strong>:</p>
+<ul>
+<li><strong>A named profile</strong> — <code>soft</code>, <code>medium</code>, <code>stiff</code>. Each is a <em>complete</em>
+  parameter set owned by the core (<code>interface/gains.h</code>), so <code>soft</code> means the
+  same thing on every surface and every deployment. <code>medium</code> <strong>is</strong> the mode's
+  constructor defaults above; <code>soft</code> is <code>Kq (40×4, 15×3)</code>, <code>zeta 0.4</code>, leash
+  <code>0.45</code>; <code>stiff</code> is <code>Kq (160×4, 60×3)</code>, <code>zeta 0.7</code>, leash <code>0.25</code>.</li>
+<li><strong><code>custom</code></strong> — raw <code>{kq, zeta, torque_limit}</code> overriding just those three
+  fields of the session default. Validated at accept time: non-finite,
+  out-of-range (<code>kq ∈ [1, 400]</code>, <code>zeta ∈ [0.05, 2]</code>), or a torque limit below
+  the per-joint <strong>gravity floor</strong> is refused with a reason, never clamped — a
+  limit the clamp would use to eat gravity drops the arm.</li>
+<li><strong>Nothing</strong> — the <em>session default</em>, initially <code>medium</code>. <code>set_gains</code>
+  (Arbiter-gated) replaces the session default; it never touches a running
+  session. Gains apply on <strong>every</strong> impedance command — repeat-mode goals
+  included — and never leak into the next command or session.</li>
+</ul>
+<p><strong>Switching to impedance requires no tuning</strong>: a goal with <code>control_mode =
+impedance</code> and no gains runs the medium profile, which is the deliverable the
+v1.3 on-arm pass tunes and documents.</p>
+<h3 id="target-feedforward-v13">Target feedforward (v1.3)<a class="headerlink" href="#target-feedforward-v13" title="Permanent link">&para;</a></h3>
+<p>A joint target may carry the planner's profile (<code>JointTarget{q, qd, qdd}</code>).
+When it does, the damper acts on the velocity <strong>error</strong> — using the achieved,
+post-rate-limit reference velocity, so a clamped or speed-scaled reference
+feeds forward the motion actually commanded — and <code>M(q)·qdd</code> is added so the
+spring is not left to generate the planned acceleration out of tracking error.
+This removes the standing lag <code>2ζ·qd·√(M/Kq)</code> on profiled trajectories.
+Position-only targets (teleop, poses, entry hold) and the staleness freeze
+behave exactly as before.</p>
+<h2 id="joint-space-position-jointpositionmode">Joint-Space Position — <code>JointPositionMode</code><a class="headerlink" href="#joint-space-position-jointpositionmode" title="Permanent link">&para;</a></h2>
+<p>Commands every actuator in <code>kPosition</code> and lets the actuator's own servo close
+the loop.</p>
+<p>With a <strong>joint</strong> target it runs no dynamics at all — no gravity term, no mass
+matrix, no IK — which makes it the cheapest control path in the driver
+(<code>compute p50 = 128 ns</code> in sim, against a 1 ms budget). Driven through
+<code>JointTargetSink::set_target(const JointVec&amp;)</code>: a caller that already knows the
+configuration it wants does not have to invent a Cartesian pose and pay for an
+IK solve.</p>
+<p>With a <strong>pose</strong> target (<code>PoseTargetSink::set_target(const Pose&amp;)</code>) it runs the
+same in-loop <code>DiffIkSolver</code> <code>JointImpedanceMode</code> uses, up to <code>ik.max_iters</code> (4)
+Gauss-Newton iterations per cycle, and the solution then feeds the <em>same</em>
+reference pipeline below — so the pose path inherits the whole safety envelope
+unchanged. That costs <code>compute p50 ≈ 5.2 µs</code> in sim, ~0.5% of the 1 ms budget,
+against 128 ns for the joint path.</p>
+<p>The IK seed <strong>persists across cycles</strong>: it is refined in place and re-anchored
+only on entry and on the transition into a pose target. It is deliberately not
+re-seeded from the rate-limited reference each cycle, which would throw every
+solve's progress away and make convergence unreachable for any pose more than
+one solve's travel (<code>max_iters · ik.max_joint_step</code> = 0.2 rad) away.</p>
+<p>Sustained non-convergence — longer than <code>ik_fault_s</code> — is a <strong>fault</strong>: the mode
+freezes the reference at the measured configuration at 1 kHz and publishes
+<code>ik_faulted()</code>, which the supervisor's sampler observes to tear down any open
+streaming session. See
+<a href="../streaming/#when-the-pose-path-cannot-solve">Streaming → When the pose path cannot solve</a>.</p>
+<p><strong>There is no compliance.</strong> The arm will not yield to contact — it will push
+through until the actuator faults. Use it to move to known configurations and to
+exercise a target path; use joint-space impedance when a human is in the loop.</p>
+<p>What the mode owns is the reference integrator, and every stage is a guard:
+rate limit (<code>max_ref_speed·dt</code>), a following-error leash against the <em>measured</em>
+position, continuous-joint wrapping, then a position-limit clamp.</p>
+<table>
+<thead>
+<tr>
+<th>Knob</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_ref_speed</code></td>
+<td>0.5 rad/s</td>
+<td>Deliberately below the URDF limits (1.40 / 1.22). Finite requests are clamped <strong>down</strong> to the URDF value, non-finite ones seeded from it — no config can outrun the hardware rating.</td>
+</tr>
+<tr>
+<td><code>max_following_error</code></td>
+<td>0.35 rad</td>
+<td>How far the reference may lead the measured position. Bounds the snap when a blocked arm comes free. <code>&lt;= 0</code> disables.</td>
+</tr>
+<tr>
+<td><code>q_lower</code> / <code>q_upper</code></td>
+<td>URDF limits</td>
+<td>Software position limits. A tighter caller-supplied value survives; non-finite entries are seeded from the model.</td>
+</tr>
+<tr>
+<td><code>ik_fault_s</code></td>
+<td>0.1 s</td>
+<td>How long the pose path may miss the IK tolerance before it latches a fault and freezes. <code>&lt;= 0</code> disables. Only a pose target can trip it.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>These defaults are <strong>untuned</strong>. The mode passed its first hardware run on
+2026-08-11 — joints moved correctly and the arm returned home — but nothing was
+measured or characterised, and no parameter was adjusted as a result. Treat
+them as a conservative starting point, not as values anyone validated.
+<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/6">Issue #6</a>.</p>
+</blockquote>
+<p>Hardware validation procedure:
+<a href="../../integration/joint_position_hardware_check/"><code>../integration/joint_position_hardware_check.md</code></a>.</p>
+<h2 id="joint-velocity-jointvelocitymode">Joint Velocity — <code>JointVelocityMode</code><a class="headerlink" href="#joint-velocity-jointvelocitymode" title="Permanent link">&para;</a></h2>
+<p>Integrates the commanded velocity into a position reference at the RT rate and
+commands every actuator in <code>kPosition</code>, so the actuator's own position servo
+holds the reference. This is the mode for jogging: a policy, a jog panel, or a
+spacemouse that wants to say "move <em>this way, this fast</em>" rather than "be
+<em>here</em>".</p>
+<p><strong>Why not the actuator's velocity servo.</strong> It does not reject gravity at a zero
+command: joint 2 crept at ~0.038 rad/s with <code>qd = 0</code> streamed
+(<a href="https://github.com/rammp-org/kinova-gen3-driver/issues/34">#34</a>), and
+Kinova's own low-level example holds its loaded joints in position mode for
+the same reason. Integrating into a held position reference is what makes a
+zero command mean <em>stay put</em>.</p>
+<p><strong>Stiff by contract.</strong> It does not yield to contact and makes no attempt to. A
+compliant velocity law is a different promise and belongs in a different mode —
+shipping compliance from something named "velocity" is exactly the silent
+semantic difference this driver refuses. If a human is in the loop, use an
+impedance mode.</p>
+<p>Two target shapes, latest setter wins:</p>
+<ul>
+<li><strong><code>set_velocity_target(qd)</code></strong> — native joint velocity, <code>rad/s</code>. Passed through
+  unchanged, then limited. The cheap path: no solve at all.</li>
+<li><strong><code>set_twist_target(V)</code></strong> — an EE twist <code>[linear; angular]</code> in the <strong>base</strong>
+  frame, <code>m/s</code> and <code>rad/s</code>. Mapped to joint velocity by a single damped
+  least-squares 6×7 solve, plus a null-space posture bias toward <code>q_rest</code> so the
+  redundant DOF is decided rather than left to drift. The
+  <a href="../../deep-dive/velocity-mode/">deep dive</a> derives it.</li>
+</ul>
+<p><strong>What bounds the command.</strong> <code>limit()</code> runs on every cycle whatever the target
+shape: first a <strong>uniform scale</strong> so the fastest joint just reaches its <code>max_qd</code>
+cap, then a hard per-joint clamp as a backstop. Scaling rather than clamping is
+what keeps the achieved EE twist pointing the same direction as the commanded
+one — a bare per-joint clamp would silently <em>rotate</em> the twist the moment one
+joint saturated. The DLS damping is a separate concern: it keeps the <em>solve</em>
+well-conditioned near a singularity, but <code>limit()</code> is what bounds the velocity
+that is integrated into the reference (and the leash, next, bounds the
+reference itself). Near a singularity what you observe is the tool
+<strong>slowing down</strong>, not veering.</p>
+<p><strong>What bounds the reference.</strong> The integrated reference is leashed to within
+<strong>0.1 rad</strong> of the measured position on every joint (a constant in
+<code>joint_velocity_mode.cpp</code>, deliberately tighter than the position mode's
+0.35 rad default). A joint that cannot follow — contact, a limit, an arm that
+cannot keep up — stops winding the reference up at that lead, so it never snaps
+across an accumulated gap when it frees, and under contact the leash is the
+bound on how hard the position servo pushes. Bounded joints are clamped to
+their URDF position limits; continuous joints stay in the transport's
+<code>(-π, π]</code> representation. The leash is per joint, so if it ever bites during
+nominal tracking (the actuator's following lag at full speed is not yet
+characterised) it caps that joint alone and the achieved twist rotates — compare
+measured <code>qd</code> against <code>commanded()</code> on the arm before trusting a full-speed jog.</p>
+<p><strong>A stale stream commands zero, freezes at the measured position, and
+latches.</strong> Holding the last velocity while the stream is silent would keep the
+arm travelling toward nothing, and freezing at the <em>reference</em> would leave up
+to a leash's worth of travel still to finish. Disarming the watchdog cannot
+un-freeze it; only a fresh target can.</p>
+<p><strong>No entry ramp.</strong> Unlike the torque and impedance modes, the posture bias lands
+as a step on the first setpoint of a session — see
+<a href="../streaming/#the-first-twist-setpoint-can-swing-the-elbow">Streaming → the first twist setpoint</a>
+before opening a twist stream with the arm far from <code>q_rest</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Knob</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_qd</code></td>
+<td>URDF velocity limits</td>
+<td>Per-joint cap. Non-finite entries are seeded from the URDF, finite ones clamped <strong>down</strong> to it — no config can outrun the hardware rating.</td>
+</tr>
+<tr>
+<td><code>dls_damping</code></td>
+<td>1e-3</td>
+<td>Baseline Levenberg–Marquardt damping for the twist solve.</td>
+</tr>
+<tr>
+<td><code>w_threshold</code></td>
+<td>0.0033</td>
+<td>Manipulability <code>sqrt(det(J Jᵀ))</code> below which damping ramps up. One tenth of the measured nominal <code>0.0325</code>. <strong>Re-derive it if the URDF or EE frame changes</strong> — <code>w</code> is unit-mixed and scale-dependent.</td>
+</tr>
+<tr>
+<td><code>dls_damping_max</code></td>
+<td>0.10</td>
+<td>Damping at a true singularity. Reach for this when the <em>solve</em> is ill-conditioned, not when the tool feels sluggish.</td>
+</tr>
+<tr>
+<td><code>posture_gain</code></td>
+<td>0.15</td>
+<td>Null-space bias toward <code>q_rest</code>, <code>1/s</code>. Matches <code>DiffIkParams</code>. <code>0</code> disables it and hands you the redundant DOF.</td>
+</tr>
+<tr>
+<td><code>q_rest</code></td>
+<td>elbow-up placeholder</td>
+<td><strong>Tune on hardware.</strong> The posture the redundant DOF settles into.</td>
+</tr>
+<tr>
+<td><code>cmd_timeout_s</code></td>
+<td>0.0 (disabled)</td>
+<td>Staleness deadline; the streaming tier arms it from the session's <code>timeout_s</code>.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>These defaults are <strong>untuned</strong> — no hardware characterisation has been done for
+this mode. <code>benchmark_joint_velocity --kind twist</code> measures the per-cycle cost
+in sim; nothing has been measured on the arm.</p>
+</blockquote>
+<h2 id="choosing-a-mode">Choosing a mode<a class="headerlink" href="#choosing-a-mode" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>You want…</th>
+<th>Mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The arm weightless / back-drivable</td>
+<td>Gravity compensation</td>
+</tr>
+<tr>
+<td>A safe, predictable first hardware test</td>
+<td>Gravity compensation at <code>scale 0.5</code></td>
+</tr>
+<tr>
+<td>The tool to be compliant about a target pose</td>
+<td>Cartesian impedance</td>
+</tr>
+<tr>
+<td>Online retargeting / regrasping with compliance</td>
+<td>Cartesian impedance + <code>set_target</code></td>
+</tr>
+<tr>
+<td>Precisely shaped tool-frame compliance for contact</td>
+<td>Cartesian impedance</td>
+</tr>
+<tr>
+<td>Teleop that keeps drifting into awkward elbow poses</td>
+<td>Joint-space impedance</td>
+</tr>
+<tr>
+<td>Every joint constrained, posture fully predictable</td>
+<td>Joint-space impedance</td>
+</tr>
+<tr>
+<td>To move to a known joint configuration, rigidly</td>
+<td>Joint-space position</td>
+</tr>
+<tr>
+<td>To servo the tool to a Cartesian pose, rigidly</td>
+<td>Joint-space position + <code>set_target(Pose)</code></td>
+</tr>
+<tr>
+<td>A target for another layer to test against</td>
+<td>Joint-space position</td>
+</tr>
+<tr>
+<td>The cheapest possible control path</td>
+<td>Joint-space position with a <em>joint</em> target</td>
+</tr>
+<tr>
+<td>To jog the tool at a commanded EE speed</td>
+<td>Joint velocity + <code>set_twist_target</code></td>
+</tr>
+<tr>
+<td>To drive joint rates directly (a policy, a jog panel)</td>
+<td>Joint velocity + <code>set_velocity_target</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="adding-your-own-mode">Adding your own mode<a class="headerlink" href="#adding-your-own-mode" title="Permanent link">&para;</a></h2>
+<p>Admittance control, force control, and other laws slot in the same way — no
+transport, executor, or RT changes. <code>JointVelocityMode</code> was added exactly this
+way and is the most recent worked example:</p>
+<ol>
+<li>Implement <code>ControlMode</code> in a new <code>*_mode.h</code> / <code>.cpp</code>. Capture entry state in
+   <code>on_enter</code>; keep <code>compute()</code> allocation-free (preallocate all scratch as
+   members; use fixed-size Eigen types).</li>
+<li>Get the rigid-body quantities you need from <code>Dynamics</code> (extend it if you need a
+   new quantity such as the mass matrix — it's the one place Pinocchio lives).</li>
+<li>Add a unit test that recomputes the law independently (see the
+   <code>MatchesIndependentlyComputedLaw</code> oracle pattern) and extend the RT-safety test
+   to assert zero major page faults with your mode active.</li>
+<li>Register the source/test in <code>CMakeLists.txt</code>.</li>
+</ol>
+<p>See the <a href="../../deep-dive/impedance/">Deep Dive</a> and the design spec/plan under
+<code>docs/superpowers/</code> for the Cartesian impedance controller as a worked example.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

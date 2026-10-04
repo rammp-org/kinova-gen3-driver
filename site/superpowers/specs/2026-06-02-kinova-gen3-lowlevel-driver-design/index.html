@@ -1,0 +1,1105 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Kinova Gen3 Low-Level Control Driver — Design - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kinova-gen3-low-level-control-driver-design" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Kinova Gen3 Low-Level Control Driver — Design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-goal-framing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Goal &amp; framing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-scope-first-deliverable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Scope (first deliverable)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-decisions-the-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Decisions (the "why")
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-architecture-seven-units" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Architecture — seven units
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-rt-executor-timing-threading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. RT executor, timing &amp; threading
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-benchmarking-telemetry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Benchmarking &amp; telemetry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-dynamics-gravity-comp-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Dynamics &amp; gravity-comp mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-build-deps-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Build, deps, layout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-testing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Testing strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-open-items-to-confirm-with-user-robot-powered-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Open items / to confirm with user (robot powered off)
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="kinova-gen3-low-level-control-driver-design">Kinova Gen3 Low-Level Control Driver — Design<a class="headerlink" href="#kinova-gen3-low-level-control-driver-design" title="Permanent link">&para;</a></h1>
+<p><strong>Date:</strong> 2026-06-02
+<strong>Status:</strong> Approved (design); implementation in progress
+<strong>Target hardware:</strong> Kinova Gen3 7-DOF, NVIDIA Jetson (<code>abra</code>), Linux 5.15-rt-tegra (PREEMPT_RT), aarch64</p>
+<h2 id="1-goal-framing">1. Goal &amp; framing<a class="headerlink" href="#1-goal-framing" title="Permanent link">&para;</a></h2>
+<p>Build a <strong>durable, maintainable C++ driver for Gen3 low-level control</strong>. The supported control modes over time are torque (with gravity comp), impedance, and high-speed velocity control. Public-facing interfaces (ROS, websockets, …) are deliberately <strong>deferred</strong> — this work implements the <em>functionality</em> behind a clean library boundary so a frontend is "just another consumer" later.</p>
+<p><strong>The single most important deliverable is benchmarking:</strong> characterizing per-cycle compute cost and loop-timing stability on the PREEMPT_RT Jetson.</p>
+<p>This is <strong>not green-field</strong>. A validated single-file prototype already exists at <code>~/rtos_testing/cpp/grav_comp_test.cpp</code> on <code>abra</code> (mirrors <code>kortex_hardware/src/Gen3Robot.cpp</code>). It proves the full KORTEX low-level handshake, 1 kHz torque gravity-comp loop, continuous-joint dynamics handling, and <code>mlockall</code>+<code>SCHED_FIFO</code> timing. <strong>This project refactors that proven prototype into a layered, instrumented, testable library</strong> — keeping the hard-won correct sequences, adding architecture and benchmarking.</p>
+<h2 id="2-scope-first-deliverable">2. Scope (first deliverable)<a class="headerlink" href="#2-scope-first-deliverable" title="Permanent link">&para;</a></h2>
+<ul>
+<li>RT control-loop <strong>skeleton</strong> over the KORTEX low-level cyclic API.</li>
+<li><strong>One real mode:</strong> gravity-comp torque (realistic per-cycle compute for benchmarking; foundation for impedance).</li>
+<li><strong>Heavy instrumentation:</strong> live console stats, latency histogram, CSV-to-disk, CPU/thread introspection.</li>
+<li>Mode/control abstraction designed in so impedance + velocity slot in later as new <code>ControlMode</code> implementations.</li>
+</ul>
+<p><strong>Out of scope now:</strong> impedance &amp; velocity modes (designed-for, not built), live cross-mode switching across differing actuator modes, any public frontend (ROS/websocket), config-file framework.</p>
+<h2 id="3-decisions-the-why">3. Decisions (the "why")<a class="headerlink" href="#3-decisions-the-why" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Choice</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Substrate</td>
+<td>KORTEX C++ low-level cyclic API</td>
+<td>Only path to low-level control on Gen3; prototype already links the vendored static lib</td>
+</tr>
+<tr>
+<td>Dynamics</td>
+<td>Pinocchio + faithful 7-DOF URDF</td>
+<td>Fast analytical RNEA/CRBA; gravity now, mass matrix/Coriolis for impedance later</td>
+</tr>
+<tr>
+<td>Continuous joints</td>
+<td>Modeled faithfully; <strong>cos/sin packing inside <code>Dynamics</code></strong></td>
+<td>NO wide-limit-revolute hack — that risks phantom joint-limit/windup failures. Easy interface (flat angle vector), faithful implementation. See [[no-silent-footgun-hacks]]</td>
+</tr>
+<tr>
+<td>Units</td>
+<td>SI/radians internal; convert only at the Transport boundary</td>
+<td>KORTEX speaks deg/N·m; one conversion site</td>
+</tr>
+<tr>
+<td>Loop architecture</td>
+<td>Single RT thread (A); comm &amp; compute as separate functional units</td>
+<td>Simplest correct; at 1 kHz the UDP round-trip + sub-ms compute fit easily. Functional separation keeps A→A′(async)→B(pipeline) a localized change</td>
+</tr>
+<tr>
+<td>Pacing</td>
+<td>Sleep-then-spin (proven) + pure <code>clock_nanosleep(ABSTIME)</code> as alternative</td>
+<td>Prototype's hybrid gives lower jitter; benchmark both</td>
+</tr>
+<tr>
+<td>Build</td>
+<td>Library core + separate app target; native on Jetson, cross-compile kept open</td>
+<td>Frontend-agnostic; no hardcoded paths, deps via <code>find_package</code>/cache vars</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-architecture-seven-units">4. Architecture — seven units<a class="headerlink" href="#4-architecture-seven-units" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>        ┌───────────────┐
+main ──▶ │  RtExecutor   │  owns RT thread, timing, mode-switch handoff
+        └───────┬───────┘
+         ┌──────┼───────────────┬────────────────┐
+         ▼      ▼               ▼                ▼
+   ┌──────────┐ ┌────────────┐ ┌──────────┐ ┌───────────┐
+   │ Transport│ │ControlMode │ │ Telemetry│ │ rt_system │
+   │  (comm)  │ │ (compute)  │ │          │ │ (sched..) │
+   └──────────┘ └─────┬──────┘ └──────────┘ └───────────┘
+   KORTEX-only        ▼
+                ┌──────────┐
+                │ Dynamics │  Pinocchio-only
+                └──────────┘
+   all share ──▶ joint_types  (POD, fixed-size 7-DOF, alloc-free)
+</code></pre></div>
+<ul>
+<li><strong><code>joint_types</code></strong> — fixed-size SI value types: <code>JointFeedback{q,qd,tau,current}</code>, <code>JointCommand{setpoints + mode tag}</code>, <code>ActuatorMode</code> enum. <code>kNumJoints=7</code> compile-time const. No KORTEX/Pinocchio types leak.</li>
+<li><strong><code>Transport</code> (interface)</strong> — ONLY code that includes KORTEX/protobuf. Lifecycle (<code>connect</code>, <code>set_servoing_low_level</code>, <code>set_actuator_modes</code> with the <em>pumping</em> sequence, <code>safe_shutdown</code>) + cyclic ops split so blocking-vs-async lives here: <code>send()</code>→<code>RefreshCommand</code>, <code>receive()</code>→<code>RefreshFeedback</code>, <code>exchange()</code>→<code>Refresh</code>. Concrete: <code>KortexTransport</code>, protobuf messages pre-allocated/reused; does deg↔rad + frame_id/command_id bookkeeping.</li>
+<li><strong><code>ControlMode</code> (interface)</strong> — <code>required_modes()</code>, <code>on_enter(fb)</code>, <code>compute(fb, dt, out)</code> (RT-safe, no alloc), <code>on_exit()</code>. Concrete: <code>GravityCompTorqueMode</code>.</li>
+<li><strong><code>Dynamics</code></strong> — ONLY Pinocchio code. Loads URDF once, pre-allocates <code>Data</code>. <code>gravity(q, tau_out)</code> now; <code>mass_matrix</code>/<code>nonlinear</code>/<code>inverse_dynamics</code> later. Public interface takes flat 7-vector of joint angles; internally maps to Pinocchio <code>nq</code> config via faithful cos/sin packing (ported from prototype's <code>compute_gravity</code>).</li>
+<li><strong><code>RtExecutor</code></strong> — owns RT thread; per cycle: pick up mode-switch → <code>exchange</code> → check faults → <code>compute</code> → push timing sample. Paces to next boundary. The ONE place that decides thread layout (the A→B seam). Mode switch = atomic pointer swap of pre-built modes at a cycle boundary.</li>
+<li><strong><code>Telemetry</code></strong> — lock-free SPSC ring buffer (RT producer, drop-don't-block + drop counter), drained by non-RT thread feeding console/CSV/histogram. RT side only reads clocks + pushes.</li>
+<li><strong><code>rt_system</code></strong> — <code>mlockall</code>, <code>SCHED_FIFO</code>, core affinity, <code>getrusage</code>/page-fault/ctx-switch + applied-policy introspection. Startup/shutdown only.</li>
+</ul>
+<h2 id="5-rt-executor-timing-threading">5. RT executor, timing &amp; threading<a class="headerlink" href="#5-rt-executor-timing-threading" title="Permanent link">&para;</a></h2>
+<p>Three threads: <strong>RT loop</strong> (<code>SCHED_FIFO</code>, pinned, <code>mlockall</code>'d — the only RT thread), <strong>Supervisor</strong> (normal: setup/teardown, mode requests, fault response), <strong>Telemetry drain</strong> (normal; NOT on the RT core).</p>
+<p>Cycle (four timestamps → full decomposition):
+<div class="highlight"><pre><span></span><code>sleep→boundary; t0=now (wake jitter=t0-boundary)
+maybe_switch_mode(); transport.exchange(cmd,fb); t1=now (comm cost)
+check_faults(fb); mode.compute(fb,dt,cmd); t2=now (compute cost)
+telemetry.push({boundary,t0,t1,t2,flags})   // total cycle vs period
+if (boundary missed) { overruns++; resync }
+</code></pre></div>
+RT thread: no alloc, no I/O, no locks. <strong>Pacing</strong> defaults to prototype's sleep-then-spin (coarse <code>clock_nanosleep</code> + busy-wait); pure <code>clock_nanosleep(ABSTIME)</code> selectable for comparison.</p>
+<p><strong>Torque entry</strong> (no-jump): seed cyclic with current positions, switch actuators to TORQUE with <code>Refresh</code> <em>pumping</em> between each <code>SetControlMode</code>, first torque = <code>gravity(q)</code>, position passthrough each cycle. <strong>Safe exit:</strong> revert actuators to POSITION, <code>SINGLE_LEVEL_SERVOING</code>, close sessions. Missed deadlines are operational risk (robot watchdog), not just a metric.</p>
+<h2 id="6-benchmarking-telemetry">6. Benchmarking &amp; telemetry<a class="headerlink" href="#6-benchmarking-telemetry" title="Permanent link">&para;</a></h2>
+<p><code>CycleSample</code> ~32B POD: <code>cycle_index, wake_jitter_ns, comm_ns, compute_ns, cycle_ns, flags</code>. Lock-free SPSC ring, preallocated, drop-don't-block with visible drop counter. Clock = <code>clock_gettime(CLOCK_MONOTONIC)</code> (vDSO); measure clock overhead itself first.</p>
+<p>Four consumers: (1) <strong>live console</strong> (~1 Hz): rate, cycle min/mean/p50/p99/p99.9/max, jitter, compute &amp; comm min/mean/max, overruns, drops; (2) <strong>CSV</strong> per-cycle, buffered off RT thread; (3) <strong>latency histogram</strong> (hand-rolled log buckets); (4) <strong>CPU/thread introspection</strong> one-shot start/end: applied sched policy/prio/affinity, page-fault delta (≈0 proves <code>mlockall</code>), <strong>involuntary ctx switches</strong> (<code>ru_nivcsw</code> — top preemption signal). Per-cycle CPU time is an opt-in flag (adds a 2nd in-loop clock read); default is coarse <code>getrusage</code> deltas. Run bounded by duration or cycle count.</p>
+<h2 id="7-dynamics-gravity-comp-mode">7. Dynamics &amp; gravity-comp mode<a class="headerlink" href="#7-dynamics-gravity-comp-mode" title="Permanent link">&para;</a></h2>
+<p><code>Dynamics</code>: <code>buildModel(urdf)</code> + pre-alloc <code>Data</code>; <code>gravity(q,tau_out)</code> → <code>computeGeneralizedGravity</code>. Continuous joints packed via <code>nqs[jid]==2</code> → (cos,sin), bounded → angle (ported, validated). Model fidelity (incl. end-effector payload inertia) governs grav-comp quality — payload is an explicit input.</p>
+<p><code>GravityCompTorqueMode</code>: <code>required_modes()</code>=all TORQUE; <code>compute</code> sets <code>out.torque = gravity(fb.q)</code> + measured-position passthrough + torque clamp (default 39 N·m). Optional joint-damping <code>−b·q̇</code> (default <code>b=0</code>) as explicit stability knob. Scale knob (default 1.0) retained from prototype.</p>
+<h2 id="8-build-deps-layout">8. Build, deps, layout<a class="headerlink" href="#8-build-deps-layout" title="Permanent link">&para;</a></h2>
+<p>C++17, CMake. Library target <code>kinova_lowlevel</code> + separate <code>apps/benchmark_grav_comp</code>.
+- <strong>KORTEX</strong>: vendored static lib via <code>KORTEX_HW_DIR</code> (default <code>~/rtos_testing/cpp/kortex_hardware</code>); include dirs + <code>libKortexApiCpp.a</code> + <code>dl</code> + <code>pthread</code> (mirror prototype CMake).
+- <strong>Pinocchio</strong>: <code>find_package(pinocchio REQUIRED)</code>; <code>CMAKE_PREFIX_PATH</code> → pip <code>cmeel.prefix</code> (<code>/usr/local/lib/python3.10/dist-packages/cmeel.prefix</code>). Pulls Eigen 3.4, Boost, urdfdom (all present).
+- <strong>GoogleTest</strong> (present) for unit tests.
+- No absolute paths; stub <code>cmake/aarch64-toolchain.cmake</code> checked in but unused by default native build.</p>
+<div class="highlight"><pre><span></span><code>include/kinova_lowlevel/  joint_types.h transport.h control_mode.h dynamics.h
+                          rt_executor.h telemetry.h rt_system.h
+src/                      kortex_transport.cpp dynamics.cpp rt_executor.cpp
+                          telemetry.cpp rt_system.cpp gravity_comp_mode.cpp
+apps/                     benchmark_grav_comp.cpp
+models/                   gen3_7dof.urdf            (from ~/rtos_testing/7dof.urdf)
+tests/                    *_test.cpp
+cmake/                    FindKortex.cmake aarch64-toolchain.cmake
+scripts/                  rt_setup notes, plot_csv.py
+</code></pre></div>
+<p>Dev loop: author in this repo on the Mac → rsync to <code>abra</code> → build + unit/SimTransport tests there (Kinova powered off → no live-robot runs).</p>
+<h2 id="9-testing-strategy">9. Testing strategy<a class="headerlink" href="#9-testing-strategy" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>SimTransport</code></strong> fake robot (implements <code>Transport</code>): runs the whole executor+mode+dynamics+telemetry pipeline with no robot, models round-trip latency, CI-able.</li>
+<li><strong>Unit (no robot, CI):</strong> <code>Dynamics</code> gravity at known poses + continuous-joint config round-trip; deg↔rad round-trips; SPSC ring correctness + drop counting under load; <code>GravityCompTorqueMode.compute</code> = gravity + position passthrough.</li>
+<li><strong>RT-safety (no robot):</strong> loop on <code>SimTransport</code> asserts zero steady-state page faults / zero heap alloc in hot path.</li>
+<li><strong>Integration (robot, MANUAL, with user present):</strong> static-pose gravity vs measured torques; hold-position; live timing benchmark. Built now, <strong>run together when the user is back</strong> (robot is off).</li>
+<li>Built <strong>test-first</strong> (TDD).</li>
+</ul>
+<h2 id="10-open-items-to-confirm-with-user-robot-powered-off">10. Open items / to confirm with user (robot powered off)<a class="headerlink" href="#10-open-items-to-confirm-with-user-robot-powered-off" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Confirm <code>~/rtos_testing/7dof.urdf</code> is the correct 7-DOF model and includes the actual end-effector payload inertia.</li>
+<li>Robot IP (prototype default <code>192.168.1.10</code>), credentials.</li>
+<li>Run the integration suite together once the Kinova is on.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

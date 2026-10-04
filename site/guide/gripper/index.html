@@ -1,0 +1,1256 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+        <link rel="prev" href="../control-modes/">
+      
+      
+        <link rel="next" href="../arbitration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Gripper - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#gripper" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Gripper
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#not-a-control-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not a control mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-command-position-speed-force" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The command: position, speed, force
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-state-position-effort-current-present" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The state: position, effort, current, present
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-effort-honestly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading effort honestly
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-rides-the-arms-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership rides the arm's token
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-halt-the-gripper-holds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On halt, the gripper holds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-grasp-primitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No grasp primitive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#not-a-control-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not a control mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-command-position-speed-force" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The command: position, speed, force
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-state-position-effort-current-present" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The state: position, effort, current, present
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-effort-honestly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading effort honestly
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-rides-the-arms-token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership rides the arm's token
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-halt-the-gripper-holds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On halt, the gripper holds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#no-grasp-primitive" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        No grasp primitive
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="gripper">Gripper<a class="headerlink" href="#gripper" title="Permanent link">&para;</a></h1>
+<p>The driver commands and reads back the Robotiq 2F-85 mounted on the Gen3's
+wrist. This page is the user-facing story: what you can ask the gripper to do,
+what it tells you back, and the two places where the honest answer is not the
+obvious one. For exact signatures see the
+<a href="../../reference/api/#gripper-gripper_typesh-gripper_controllerh-interfaceportsh">API Reference</a>;
+for ownership mechanics see <a href="../arbitration/">Arbitration</a>.</p>
+<h2 id="not-a-control-mode">Not a control mode<a class="headerlink" href="#not-a-control-mode" title="Permanent link">&para;</a></h2>
+<p>The gripper is <strong>not</strong> a <code>ControlMode</code>. Modes are mutually exclusive — adopting
+one gives up whichever was running — and giving up arm control just to move the
+gripper would be absurd. Instead <code>GripperController</code> decorates <code>Transport</code> and
+stamps the gripper fields onto every outgoing frame, the same shape <code>FeedbackTap</code>
+uses to tap feedback and <code>Arbiter</code> uses to gate a <code>CommandSink</code>.</p>
+<p>That makes the gripper <strong>orthogonal</strong> to whatever mode is driving the arm: you
+can open or close it during a trajectory, mid impedance-hold, or while a
+velocity stream is live. Nothing about the gripper touches mode switching, and
+it adds nothing to the RT-safe surface beyond a fixed-size struct copy.</p>
+<h2 id="the-command-position-speed-force">The command: position, speed, force<a class="headerlink" href="#the-command-position-speed-force" title="Permanent link">&para;</a></h2>
+<p>Every gripper command carries three fields, all normalized <code>0..1</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>position</code></td>
+<td><code>0</code> = open, <code>1</code> = closed</td>
+</tr>
+<tr>
+<td><code>speed</code></td>
+<td>fraction of max closing speed</td>
+</tr>
+<tr>
+<td><code>force</code></td>
+<td>fraction of max — see below</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>force</code> is a ceiling on motor current, not a force setpoint.</strong> The gripper
+closes at <code>speed</code> toward <code>position</code> and stalls once motor current reaches the
+<code>force</code> limit — that is the entire law. There is no force servo on this
+hardware by any path: the SDK's <code>GripperMode</code> enum has no force mode at all,
+and the high-level API that would host one needs a servoing level
+(<code>SINGLE_LEVEL_SERVOING</code>) that is incompatible with the <code>LOW_LEVEL_SERVOING</code>
+this driver's 1 kHz torque control requires. "Grasp with 15 N" is not
+expressible on this arm; "close, but do not push harder than X" is.</p>
+<p><strong>Speed and force do not persist between commands.</strong> Every command is a
+complete setpoint, following the same rule the streaming tier uses for its
+setpoints — an absolute target, never a delta, so a dropped message can never
+change the meaning of the next one. Concretely: set <code>force</code> once and then send
+position-only commands, and you get the <em>default</em> force back (<code>1.0</code> speed,
+<code>0.5</code> force), not your earlier value. A caller that wants a non-default force
+on every command has to say so on every command.</p>
+<p><strong>Percent is not aperture.</strong> The 2F-85's linkage is underactuated — one motor
+driving a four-bar through five mimic joints — which makes aperture-vs-angle
+non-linear. <code>position = 0.5</code> is not "fingers 42.5 mm apart"; treat <code>position</code>
+as a normalized command, not a length.</p>
+<h2 id="the-state-position-effort-current-present">The state: position, effort, current, present<a class="headerlink" href="#the-state-position-effort-current-present" title="Permanent link">&para;</a></h2>
+<p>Feedback mirrors the command's shape minus force, plus a presence flag:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>position</code></td>
+<td><code>0</code> (open) .. <code>1</code> (closed), measured</td>
+</tr>
+<tr>
+<td><code>effort</code></td>
+<td><code>0..1</code>, derived from motor current — see below</td>
+</tr>
+<tr>
+<td><code>current</code></td>
+<td>amps, raw, exactly as reported</td>
+</tr>
+<tr>
+<td><code>present</code></td>
+<td><code>false</code> when no interconnect gripper is attached</td>
+</tr>
+</tbody>
+</table>
+<p><code>present</code> matters because, without it, a missing gripper and a fully-open one
+both report <code>position = 0</code> — a silent mis-mapping the rest of the driver
+refuses to allow elsewhere, so it doesn't allow it here either.</p>
+<p><strong>There is no velocity field.</strong> The hardware's feedback message does carry
+one, but it was measured on the arm to be the <em>commanded</em> speed echoed back —
+unsigned, identical whether opening or closing, and it kept reporting the
+commanded value even while the fingers were being physically stopped by an
+object. A field that carries no information you don't already have is worse
+than no field, because it looks like a measurement — so core removed it rather
+than publish a setpoint echo into a slot that ought to hold one.</p>
+<p>The linkage's underactuation has a second consequence beyond non-linear
+aperture: because the four-bar deviates from its free-space geometry on
+contact so the fingers can wrap an object, <strong>the mimic model is a free-space
+approximation</strong> — TF computed through the fingertips is not trustworthy
+<em>during</em> a grasp. Fine for planning the approach; don't trust it once the
+fingers are loaded.</p>
+<h2 id="reading-effort-honestly">Reading effort honestly<a class="headerlink" href="#reading-effort-honestly" title="Permanent link">&para;</a></h2>
+<p><code>effort</code> is <code>|current| / kGripperMaxCurrentA</code>, a fraction of the gripper's
+measured peak current — not Newtons, and not comparable across grippers. Read
+literally, it produces a result that looks backwards until you've seen the
+trace:</p>
+<ul>
+<li><strong>A grasp spikes, then settles.</strong> Closing on a compliant object, current
+  climbed to <strong>1.00 A</strong> (full scale, <code>effort = 1.0</code>) while the fingers closed,
+  then dropped to about <strong>0.05 A</strong> and held there for as long as the grip was
+  maintained. A <em>sustained</em> grasp reports a <strong>small</strong> effort, not a large one.</li>
+<li><strong>Closing on empty air reports zero.</strong> The gripper reaches the commanded
+  position, stops driving entirely, and current falls to <code>0</code> — it does not
+  hold against the force cap the way it does on contact.</li>
+</ul>
+<p>Anything that keys off "high effort means holding something" is backwards: the
+high number is the brief squeeze during closure, and the number that persists
+while an object is actually held is the low one.</p>
+<h2 id="ownership-rides-the-arms-token">Ownership rides the arm's token<a class="headerlink" href="#ownership-rides-the-arms-token" title="Permanent link">&para;</a></h2>
+<p>The gripper has no ownership of its own — <code>GripperSink</code> is gated by the same
+token as <code>CommandSink</code> and <code>StreamSink</code>. Whoever holds the arm holds the
+gripper; there is no separate grant to request and nothing to reconcile if the
+two ever disagreed, because they can't. See
+<a href="../arbitration/#the-token-lifecycle">Arbitration</a> for how a token is granted
+and revoked.</p>
+<h2 id="on-halt-the-gripper-holds">On halt, the gripper holds<a class="headerlink" href="#on-halt-the-gripper-holds" title="Permanent link">&para;</a></h2>
+<p><strong>On halt — ownership revoked, e-stop, operator request — the gripper stops
+being commanded and keeps whatever grip it has.</strong> E-stop means stop moving,
+and opening the gripper is itself a motion, so halting does not open it.</p>
+<p>State this plainly because it has a real cost: <strong>if the gripper is closed on
+something it should not be, e-stop will not release it.</strong> Releasing needs a
+deliberate open command sent after the halt clears. Anyone standing this
+system up needs to know that before they rely on e-stop to make a bad grasp
+let go.</p>
+<p>The mechanism behind "holds" is worth knowing too, because it is not what it
+sounds like. <code>KortexTransport</code> keeps a persistent cyclic command and
+retransmits it whole, every cycle, regardless of whether the driver's own
+<code>active</code> flag is set — this is <strong>retransmission, not cessation</strong>. So a gripper
+stalled at e-stop does not go idle; it stays <strong>energized, driven against the
+commanded current cap</strong>, continuously re-commanded toward the same target for
+as long as the halt lasts — not merely held by the self-locking linkage. The
+2F-85's linkage <em>is</em> self-locking, so nothing about whether the grip holds
+depends on this — but it is a duty-cycle and thermal consideration for a long
+halt, not a free lunch.</p>
+<h2 id="no-grasp-primitive">No grasp primitive<a class="headerlink" href="#no-grasp-primitive" title="Permanent link">&para;</a></h2>
+<p>There is no <code>Grasp</code> action and no stall detection. The gripper tier is
+topic-only: send a setpoint, read state back, decide for yourself whether you
+got what you asked for.</p>
+<p>If you want to build one, the measurement points at the simplest possible
+check. Commanding the gripper fully closed (<code>position = 1.0</code>), it settles at
+<strong><code>0.8333</code></strong> when closing on an object and at <strong><code>0.9912</code></strong> on empty air. "The
+gripper stopped short of the commanded target" separates the two cases with no
+effort threshold at all — effort doesn't help here, since a sustained grasp's
+effort is low (see above) and would need a floor tuned against noise. Start
+from position, not effort.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../arbitration/">Arbitration</a> — the token the gripper rides, and what
+  revocation and e-stop do to it.</li>
+<li><a href="../control-modes/">Control Modes</a> — why the gripper is deliberately not one
+  of these.</li>
+<li><a href="../../reference/api/#gripper-gripper_typesh-gripper_controllerh-interfaceportsh">API Reference</a> —
+  <code>GripperCommand</code>, <code>GripperFeedback</code>, <code>GripperController</code>, <code>GripperSink</code>,
+  <code>GripperSetpoint</code>, <code>GripperState</code>.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

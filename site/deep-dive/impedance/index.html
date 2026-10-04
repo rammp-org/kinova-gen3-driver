@@ -1,0 +1,1372 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+        <link rel="prev" href="../../reference/api/">
+      
+      
+        <link rel="next" href="../trajectory-interpolation/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Cartesian Impedance - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#deep-dive-cartesian-impedance" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Cartesian Impedance
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-control-law" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The control law
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pose-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pose error
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frames-why-the-pieces-line-up-frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frames — why the pieces line up {#frames}
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frames — why the pieces line up {#frames}">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validating-it-numerically" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validating it numerically
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nullspace-posture-redundancy-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nullspace posture (redundancy resolution)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Nullspace posture (redundancy resolution)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-n-annihilates-the-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why N annihilates the task
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#damping-for-singularity-robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Damping for singularity robustness
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-entry-ramp-gravity-is-always-full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The entry ramp — gravity is always full
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#real-time-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-time safety
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Real-time safety">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#redundant-forward-passes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redundant forward passes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-targets-gains-without-races" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live targets &amp; gains without races
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-control-law" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The control law
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-pose-error" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pose error
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frames-why-the-pieces-line-up-frames" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frames — why the pieces line up {#frames}
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Frames — why the pieces line up {#frames}">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validating-it-numerically" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validating it numerically
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nullspace-posture-redundancy-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nullspace posture (redundancy resolution)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Nullspace posture (redundancy resolution)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-n-annihilates-the-task" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why N annihilates the task
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#damping-for-singularity-robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Damping for singularity robustness
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-entry-ramp-gravity-is-always-full" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The entry ramp — gravity is always full
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#real-time-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Real-time safety
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Real-time safety">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#redundant-forward-passes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redundant forward passes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#live-targets-gains-without-races" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Live targets &amp; gains without races
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="deep-dive-cartesian-impedance">Deep Dive: Cartesian Impedance<a class="headerlink" href="#deep-dive-cartesian-impedance" title="Permanent link">&para;</a></h1>
+<p>This page derives the Cartesian impedance control law as implemented in
+<code>CartesianImpedanceMode</code>, explains the frame conventions that make it consistent,
+the nullspace redundancy resolution, the safety ramp, and the real-time-safety
+design. For the conceptual overview see the
+<a href="../../guide/control-modes/">Control Modes guide</a>; for signatures, the
+<a href="../../reference/api/">API Reference</a>.</p>
+<p>The canonical design record is the spec and plan under <code>docs/superpowers/</code>.</p>
+<h2 id="the-control-law">The control law<a class="headerlink" href="#the-control-law" title="Permanent link">&para;</a></h2>
+<p>Per cycle, given joint position <code>q</code> and velocity <code>q̇</code>, a target tool pose <code>x_d</code>,
+and gain matrices <code>Kx</code>, <code>Dx</code>:</p>
+<div class="highlight"><pre><span></span><code>x          = fk(q)                        # current tool pose  (SE(3))
+J          = jacobian(q)                  # 6×7, LOCAL_WORLD_ALIGNED
+ẋ          = J · q̇                        # tool spatial velocity (6×1)
+e          = pose_error(x_d, x)           # decoupled SE(3) error (6×1)
+F          = Kx ∘ e  −  Dx ∘ ẋ            # task wrench (6×1)
+τ_active   = Jᵀ · F  +  τ_null            # joint torque from task + nullspace
+τ          = g(q)  +  ramp(t) · τ_active  # gravity ALWAYS full
+τ_out      = clamp(τ, ±τ_limit)
+</code></pre></div>
+<p><code>∘</code> is elementwise (diagonal gains). <code>g(q)</code> is the generalized gravity torque.
+This is the classic <strong>operational-space impedance</strong> law in its <code>Jᵀ</code>-stiffness
+form: a diagonal spring–damper in task space, mapped to joint torques by the
+Jacobian transpose, plus full gravity compensation. v1 does <strong>not</strong> shape the
+apparent inertia (no <code>Λ = (J M⁻¹ Jᵀ)⁻¹</code> term) — that would require the mass
+matrix and is a documented future extension; the <code>Jᵀ</code> form is the robust,
+standard starting point.</p>
+<h2 id="the-pose-error">The pose error<a class="headerlink" href="#the-pose-error" title="Permanent link">&para;</a></h2>
+<p><code>pose_error(x_d, x)</code> returns the <strong>decoupled geometric error</strong></p>
+<div class="highlight"><pre><span></span><code>e = [ p_d − p ;  rotvec(R_d · R⁻¹) ]
+</code></pre></div>
+<p>— position difference in the world frame, stacked with the orientation error as a
+<strong>rotation vector</strong> (axis·angle) of the relative rotation <code>R_d R⁻¹</code>. The
+implementation takes the relative quaternion, flips it to the <code>w ≥ 0</code> hemisphere
+(shortest geodesic), and converts to axis·angle. It is singularity-free for
+orientation errors below π.</p>
+<p>We deliberately use this decoupled error rather than the full <code>se(3)</code> <code>log6</code>
+(which couples translation and rotation through the left Jacobian). The decoupled
+form pairs naturally with a <strong>diagonal</strong> world-frame stiffness — independent XYZ
+and rotational gains, which is what users expect to dial — and it keeps the error
+metric a small Eigen-only helper, leaving <code>Dynamics</code> a pure rigid-body query unit.</p>
+<h2 id="frames-why-the-pieces-line-up-frames">Frames — why the pieces line up {#frames}<a class="headerlink" href="#frames-why-the-pieces-line-up-frames" title="Permanent link">&para;</a></h2>
+<p>Everything is expressed in <strong>world-aligned axes at the tool origin</strong>, and that
+consistency is what makes the law correct without stray rotations:</p>
+<ul>
+<li><code>jacobian()</code> uses Pinocchio's <strong><code>LOCAL_WORLD_ALIGNED</code></strong> reference frame, so
+  <code>ẋ = J q̇</code> is the tool's spatial velocity (linear velocity of the origin and
+  angular velocity) expressed in world-aligned axes.</li>
+<li><code>fk()</code> returns the tool pose in the world frame, and <code>pose_error</code> returns the
+  position error in the world frame and the orientation error as a world-frame
+  rotation vector.</li>
+<li>The diagonal gains <code>Kx</code>, <code>Dx</code> are therefore world-frame gains: <code>Kx[0..2]</code> act
+  on world X/Y/Z translation, <code>Kx[3..5]</code> on world rotation about X/Y/Z.</li>
+</ul>
+<p>Because <code>F</code> lives in the same frame the Jacobian maps to/from, <code>Jᵀ F</code> is the
+correct joint torque for that wrench — no extra frame transform is needed. (If you
+ever wanted stiffness defined in the <em>tool</em> frame instead of world-aligned, that's
+a small variant: rotate <code>e</code> and <code>ẋ</code> into the tool frame, apply the gains, rotate
+<code>F</code> back — or use <code>LOCAL</code> Jacobian throughout.)</p>
+<h3 id="validating-it-numerically">Validating it numerically<a class="headerlink" href="#validating-it-numerically" title="Permanent link">&para;</a></h3>
+<p>A frame or sign mistake in <code>fk</code>/<code>jacobian</code> would be invisible to a test that
+recomputes the law with the same primitives. The anchor is the <strong>finite-difference
+Jacobian test</strong>: it perturbs each joint, recomputes <code>fk</code>, and compares the
+numerical <code>Δpose/Δq</code> (linear part from position, angular part from the rotation
+vector of the relative rotation) against the analytic Jacobian column — to 1e-4,
+independent of Pinocchio's conventions. That test pins both <code>fk</code> and <code>jacobian</code>.</p>
+<h2 id="nullspace-posture-redundancy-resolution">Nullspace posture (redundancy resolution)<a class="headerlink" href="#nullspace-posture-redundancy-resolution" title="Permanent link">&para;</a></h2>
+<p>The Gen3 has 7 DOF but a tool pose is 6 DOF, leaving a <strong>1-DOF redundancy</strong> (the
+elbow can swing while the tool stays put). Left alone, the elbow drifts. We add a
+secondary joint-space posture torque</p>
+<div class="highlight"><pre><span></span><code>τ0 = nullspace_kp · (q_rest − q)  −  nullspace_kd · q̇
+</code></pre></div>
+<p>(a PD law pulling toward the rest posture captured at entry) and <strong>project it into
+the nullspace of the task</strong> so it produces no tool wrench:</p>
+<div class="highlight"><pre><span></span><code>τ_null = N · τ0,        N = I − Jᵀ (Jᵀ)⁺
+</code></pre></div>
+<h3 id="why-n-annihilates-the-task">Why <code>N</code> annihilates the task<a class="headerlink" href="#why-n-annihilates-the-task" title="Permanent link">&para;</a></h3>
+<p>With <code>Jᵀ</code> of full column rank (rank 6), the Moore–Penrose pseudo-inverse is
+<code>(Jᵀ)⁺ = (J Jᵀ)⁻¹ J</code>, so</p>
+<div class="highlight"><pre><span></span><code>J · N = J − J Jᵀ (J Jᵀ)⁻¹ J = J − J = 0.
+</code></pre></div>
+<p>Thus any secondary torque mapped through <code>N</code> lies in <code>null(J)</code> and produces <strong>zero
+task-space motion/wrench</strong> — the elbow moves toward <code>q_rest</code> without disturbing the
+tool. <code>N</code> is also a true projector (<code>N² = N</code>). The unit test
+<code>ProjectorAnnihilatesTaskSpace</code> checks both <code>‖J N‖ ≈ 0</code> and <code>‖N² − N‖ ≈ 0</code> with the
+<strong>undamped</strong> projector (exact to machine precision at a non-singular pose);
+<code>PostureTorqueProducesNoTaskWrench</code> checks the live damped path produces <code>‖J·Δτ‖ ≈ 0</code>.</p>
+<h3 id="damping-for-singularity-robustness">Damping for singularity robustness<a class="headerlink" href="#damping-for-singularity-robustness" title="Permanent link">&para;</a></h3>
+<p>Near a kinematic singularity <code>J Jᵀ</code> becomes ill-conditioned and the exact inverse
+blows up. We use a <strong>damped (Levenberg–Marquardt) pseudo-inverse</strong>:</p>
+<div class="highlight"><pre><span></span><code>(Jᵀ)⁺ = (J Jᵀ + λ²I)⁻¹ J,     λ = pinv_damping (default 1e-3)
+</code></pre></div>
+<p>The <code>λ²I</code> keeps <code>J Jᵀ + λ²I</code> strictly positive definite for any <code>J</code>, so the
+fixed-size LDLT solve is always well-defined. Damping makes the projector
+<em>approximate</em> (<code>J N = λ²(J Jᵀ + λ²I)⁻¹ J = O(λ²)</code> instead of exactly 0) — an
+intentional trade of a tiny task-space leak for boundedness near singularities.
+The <code>--dry-run</code> tool reports the Jacobian condition number so you can see when
+you're approaching one.</p>
+<h2 id="the-entry-ramp-gravity-is-always-full">The entry ramp — gravity is always full<a class="headerlink" href="#the-entry-ramp-gravity-is-always-full" title="Permanent link">&para;</a></h2>
+<p>Entering impedance with full stiffness against a small initial error would jolt
+the arm. The active wrench (task term + nullspace) is therefore <strong>ramped in</strong>:</p>
+<div class="highlight"><pre><span></span><code>ramp(t) = min(1, t_since_enter / gain_ramp_s)        # 0 → 1 over gain_ramp_s
+τ = g(q) + ramp(t) · τ_active
+</code></pre></div>
+<p>Crucially the ramp multiplies <strong>only</strong> <code>τ_active</code>; gravity <code>g(q)</code> is applied in
+full from the very first cycle. Ramping the whole torque (gravity included) would
+make the arm sag during the fade-in. The ramp uses elapsed-at-start-of-cycle then
+advances by <code>dt</code>, so the first cycle after <code>on_enter</code> is pure gravity comp, and
+<code>gain_ramp_s ≤ 0</code> short-circuits to full immediately. <code>on_enter</code> resets the ramp,
+so re-entering the mode re-ramps cleanly.</p>
+<p>The per-joint clamp is applied <strong>after</strong> the ramp. Saturation can break the exact
+nullspace orthogonality — that's an accepted trade: safety (a hard torque bound)
+takes precedence over the projection.</p>
+<h2 id="real-time-safety">Real-time safety<a class="headerlink" href="#real-time-safety" title="Permanent link">&para;</a></h2>
+<p><code>compute()</code> runs on the 1 kHz RT thread and must never allocate, lock, or block.</p>
+<ul>
+<li><strong>No heap.</strong> Every quantity is fixed-size: <code>Jacobian6</code> (6×7), <code>Vector6</code>,
+  <code>JointVec</code> (7×1), and the nullspace temporaries <code>J Jᵀ</code> (6×6), <code>(Jᵀ)⁺</code> (6×7),
+  <code>N</code> (7×7). The damped pseudo-inverse uses Eigen's <strong>fixed-size LDLT</strong>
+  (<code>Matrix&lt;double,6,6&gt;::ldlt().solve(...)</code>), whose internal storage is stack-
+  resident — no dynamic allocation. <code>Dynamics</code> preallocates Pinocchio's <code>Data</code> in
+  its constructor, so <code>gravity</code>/<code>fk</code>/<code>jacobian</code> allocate nothing per call.</li>
+<li><strong>Empirically verified.</strong> <code>RtSafety.ImpedanceModeNoMajorFaultsSteadyState</code> runs
+  the mode (nullspace on) through the executor on the sim transport and asserts
+  <strong>zero major page faults</strong> in the steady-state window and zero dropped telemetry
+  — i.e. the whole FK + Jacobian + gravity + LDLT path touches no new memory once
+  warmed up.</li>
+<li><strong>Measured cost:</strong> p50 ≈ 2 µs, p99 ≈ 4 µs per cycle on a Jetson AGX Orin — well
+  inside the 1 ms budget.</li>
+</ul>
+<h3 id="redundant-forward-passes">Redundant forward passes<a class="headerlink" href="#redundant-forward-passes" title="Permanent link">&para;</a></h3>
+<p><code>fk()</code>, <code>jacobian()</code>, and <code>gravity()</code> each run their own kinematic-tree pass, so
+calling all three per cycle repeats the forward pass 2–3×. At 7-DOF and the cost
+above this is comfortably affordable, so the methods stay <strong>granular</strong> (clean,
+independently testable). A fused single-pass <code>evaluate(q, q̇) → {pose, J, g}</code> is a
+documented future optimization if profiling ever demands it.</p>
+<h2 id="live-targets-gains-without-races">Live targets &amp; gains without races<a class="headerlink" href="#live-targets-gains-without-races" title="Permanent link">&para;</a></h2>
+<p><code>set_target</code> and <code>set_gains</code> are called from a non-RT supervisor thread while
+<code>compute()</code> reads on the RT thread. They publish via <strong>lock-free double-buffers</strong>:
+the writer fills the inactive slot, then flips an atomic index with a release
+store; the reader acquire-loads the index and takes a <strong>value snapshot</strong> of the
+slot. <code>compute()</code> copies the gains snapshot once at the top of the cycle rather
+than holding a reference, so a burst of <code>set_gains</code> calls can never tear a read
+mid-cycle.</p>
+<p>One subtlety: the "is there an external target?" flag is written by both
+<code>set_target</code> (non-RT, sets true) and <code>on_enter</code> (RT, sets false on entry). Both are
+release-stores to an <code>atomic&lt;bool&gt;</code>, and the target payload is always published
+(release) <em>before</em> the flag flips, so the reader's acquire-load sees a consistent
+target. The race is benign: at worst the loop uses the entry-hold pose for one
+extra cycle. This is exactly the seam a future front-end/IPC server plugs into,
+where the single non-RT writer is the server thread.</p>
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../../guide/control-modes/">Control Modes guide</a> — conceptual overview &amp; tuning.</li>
+<li><a href="../../reference/api/">API Reference</a> — exact signatures.</li>
+<li><code>docs/superpowers/specs/2026-06-16-cartesian-impedance-controller-design.md</code> —
+  the design spec.</li>
+<li><code>docs/superpowers/plans/2026-06-16-cartesian-impedance-controller.md</code> — the
+  task-by-task implementation plan.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

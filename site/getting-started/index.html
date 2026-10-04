@@ -1,0 +1,1173 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Durable C++17 driver for Kinova Gen3 7-DOF low-level control at 1 kHz — joint torque, Cartesian and joint impedance, position and velocity modes, on a PREEMPT_RT Jetson">
+      
+      
+      
+      
+        <link rel="prev" href="..">
+      
+      
+        <link rel="next" href="../guide/control-modes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Getting Started - Kinova Gen3 Low-Level Driver</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#getting-started" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Kinova Gen3 Low-Level Driver" class="md-header__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Kinova Gen3 Low-Level Driver
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Getting Started
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Kinova Gen3 Low-Level Driver" class="md-nav__button md-logo" aria-label="Kinova Gen3 Low-Level Driver" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Kinova Gen3 Low-Level Driver
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-build-sim-only-the-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build (sim-only, the default)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-run-a-control-mode-in-sim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run a control mode in sim
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-drive-a-mode-from-your-own-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Drive a mode from your own C++
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-before-real-hardware-validate-read-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Before real hardware: validate read-only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/control-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Control Modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/gripper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gripper
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/arbitration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Arbitration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/streaming/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deep Dive
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Deep Dive
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deep-dive/impedance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cartesian Impedance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deep-dive/trajectory-interpolation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Trajectory Interpolation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deep-dive/velocity-mode/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Velocity-Mode Twist Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rt-tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Real-Time Tuning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration-runbook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Runbook
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-build-sim-only-the-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build (sim-only, the default)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-run-a-control-mode-in-sim" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Run a control mode in sim
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-drive-a-mode-from-your-own-c" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Drive a mode from your own C++
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-before-real-hardware-validate-read-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Before real hardware: validate read-only
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h1>
+<p>This guide gets you from a clean checkout to a control mode running against the
+<strong>simulation transport</strong> (no robot), then shows how to drive a mode from your own
+C++ and how to validate a real arm read-only before any torque.</p>
+<blockquote>
+<p>The driver is currently consumed as a <strong>C++ library</strong> linked into your own RT
+program. A higher-level front-end/IPC server (so non-C++ clients can drive it
+over a process boundary) is on the <a href="../#status--roadmap">roadmap</a> — when it
+lands, this page will grow a client-API section.</p>
+</blockquote>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li>An <strong>aarch64 Jetson</strong> with a <strong>PREEMPT_RT</strong> kernel (developed on Linux
+  5.15-rt-tegra). The driver builds natively on the Jetson; it does <strong>not</strong> build
+  on macOS (the KORTEX SDK and RT syscalls are Linux-only).</li>
+<li>Dependencies installed on the Jetson:</li>
+<li><strong>Pinocchio</strong> (pip/cmeel) — point CMake at its prefix.</li>
+<li><strong>Eigen 3.4</strong>, <strong>Boost</strong>, <strong>urdfdom</strong> (pulled in by Pinocchio).</li>
+<li><strong>GoogleTest</strong> (for the unit tests).</li>
+<li><strong>KORTEX C++ SDK</strong> — only for the real-robot build; see the
+    <a href="../README.md#kortex-c-sdk-for-the-real-robot-build">README</a>.</li>
+</ul>
+<h2 id="1-build-sim-only-the-default">1. Build (sim-only, the default)<a class="headerlink" href="#1-build-sim-only-the-default" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>kinova-gen3-driver
+cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DCMAKE_PREFIX_PATH<span class="o">=</span>/usr/local/lib/python3.10/dist-packages/cmeel.prefix<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="o">&amp;&amp;</span><span class="w"> </span>cmake<span class="w"> </span>--build<span class="w"> </span>build<span class="w"> </span>-j
+ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>--output-on-failure<span class="w">      </span><span class="c1"># unit + sim-integration + RT-safety tests</span>
+</code></pre></div>
+<p><code>CMAKE_PREFIX_PATH</code> points at wherever pip installed Pinocchio's cmeel prefix
+(adjust the Python version). The default build is <strong>sim-only</strong> — no KORTEX
+required. The real-robot path is opt-in via <code>-DKINOVA_ENABLE_KORTEX=ON</code>.</p>
+<h2 id="2-run-a-control-mode-in-sim">2. Run a control mode in sim<a class="headerlink" href="#2-run-a-control-mode-in-sim" title="Permanent link">&para;</a></h2>
+<p>Each mode ships a benchmark app that runs it through the <code>RtExecutor</code> and reports
+per-cycle timing. No robot is involved.</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>build
+
+<span class="c1"># Gravity compensation (JointTorqueMode with no feedforward)</span>
+./benchmark_grav_comp<span class="w"> </span>--sim<span class="w"> </span>--urdf<span class="w"> </span>../models/gen3_7dof_2f85.urdf<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--ee-frame<span class="w"> </span>gen3_end_effector_link<span class="w"> </span>--rate<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--duration<span class="w"> </span><span class="m">5</span>
+
+<span class="c1"># Cartesian impedance (holds the entry pose; push -&gt; springs back)</span>
+./benchmark_cartesian_impedance<span class="w"> </span>--sim<span class="w"> </span>--urdf<span class="w"> </span>../models/gen3_7dof_2f85.urdf<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rate<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--duration<span class="w"> </span><span class="m">5</span>
+
+<span class="c1"># Joint velocity, EE-twist path (--kind joint drives the native pass-through)</span>
+./benchmark_joint_velocity<span class="w"> </span>--sim<span class="w"> </span>--urdf<span class="w"> </span>../models/gen3_7dof_2f85.urdf<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rate<span class="w"> </span><span class="m">1000</span><span class="w"> </span>--duration<span class="w"> </span><span class="m">5</span><span class="w"> </span>--kind<span class="w"> </span>twist
+</code></pre></div>
+<p>You'll see ~1 Hz console lines (loop rate, cycle/compute percentiles, overruns,
+dropped) and a final report. <strong>What good looks like:</strong> rate ≈ 1000 Hz,
+<code>overruns ≈ 0</code>, <code>faults = 0</code>, <code>dropped = 0</code>, <code>majflt+=0</code>. With the sim transport
+the impedance compute reports <strong>p50 ≈ 2 µs</strong>.</p>
+<blockquote>
+<p>Use <code>models/gen3_7dof_2f85.urdf</code> (arm <strong>with</strong> the Robotiq 2F-85 gripper as a
+fixed payload). Running the bare-arm URDF with a gripper mounted
+under-compensates gravity and the arm sags. Match the URDF to the hardware.</p>
+</blockquote>
+<h2 id="3-drive-a-mode-from-your-own-c">3. Drive a mode from your own C++<a class="headerlink" href="#3-drive-a-mode-from-your-own-c" title="Permanent link">&para;</a></h2>
+<p>A control mode plugs into the <code>RtExecutor</code>. Minimal program (sim transport):</p>
+<div class="highlight"><pre><span></span><code><span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;atomic&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;thread&gt;</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/dynamics.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/cartesian_impedance_mode.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/rt_executor.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/sim_transport.h"</span>
+<span class="cp">#include</span><span class="w"> </span><span class="cpf">"kinova_lowlevel/telemetry.h"</span>
+<span class="k">using</span><span class="w"> </span><span class="k">namespace</span><span class="w"> </span><span class="nn">kinova</span><span class="p">;</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c1">// 1. Dynamics from the URDF (validates the model + EE frame at construction).</span>
+<span class="w">  </span><span class="n">Dynamics</span><span class="w"> </span><span class="n">dyn</span><span class="p">(</span><span class="s">"models/gen3_7dof_2f85.urdf"</span><span class="p">);</span><span class="w">      </span><span class="c1">// default EE frame: gen3_end_effector_link</span>
+
+<span class="w">  </span><span class="c1">// 2. A transport. SimTransport is a fake robot; swap in KortexTransport(ip) for real hardware.</span>
+<span class="w">  </span><span class="n">JointFeedback</span><span class="w"> </span><span class="n">init</span><span class="p">;</span><span class="w">                               </span><span class="c1">// zero state</span>
+<span class="w">  </span><span class="n">SimTransport</span><span class="w"> </span><span class="n">transport</span><span class="p">(</span><span class="n">init</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// 3. Telemetry ring (drained on a non-RT thread).</span>
+<span class="w">  </span><span class="n">SampleRing</span><span class="w"> </span><span class="n">ring</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="mi">16</span><span class="p">);</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="w"> </span><span class="n">draining</span><span class="p">{</span><span class="nb">true</span><span class="p">};</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">drain</span><span class="p">([</span><span class="o">&amp;</span><span class="p">]{</span><span class="w"> </span><span class="n">CycleSample</span><span class="w"> </span><span class="n">s</span><span class="p">;</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">draining</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="n">ring</span><span class="p">.</span><span class="n">pop</span><span class="p">(</span><span class="n">s</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="cm">/* log s */</span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">});</span>
+
+<span class="w">  </span><span class="c1">// 4. The control mode (holds the pose captured at entry, compliantly).</span>
+<span class="w">  </span><span class="n">CartesianImpedanceParams</span><span class="w"> </span><span class="n">params</span><span class="p">;</span><span class="w">                  </span><span class="c1">// sensible defaults; tune Kx/Dx on hardware</span>
+<span class="w">  </span><span class="n">CartesianImpedanceMode</span><span class="w"> </span><span class="n">mode</span><span class="p">(</span><span class="n">dyn</span><span class="p">,</span><span class="w"> </span><span class="n">params</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// 5. The executor owns the RT thread. cpu=-1 =&gt; no pinning; priority 80.</span>
+<span class="w">  </span><span class="n">transport</span><span class="p">.</span><span class="n">connect</span><span class="p">();</span>
+<span class="w">  </span><span class="n">transport</span><span class="p">.</span><span class="n">set_servoing_low_level</span><span class="p">();</span>
+<span class="w">  </span><span class="n">RtExecutor</span><span class="w"> </span><span class="n">ex</span><span class="p">(</span><span class="n">transport</span><span class="p">,</span><span class="w"> </span><span class="n">ring</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="cm">/*rate_hz*/</span><span class="w"> </span><span class="mf">1000.0</span><span class="p">,</span><span class="w"> </span><span class="n">Pacing</span><span class="o">::</span><span class="n">kSleepSpin</span><span class="p">,</span><span class="w"> </span><span class="cm">/*RtConfig*/</span><span class="w"> </span><span class="p">{</span><span class="mi">80</span><span class="p">,</span><span class="w"> </span><span class="mi">-1</span><span class="p">,</span><span class="w"> </span><span class="nb">true</span><span class="p">}</span><span class="w"> </span><span class="p">});</span>
+<span class="w">  </span><span class="n">ex</span><span class="p">.</span><span class="n">request_mode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mode</span><span class="p">);</span>
+
+<span class="w">  </span><span class="c1">// 6. Run the loop until stopped (here: a separate thread stops it after 5 s).</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">atomic</span><span class="o">&lt;</span><span class="kt">bool</span><span class="o">&gt;</span><span class="w"> </span><span class="n">stop</span><span class="p">{</span><span class="nb">false</span><span class="p">};</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="kr">thread</span><span class="w"> </span><span class="n">timer</span><span class="p">([</span><span class="o">&amp;</span><span class="p">]{</span><span class="w"> </span><span class="n">std</span><span class="o">::</span><span class="n">this_thread</span><span class="o">::</span><span class="n">sleep_for</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">chrono</span><span class="o">::</span><span class="n">seconds</span><span class="p">(</span><span class="mi">5</span><span class="p">));</span><span class="w"> </span><span class="n">stop</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">;</span><span class="w"> </span><span class="p">});</span>
+<span class="w">  </span><span class="n">ex</span><span class="p">.</span><span class="n">run</span><span class="p">(</span><span class="n">stop</span><span class="p">);</span><span class="w">                                     </span><span class="c1">// blocks on this (RT) thread</span>
+
+<span class="w">  </span><span class="n">transport</span><span class="p">.</span><span class="n">safe_shutdown</span><span class="p">();</span>
+<span class="w">  </span><span class="n">timer</span><span class="p">.</span><span class="n">join</span><span class="p">();</span>
+<span class="w">  </span><span class="n">draining</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">false</span><span class="p">;</span><span class="w"> </span><span class="n">drain</span><span class="p">.</span><span class="n">join</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>To <strong>change the target or gains at runtime</strong> (e.g. from a supervisor thread),
+call the non-RT setters — they publish lock-free snapshots the RT loop reads each
+cycle:</p>
+<div class="highlight"><pre><span></span><code><span class="n">Pose</span><span class="w"> </span><span class="n">target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">dyn</span><span class="p">.</span><span class="n">fk</span><span class="p">(</span><span class="n">some_q</span><span class="p">);</span><span class="w">   </span><span class="c1">// or build an SE(3) pose directly</span>
+<span class="n">target</span><span class="p">.</span><span class="n">p</span><span class="p">.</span><span class="n">x</span><span class="p">()</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mf">0.05</span><span class="p">;</span><span class="w">           </span><span class="c1">// shift the tool +5 cm in world X</span>
+<span class="n">mode</span><span class="p">.</span><span class="n">set_target</span><span class="p">(</span><span class="n">target</span><span class="p">);</span><span class="w">        </span><span class="c1">// arm springs toward the new pose</span>
+<span class="n">mode</span><span class="p">.</span><span class="n">set_gains</span><span class="p">(</span><span class="n">stiffer_params</span><span class="p">);</span><span class="w"> </span><span class="c1">// retune online</span>
+</code></pre></div>
+<p>See the <a href="../guide/control-modes/">Control Modes guide</a> for what each mode does and
+the <a href="../reference/api/">API Reference</a> for exact signatures.</p>
+<h2 id="4-before-real-hardware-validate-read-only">4. Before real hardware: validate read-only<a class="headerlink" href="#4-before-real-hardware-validate-read-only" title="Permanent link">&para;</a></h2>
+<p>Torque control on a real arm is <strong>attended-only</strong>. The impedance app has a
+<code>--dry-run</code> that <strong>connects and reads feedback only</strong> — it never enters low-level
+servoing and never commands torque. Use it to confirm the URDF/frame match the
+real arm (move it by pendant and watch the reported pose / Jacobian condition):</p>
+<div class="highlight"><pre><span></span><code>./benchmark_cartesian_impedance<span class="w"> </span>--ip<span class="w"> </span><span class="m">192</span>.168.1.10<span class="w"> </span>--dry-run<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--urdf<span class="w"> </span>../models/gen3_7dof_2f85.urdf<span class="w"> </span>--duration<span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+<p>Then follow the <a href="../integration-runbook/">Integration Runbook</a> for the full,
+conservative bring-up (low scale, low torque limit, e-stop in reach). Tune the
+Jetson first per <a href="../rt-tuning/">Real-Time Tuning</a>.</p>
+<h2 id="next">Next<a class="headerlink" href="#next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../guide/control-modes/">Control Modes guide</a> — gravity-comp and impedance,
+  conceptually.</li>
+<li><a href="../reference/api/">API Reference</a> — every public type and signature.</li>
+<li><a href="../deep-dive/impedance/">Deep Dive: Impedance</a> — the math and the RT-safety
+  design.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
