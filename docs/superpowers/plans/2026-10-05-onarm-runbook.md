@@ -25,8 +25,14 @@ execution + feedforward + the gains contract on every surface.)
   the rammp-base image's compiled interfaces copy is 1.1.0 and lacks GainsSpec.
   (That branch is based on origin/main, not the stale local main.)
 - kinova_arm_ros2 branch: `feat/compliant-everything` (off dev).
-- colcon build + colcon test were NOT run anywhere yet (no ROS 2 on the dev
-  laptop) — they are the FIRST gate tomorrow, before anything touches the arm.
+- UPDATE (evening 2026-10-04): the Jetson gate ALREADY RAN in the v13-ws
+  container. Build: 5 packages green, KORTEX ON (rammp_curobo_interfaces
+  v1.1.0 added to src — the repos-file vendoring step doesn't run in this
+  workspace). Tests: driver 366 total, 365 green + 1 load-flake
+  (ASustainedIkFaultTearsDownThePoseSession, 3/3 green isolated); node suites
+  green after a test-only fix (double future.get()), plus one PRE-EXISTING
+  arbitration flake (ReleaseWithMatchingTokenRevokes, DDS discovery under
+  parallel load; green isolated). Tomorrow can start at §2 A1 directly.
 
 ## 1. Safety prechecks (before any torque)
 
@@ -35,9 +41,8 @@ execution + feedforward + the gains contract on every surface.)
   sync over /home/abra/kinova-gen3-driver; hil-sync to a distinct dir.
 - NIC coalescing after any reboot: `ethtool -c eno1` → rx-usecs must be 8
   (chronic regression eats 80% of the 1 kHz budget; fix: rx-usecs 8 rx-frames 1).
-- Driver unit suite + rt_safety_test ON THE JETSON before the arm moves:
-  `ctest --test-dir build --output-on-failure` (aarch64 is the real platform;
-  x86 green ≠ Jetson green).
+- Driver unit suite + rt_safety_test on the Jetson: DONE 2026-10-04 evening
+  (see §0b). Re-run only if the tree changes.
 - Jetson benchmark before/after percentiles for the feedforward delta:
   `./build/benchmark_joint_impedance --sim --rate 1000 --duration 10 --track`
   (record; x86 said "noise floor" — confirm on the RT platform).
