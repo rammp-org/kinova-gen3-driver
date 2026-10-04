@@ -831,8 +831,8 @@ TEST(Supervisor, StreamOpenRefusesABadRequestBeforeSwitchingModes) {
   interface::StreamOpenRequest negative;
   negative.timeout_s = -1.0;
   EXPECT_FALSE(f.sup.on_stream_open(negative).accepted);
-  interface::StreamOpenRequest bad_pair;  // velocity needs Plan 2
-  bad_pair.kind = interface::SetpointKind::kJointVelocity;
+  interface::StreamOpenRequest bad_pair;  // torque setpoints only drive torque mode
+  bad_pair.kind = interface::SetpointKind::kJointTorque;
   bad_pair.control_mode = interface::ControlModeKind::kImpedance;
   bad_pair.timeout_s = 1.0;
   EXPECT_FALSE(f.sup.on_stream_open(bad_pair).accepted);
@@ -1834,4 +1834,55 @@ TEST(SupervisorGains, SetGainsRejectsCircularAndInvalidSpecs) {
   const interface::GainsResult r2 = f.sup.on_set_gains(gr);
   EXPECT_FALSE(r2.accepted);
   EXPECT_FALSE(r2.message.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Compliant velocity/twist (Plan 3, #63): the velocity kinds may open in
+// impedance, and the session runs the impedance mode, not the velocity mode.
+// ---------------------------------------------------------------------------
+
+TEST(Supervisor, CompliantVelocityAndTwistStreamsOpenInImpedance) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.5;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::StreamStatus st = f.sup.on_query_stream();
+  EXPECT_TRUE(st.open);
+  EXPECT_EQ(st.kind, interface::SetpointKind::kJointVelocity);
+  EXPECT_EQ(st.control_mode, interface::ControlModeKind::kImpedance);
+  f.sup.on_stream_close({});
+
+  r.kind = interface::SetpointKind::kEeTwist;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  st = f.sup.on_query_stream();
+  EXPECT_TRUE(st.open);
+  EXPECT_EQ(st.kind, interface::SetpointKind::kEeTwist);
+  EXPECT_EQ(st.control_mode, interface::ControlModeKind::kImpedance);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+}
+
+TEST(SupervisorGains, GainsAtOpenApplyToACompliantVelocityStream) {
+  // The gains-at-open logic keys on the CONTROL MODE, so the new pairs get it
+  // for free -- this test pins that down rather than assuming it.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.5;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
 }

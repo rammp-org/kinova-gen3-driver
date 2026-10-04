@@ -7,6 +7,9 @@ namespace kinova::interface {
 
 // Which (setpoint shape, control mode) pairs this driver can actually execute.
 // Anything off the table is refused at open rather than silently degraded.
+// The velocity kinds (joint velocity, EE twist) run in kVelocity (stiff) or
+// kImpedance (compliant -- the Supervisor integrates them into a leashed
+// joint reference for JointImpedanceMode, #63).
 bool pair_supported(SetpointKind, ControlModeKind);
 
 // The streaming tier's lifecycle, as pure logic over injected time.
