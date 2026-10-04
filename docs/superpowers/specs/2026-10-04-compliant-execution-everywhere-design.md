@@ -169,12 +169,11 @@ This **is** a breaking change, in two places:
 The consumer set is closed and version-pinned (`kinova_gen3.repos` pins exact
 driver tags; the deployment chain pins images), and precedent exists: the
 arbitration round broke `CommandSink` and shipped inside a minor, with
-`kinova-gen3-ros2` following in lockstep. **Recommendation: ship as driver
-v1.3.0** under that same practice, with a coordinated chain release
+`kinova-gen3-ros2` following in lockstep. **Decided (2026-10-04): ships as
+driver v1.3.0** under that same practice, with a coordinated chain release
 (interfaces → driver → ros2 → deployments) exactly like lock/via/speed on
-2026-10-02. Whether to instead start honoring strict API semver — which would
-make this the v2.0.0 trigger — is a release-numbering call left to the
-release owner, not this spec.
+2026-10-02 — acknowledged breaking, accepted because the pinned chain absorbs
+it. (Standing reminder for future projects: stay on 0.x until truly stable.)
 
 We deliberately do **not** keep the old gains fields alongside `GainsSpec` for
 compatibility: ROS 2's type hashing gives no wire-compat reward for it, and
