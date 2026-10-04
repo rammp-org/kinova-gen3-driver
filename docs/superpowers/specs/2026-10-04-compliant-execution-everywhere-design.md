@@ -48,13 +48,17 @@ impedance, change nothing else, and it works.*
 
 Every command that can run impedance carries one optional `GainsSpec`:
 
-- **A profile name** — `default`, `soft`, `stiff` (exact menu fixed during
-  planning; small). The table lives **in the driver core**, each entry a
-  *complete* `JointImpedanceParams` — not just `{kq, zeta, torque_limit}` but
-  leash, ramp, and ref-speed too. One menu, one meaning, every front-end.
+- **A profile name** — `soft`, `medium`, `stiff` (exact menu fixed during
+  planning; small). **Names describe the gains** — there is no profile named
+  `default`. "Default" is a *pointer* to a profile (initially `medium`), never
+  a profile itself, so a caller reading back the session state always sees
+  which gains they are actually getting. The table lives **in the driver
+  core**, each entry a *complete* `JointImpedanceParams` — not just
+  `{kq, zeta, torque_limit}` but leash, ramp, and ref-speed too. One menu, one
+  meaning, every front-end.
 - **`custom` + raw gains** — the escape hatch for teleop and learned-policy
   clients that genuinely tune. Same validation as everything else.
-- **Absent** — the session default (initially the `default` profile).
+- **Absent** — whatever the session default points at (initially `medium`).
 
 Three core-enforced guarantees:
 
@@ -124,8 +128,8 @@ the feedforward change so the baseline is real. No RT-path allocation, locking, 
 
 ### 5. Defaults as a deliverable
 
-The `default` profile is tuned on the real arm and shipped with written
-acceptance criteria:
+The `medium` profile — what the session default ships pointing at — is tuned
+on the real arm and shipped with written acceptance criteria:
 
 - **Hold:** no visible droop or drift holding a commanded posture (the known
   torque-mode droop is the benchmark of what *not* to ship).
@@ -148,6 +152,34 @@ with no gains behaves identically before and after a custom-gains goal.
   `docs/interface.md`, `reference/api.md`, deep-dive where the feedforward
   math changes, CHANGELOG. The stale `stream_check.cpp` error strings get
   fixed in passing.
+
+## Compatibility and versioning
+
+This **is** a breaking change, in two places:
+
+- **Driver C++ API:** `TrajectoryGoal` drops `has_gains`/`gains` for
+  `GainsSpec`, `StreamOpenRequest` grows a field, and `on_set_gains` goes from
+  stub to real. Every consumer recompiles; code touching the old fields edits.
+- **ROS messages (`rammp_arm_interfaces`):** `ExecuteJointTrajectory` swaps
+  its gains fields; the GoTo actions grow fields. Any `.msg` change breaks
+  ROS 2 type compatibility, so old and new nodes cannot talk regardless of
+  how additive the change looks — it is a coordinated-rebuild event for
+  every publisher of these actions, not just `kinova-gen3-ros2`.
+
+The consumer set is closed and version-pinned (`kinova_gen3.repos` pins exact
+driver tags; the deployment chain pins images), and precedent exists: the
+arbitration round broke `CommandSink` and shipped inside a minor, with
+`kinova-gen3-ros2` following in lockstep. **Recommendation: ship as driver
+v1.3.0** under that same practice, with a coordinated chain release
+(interfaces → driver → ros2 → deployments) exactly like lock/via/speed on
+2026-10-02. Whether to instead start honoring strict API semver — which would
+make this the v2.0.0 trigger — is a release-numbering call left to the
+release owner, not this spec.
+
+We deliberately do **not** keep the old gains fields alongside `GainsSpec` for
+compatibility: ROS 2's type hashing gives no wire-compat reward for it, and
+keeping `has_gains` alive preserves exactly the zero-filled-gains footgun
+(#64) this release exists to kill.
 
 ## Testing
 
