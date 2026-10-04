@@ -167,8 +167,13 @@ int main(int argc, char** argv) {
       const auto t0 = std::chrono::steady_clock::now();
       while (!g_stop.load(std::memory_order_acquire)) {
         const double ts = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        JointVec q_d = JointVec::Constant(amp * std::sin(w * ts));
-        mode.set_target(q_d);
+        JointTarget t_cmd;  // analytic profile: exercises the feedforward path
+        t_cmd.q = JointVec::Constant(amp * std::sin(w * ts));
+        t_cmd.qd = JointVec::Constant(amp * w * std::cos(w * ts));
+        t_cmd.qdd = JointVec::Constant(-amp * w * w * std::sin(w * ts));
+        t_cmd.has_velocity = true;
+        t_cmd.has_acceleration = true;
+        mode.set_joint_target(t_cmd);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
       }
     });

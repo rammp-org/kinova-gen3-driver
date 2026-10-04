@@ -75,7 +75,12 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   // mode — cuRobo already planned in joint space, so re-solving IK would be a
   // lossy round-trip that could land on a different branch. Latest setter wins:
   // a joint target supersedes any pose target and vice-versa.
-  void set_target(const JointVec& q_d) noexcept override;
+  //
+  // A target carrying qd/qdd additionally enables feedforward (see compute()).
+  void set_joint_target(const JointTarget& t) noexcept override;
+  // set_target(const Pose&) above would otherwise hide the position-only
+  // set_target(const JointVec&) the sink provides for callers with no profile.
+  using JointTargetSink::set_target;
 
   // Re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores this
   // mode's own configured default (params().cmd_timeout_s).
@@ -89,6 +94,9 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   // watching while tuning — it is configuration dependent, so it changes as the
   // arm moves even at a fixed Kq.
   JointVec last_damping() const noexcept { return Dq_last_; }
+  // The reference velocity used as feedforward last cycle (zero unless the
+  // active target carried a profile). Worth watching while tuning tracking.
+  JointVec last_ref_velocity() const noexcept { return qd_ref_; }
 
   // Snapshot of the live parameter set (RT-safe copy). For tests, diagnostics
   // and gain read-back -- the one way to see what tuning is actually in force.
@@ -124,7 +132,7 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   enum class TargetSource : int { kEntryHold, kPose, kJoint };
   Pose ext_target_[2];
   std::atomic<int> ext_active_{0};
-  JointVec ext_q_target_[2];
+  JointTarget ext_q_target_[2];
   std::atomic<int> jt_active_{0};
   std::atomic<TargetSource> source_{TargetSource::kEntryHold};
 
@@ -145,6 +153,7 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   double ramp_elapsed_ = 0.0;
 
   JointVec Dq_last_ = JointVec::Zero();  // damping applied last cycle (derived)
+  JointVec qd_ref_ = JointVec::Zero();   // reference velocity fed forward last cycle
 
   // Preallocated RT scratch.
   JointMat M_ = JointMat::Zero();

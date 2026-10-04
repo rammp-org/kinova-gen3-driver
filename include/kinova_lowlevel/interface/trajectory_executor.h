@@ -30,6 +30,12 @@ struct Trajectory {
 };
 
 kinova::JointVec sample(const Trajectory& tr, double t_s);
+// The full reference at t_s: q from sample(), qd/qdd as the derivatives of the
+// very polynomial sample() evaluates — so the feedforward always describes the
+// curve being commanded. has_velocity/has_acceleration are set only when the
+// trajectory actually carried a profile; outside the span the reference holds
+// still, so qd/qdd are reported as zero WITH has_velocity set.
+kinova::JointTarget sample_target(const Trajectory& tr, double t_s);
 
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };

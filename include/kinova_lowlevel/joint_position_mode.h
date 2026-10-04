@@ -83,13 +83,17 @@ class JointPositionMode : public ControlMode, public JointTargetSink, public Pos
   void compute(const JointFeedback& fb, double dt_s, JointCommand& out) override;
   void on_exit() override {}
 
-  // Non-RT setters (call from one supervisor thread).
-  void set_target(const JointVec& q_d) noexcept override;
+  // Non-RT setters (call from one supervisor thread). Derivatives on the
+  // target are IGNORED here: position mode has no torque channel to feed them
+  // into, and whether the actuator's own servo accepts a velocity feedforward
+  // in kPosition is firmware behaviour that cannot be settled in sim -- see
+  // the target-feedforward plan for the deliberately unported half.
+  void set_joint_target(const JointTarget& t) noexcept override;
   // Cartesian target: resolved to a joint reference by in-loop IK, which then
   // feeds the SAME rate_limit -> leash -> wrap -> clamp pipeline a joint target
   // does, so the whole safety envelope comes along unchanged (PoseTargetSink).
   void set_target(const Pose& x_d) noexcept override;
-  using JointTargetSink::set_target;  // keep the JointVec overload visible
+  using JointTargetSink::set_target;  // keep the JointVec convenience visible
   void set_params(const JointPositionParams& p) noexcept;
 
   // Set when IK has failed to converge for longer than ik_fault_s. Published for

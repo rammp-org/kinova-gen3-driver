@@ -41,9 +41,11 @@ namespace {
 struct RecordingSink : kinova::JointTargetSink {
   std::vector<kinova::JointVec> calls;
   kinova::JointVec last = kinova::JointVec::Zero();
-  void set_target(const kinova::JointVec& q) noexcept override {
-    calls.push_back(q);
-    last = q;
+  kinova::JointTarget last_target{};  // full reference, derivatives included
+  void set_joint_target(const kinova::JointTarget& t) noexcept override {
+    calls.push_back(t.q);
+    last = t.q;
+    last_target = t;
   }
 };
 kinova::interface::Trajectory ramp(double dur) {  // helper: 0->1 rad over dur
@@ -644,4 +646,70 @@ TEST(ExecutorSpeedScale, BackwardsWallClockDoesNotMoveTrajectoryTimeBackwards) {
   ExecStatus back = ex.tick(5.5, vec7(0.0));  // now_s went BACKWARDS
   EXPECT_NEAR(back.fraction, before.fraction, 1e-9)
       << "a backwards wall-clock stamp must never move trajectory time backwards";
+}
+
+// ---- v1.3.0 target feedforward: sample_target + scaled derivatives ----
+namespace {
+// A profiled S-curve: rest -> rest over 2 s with a nonzero mid velocity.
+kinova::interface::Trajectory profiled(bool with_accel) {
+  kinova::interface::Trajectory tr;
+  kinova::interface::JointWaypoint w0{vec7(0.0), 0.0}, w1{vec7(0.5), 1.0}, w2{vec7(1.0), 2.0};
+  w1.qd = vec7(0.8);  // moving through the midpoint
+  tr.points = {w0, w1, w2};
+  tr.has_velocities = true;
+  tr.has_accelerations = with_accel;
+  return tr;
+}
+}  // namespace
+
+TEST(SampleTarget, DerivativesMatchFiniteDifferencesOfSample) {
+  using kinova::interface::sample;
+  using kinova::interface::sample_target;
+  for (bool accel : {false, true}) {
+    const auto tr = profiled(accel);
+    const double h = 1e-6;
+    for (double t : {0.3, 0.7, 1.4}) {
+      const auto ref = sample_target(tr, t);
+      ASSERT_TRUE(ref.has_velocity);
+      EXPECT_EQ(ref.has_acceleration, accel);
+      const kinova::JointVec fd = (sample(tr, t + h) - sample(tr, t - h)) / (2.0 * h);
+      EXPECT_NEAR(ref.qd[0], fd[0], 1e-3) << "accel=" << accel << " t=" << t;
+      if (accel) {
+        const kinova::JointVec fdd =
+            (sample(tr, t + h) - 2.0 * sample(tr, t) + sample(tr, t - h)) / (h * h);
+        EXPECT_NEAR(ref.qdd[0], fdd[0], 1e-2) << " t=" << t;
+      }
+    }
+  }
+}
+
+TEST(SampleTarget, PositionsOnlyTrajectoryCarriesNoProfile) {
+  const auto ref = kinova::interface::sample_target(ramp(2.0), 1.0);
+  EXPECT_FALSE(ref.has_velocity);
+  EXPECT_FALSE(ref.has_acceleration);
+}
+
+TEST(SampleTarget, OutsideTheSpanHoldsStillWithProfilePresent) {
+  // Holding is a real reference state: has_velocity true, qd zero — so the
+  // damper damps toward rest while holding instead of toward a phantom.
+  for (double t : {-0.1, 2.1}) {
+    const auto ref = kinova::interface::sample_target(profiled(false), t);
+    EXPECT_TRUE(ref.has_velocity);
+    EXPECT_NEAR(ref.qd.norm(), 0.0, 1e-12) << " t=" << t;
+  }
+}
+
+TEST(ExecutorTick, ScalesFedForwardDerivativesIntoWallTime) {
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  ASSERT_EQ(ex.submit(profiled(false), ControlModeKind::kImpedance, Preemption::kLatestWins,
+                      vec7(-1.0), 0.5),
+            SubmitResult::kAccepted);
+  ex.tick(10.0, vec7(0.0));  // clock starts; applied_ latches to 0.5
+  ex.tick(10.4, vec7(0.0));  // 0.4 s wall -> traj_t = 0.2
+  const auto analytic = sample_target(profiled(false), 0.2);
+  ASSERT_TRUE(sink.last_target.has_velocity);
+  EXPECT_NEAR(sink.last_target.qd[0], 0.5 * analytic.qd[0], 1e-9);
+  EXPECT_NEAR(sink.last_target.q[0], analytic.q[0], 1e-9);  // position unscaled
 }

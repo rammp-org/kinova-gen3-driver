@@ -626,3 +626,78 @@ TEST(JointImpedanceMode, AFreshCommandReleasesTheFreeze) {
   for (int i = 0; i < 30; ++i) m.compute(fb, 0.001, out);
   EXPECT_GT(std::abs(m.reference()[0]), 1e-6);  // tracking again
 }
+
+// ---- v1.3.0 target feedforward: damp the velocity error, not the velocity ----
+TEST(JointImpedance, ProfiledTargetCancelsDampingAtReferenceVelocity) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb;
+  fb.q = sample_q();
+  const double v = 0.4, dt = 0.001;
+  fb.qd.setConstant(v);  // the arm is moving exactly as commanded
+  m.on_enter(fb);
+
+  // Position-only target one step ahead: damper fights the motion (-Dq*v).
+  JointCommand c_plain;
+  m.set_target(JointVec(fb.q.array() + v * dt));
+  m.compute(fb, dt, c_plain);
+  EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);  // no profile, no ff
+
+  // Same motion WITH a profile: qd_ref = achieved step / dt = v, damper ~0.
+  m.on_enter(fb);  // reset reference to fb.q
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + v * dt);
+  t.has_velocity = true;
+  JointCommand c_ff;
+  m.set_joint_target(t);
+  m.compute(fb, dt, c_ff);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(m.last_ref_velocity()[i], v, 1e-9);
+  // The two differ by exactly the damping term Dq*v (same e, same gravity).
+  const JointVec Dq = m.last_damping();
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c_ff.torque[i] - c_plain.torque[i], Dq[i] * v, 1e-6);
+}
+
+TEST(JointImpedance, RateLimiterBoundsTheFedForwardVelocity) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(0.5);  // clamp well below the asked-for jump
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 1.0);  // teleported target
+  t.has_velocity = true;
+  JointCommand c;
+  m.set_joint_target(t);
+  m.compute(fb, 0.001, c);
+  // Achieved reference velocity == the clamp, not the 1000 rad/s implied ask.
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(m.last_ref_velocity()[i], 0.5, 1e-9);
+}
+
+TEST(JointImpedance, StalenessFreezeZeroesTheFeedforward) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.cmd_timeout_s = 0.01;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 0.3);
+  t.has_velocity = true;
+  m.set_joint_target(t);
+  JointCommand c;
+  m.compute(fb, 0.001, c);              // fresh: tracking, ff active
+  EXPECT_GT(m.last_ref_velocity().norm(), 0.0);
+  m.compute(fb, 0.05, c);               // > cmd_timeout_s with no bump: stale
+  m.compute(fb, 0.001, c);              // frozen cycle
+  EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);
+  JointVec g;
+  dyn.gravity(fb.q, g);
+  // Frozen at measured q with zero measured velocity: pure gravity hold.
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i], 1e-9);
+}
