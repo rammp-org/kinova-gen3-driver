@@ -102,6 +102,7 @@ set(KINOVA_LIB_SOURCES
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
     src/joint_velocity_mode.cpp
+    src/velocity_reference.cpp
     src/rt_executor.cpp
     src/interface/trajectory_executor.cpp
     src/interface/supervisor.cpp
@@ -365,6 +366,7 @@ add_executable(unit_tests
     tests/joint_impedance_mode_test.cpp
     tests/joint_position_mode_test.cpp
     tests/joint_velocity_mode_test.cpp
+    tests/velocity_reference_test.cpp
     tests/teleop_protocol_test.cpp
     tests/feedback_tap_test.cpp
     tests/interface/trajectory_executor_test.cpp
