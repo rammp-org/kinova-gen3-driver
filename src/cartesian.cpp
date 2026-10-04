@@ -1,4 +1,6 @@
 #include "kinova_lowlevel/cartesian.h"
+
+#include <Eigen/Cholesky>  // LDLT for the damped 6x6 solve
 namespace kinova {
 Vector6 pose_error(const Pose& desired, const Pose& current) {
   Vector6 e;
@@ -8,5 +10,11 @@ Vector6 pose_error(const Pose& desired, const Pose& current) {
   Eigen::AngleAxisd aa(qe.normalized());
   e.tail<3>() = aa.angle() * aa.axis();
   return e;
+}
+
+Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext, double damping) {
+  Eigen::Matrix<double, 6, 6> A = J * J.transpose();
+  A.diagonal().array() += damping * damping;
+  return A.ldlt().solve(J * tau_ext);
 }
 }  // namespace kinova

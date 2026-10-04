@@ -14,6 +14,14 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `ArmState::ee_wrench`: a measured external EE wrench, estimated in the
+  Supervisor's pump from the joint-torque residual
+  (`F = pinv(Jᵀ)(g(q) + τ_raw)`, damped). Wrench the environment applies to the
+  tool, `[force; torque]` in N / N·m, `LOCAL_WORLD_ALIGNED` at the tool — same
+  frame/model/sample as `ee_twist`. Quasi-static, contact-detection grade;
+  KORTEX's `tool_external_wrench` is unavailable in `LOW_LEVEL_SERVOING`, and
+  feedback torque is reaction-signed — see
+  `docs/superpowers/specs/2026-10-04-ee-wrench-design.md` (#73).
 - **One gains contract on every impedance surface** (#63). Commands name their
   compliance with an `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
   `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains

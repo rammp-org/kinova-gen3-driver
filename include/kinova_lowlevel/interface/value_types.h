@@ -145,6 +145,17 @@ struct ArmState {
   JointVec q = JointVec::Zero(), qd = JointVec::Zero(), tau = JointVec::Zero();
   Pose ee_pose;
   Vector6 ee_twist = Vector6::Zero();
+  // Measured external wrench at the tool: what the ENVIRONMENT applies to the EE,
+  // [force; torque] in N / N*m, same frame/model/sample doctrine as ee_twist above.
+  // Quasi-static estimate from the joint-torque residual, F = pinv(J^T)(g(q) + tau):
+  // KORTEX feedback torque is reaction-signed (measured ~ -g(q) at free hold,
+  // verified on the lab arm), so g + tau is the externally applied joint torque.
+  // NOT KORTEX's tool_external_wrench, which stops updating in LOW_LEVEL_SERVOING
+  // (kortex#52). Contact-detection grade, not force-control grade: the residual
+  // noise floor is ~1-2.5 N*m at the proximal joints (a few N at the tool), and
+  // Coriolis/inertial torques are ignored -- see the 2026-10-04 ee-wrench spec.
+  // In sim this field is meaningless (SimTransport synthesises no torque).
+  Vector6 ee_wrench = Vector6::Zero();
   bool fault = false;
   double stamp_s = 0.0;
   // The runtime speed override currently in force. Populated by the

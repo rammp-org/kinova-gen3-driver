@@ -111,6 +111,9 @@ struct SupFix {
   std::thread rt;
 
   explicit SupFix(double q0 = 0.0, double qd0 = 0.0) : init(make_feedback(q0, qd0)), sim(init) {}
+  // Seed the full initial feedback (the q/qd overload can't set tau, which the
+  // ee_wrench tests need to control exactly).
+  explicit SupFix(const JointFeedback& fb) : init(fb), sim(init) {}
 
   void run_rt() {
     rt = std::thread([&] { exec.run(stop); });
@@ -1503,6 +1506,54 @@ TEST(Supervisor, QueryStateReportsEeTwistConsistentWithEePose) {
   EXPECT_TRUE(s.ee_twist.isApprox(expected, 1e-9))
       << "ee_twist " << s.ee_twist.transpose() << " != J*qd " << expected.transpose();
   EXPECT_GT(s.ee_twist.norm(), 1e-6) << "twist is the default, not a computed value";
+}
+
+// ee_wrench carries the KORTEX sign convention through the whole pipeline: feedback
+// torque is reaction-signed (measured ~ -g(q) at rest, verified on the lab arm), so
+// tau = -g means "nothing touching the arm" and must give a zero wrench exactly.
+TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
+  kinova::Dynamics ref{URDF_PATH};
+  JointFeedback fb = make_feedback(0.3);
+  kinova::JointVec g;
+  ref.gravity(fb.q, g);
+  fb.tau = -g;
+  SupFix f(fb);
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  EXPECT_LT(s.ee_wrench.norm(), 1e-9)
+      << "free hold reported a phantom wrench: " << s.ee_wrench.transpose();
+}
+
+// An external wrench enters the joints as tau_raw = -g + J^T F (reaction sign); the
+// pump must map it back to F. Expected value computed independently of the pump's
+// own model objects, mirroring the ee_twist consistency test above.
+TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
+  kinova::Dynamics ref{URDF_PATH};
+  JointFeedback fb = make_feedback(0.3);
+  kinova::JointVec g;
+  ref.gravity(fb.q, g);
+  kinova::Jacobian6 J;
+  ref.jacobian(fb.q, J);
+  kinova::Vector6 F;
+  F << 4.0, -2.0, 7.0, 0.3, -0.1, 0.2;  // environment-on-tool
+  fb.tau = -g + J.transpose() * F;
+  SupFix f(fb);
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  EXPECT_TRUE(s.ee_wrench.isApprox(F, 1e-3))
+      << "ee_wrench " << s.ee_wrench.transpose() << " != applied " << F.transpose();
 }
 
 TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {

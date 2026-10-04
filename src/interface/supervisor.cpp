@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cmath>
 #include <string>
+
+#include "kinova_lowlevel/cartesian.h"  // ee_wrench_from_residual
 namespace kinova::interface {
 using clock = std::chrono::steady_clock;
 static double secs_since(clock::time_point t0) {
@@ -97,8 +99,14 @@ void Supervisor::pump_loop() {
         std::lock_guard<std::mutex> dl(dyn_mtx_);
         s.ee_pose = pump_dyn_.fk(fb.q);
         pump_dyn_.jacobian(fb.q, pump_J_);
+        // Under dyn_mtx_ like fk/jacobian: the sampler shares pump_dyn_ (and
+        // its Pinocchio Data scratch), so gravity() must not race its ticks.
+        pump_dyn_.gravity(fb.q, pump_g_);
       }
       s.ee_twist = pump_J_ * fb.qd;
+      // KORTEX feedback torque is reaction-signed, so g(q) + tau is the external
+      // joint torque in the command convention -- see ArmState::ee_wrench.
+      s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ + fb.tau);
       s.speed_override = speed_override_.load();
       state_snap_.store(s);
       stream_.publish_state(s);

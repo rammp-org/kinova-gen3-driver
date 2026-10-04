@@ -47,3 +47,53 @@ TEST(PoseError, LargeRotationTakesShortestPath) {
   EXPECT_NEAR(e[4], 0.0, 1e-9);
   EXPECT_NEAR(e[5], 0.0, 1e-9);
 }
+
+// ---- ee_wrench_from_residual ------------------------------------------------
+// The map (J, tau_ext) -> F through the damped pseudoinverse of J^T. J comes from
+// the real Gen3 model so the tests exercise the actual 6x7 geometry, including a
+// genuinely singular pose -- a synthetic J would prove less.
+
+#include "kinova_lowlevel/dynamics.h"
+
+namespace {
+// Elbow-up home (DiffIkParams::q_rest): far from singular, the pose the arm
+// actually works around.
+JointVec well_conditioned_q() {
+  return (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+}
+}  // namespace
+
+TEST(EeWrench, RecoversAWrenchAppliedThroughJt) {
+  Dynamics dyn{URDF_PATH};
+  Jacobian6 J;
+  dyn.jacobian(well_conditioned_q(), J);
+  Vector6 F;  // environment-on-tool: push along +x/-y/+z plus a twist
+  F << 5.0, -3.0, 8.0, 0.4, -0.2, 0.6;
+  const JointVec tau_ext = J.transpose() * F;
+  const Vector6 F_hat = ee_wrench_from_residual(J, tau_ext);
+  EXPECT_TRUE(F_hat.isApprox(F, 1e-3))
+      << "F_hat " << F_hat.transpose() << " != F " << F.transpose();
+}
+
+TEST(EeWrench, ZeroResidualGivesExactlyZero) {
+  Dynamics dyn{URDF_PATH};
+  Jacobian6 J;
+  dyn.jacobian(well_conditioned_q(), J);
+  const Vector6 F_hat = ee_wrench_from_residual(J, JointVec::Zero());
+  EXPECT_EQ(F_hat.norm(), 0.0);
+}
+
+TEST(EeWrench, DampingBoundsTheEstimateAtASingularPose) {
+  // q = 0 is the fully-stretched candle: J loses rank and an undamped
+  // pinv(J^T) would turn a residual with a null-space component into an
+  // enormous phantom wrench. The damping must keep it finite, and more
+  // damping must never grow the estimate.
+  Dynamics dyn{URDF_PATH};
+  Jacobian6 J;
+  dyn.jacobian(JointVec::Zero(), J);
+  const JointVec tau_ext = JointVec::Constant(5.0);  // deliberately not J^T * anything
+  const Vector6 light = ee_wrench_from_residual(J, tau_ext, 1e-3);
+  const Vector6 heavy = ee_wrench_from_residual(J, tau_ext, 0.1);
+  EXPECT_TRUE(light.allFinite());
+  EXPECT_LE(heavy.norm(), light.norm());
+}
