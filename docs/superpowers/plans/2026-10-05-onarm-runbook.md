@@ -81,6 +81,48 @@ on contact, the next lever is disabling path tolerance for the eval
 (`path_tolerance: -1` via raw ExecuteJointTrajectory) and judging by eye +
 final error only.
 
+### Crib sheet (wire names verified against the branches, 2026-10-05)
+
+The node has NO namespace: `/execute_joint_trajectory`, `/go_to_ee_pose`,
+`/set_gains`, `/open_stream`, `/close_stream`, `/list_controllers`,
+`/stream_status`, `/estop`. Goal-rejection reasons are WARN-logged on the
+node only — the client just sees REJECTED, so keep the node log visible.
+
+The sender scripts (`kinova_gen3_ros2/test/`) now take gains:
+`--profile soft|medium|stiff|default`, or custom via `--kq V[,×7]`
+`--zeta Z` `--torque-limit V[,×7]` (any custom flag ⇒ PROFILE_CUSTOM; unset
+custom fields fall back to medium kq / zeta 0.5 / ceiling limits).
+`send_goto_pose.py` grew `--mode impedance`; `send_trajectory.py` accepts
+`--expect rejected`. **Smoke the new flags against `--sim` in the container
+before any torque.**
+
+- A1: `send_trajectory.py --mode impedance --joint 3 --delta 0.3 --dur 3 --expect 0`
+- A3: same with `--profile soft` / `--profile stiff`
+- B4: `send_trajectory.py --mode impedance --torque-limit 0 --expect rejected`
+  (floor message in the node log)
+- B5: `send_trajectory.py --mode impedance --kq 60 --zeta 0.6 --expect 0`,
+  then a bare impedance goal (no gains flags) → back on medium
+- B6: `ros2 service call /set_gains rammp_arm_interfaces/srv/SetGains
+  "{spec: {profile: 1}}"`; refusal case: `"{spec: {profile: 4, custom: {kq:
+  [80,80,80,80,30,30,30], zeta: 0.5, torque_limit: [0,0,0,0,0,0,0]}}}"`
+- C7/C8/C9: `send_goto_pose.py --pos X Y Z --quat x y z w
+  [--mode impedance] [--speed-scale 0.5]` — needs cuRobo at
+  `/rammp_curobo/plan_to_pose` and `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp`,
+  otherwise it hangs in phase=planning
+- D11: `ros2 service call /open_stream rammp_arm_interfaces/srv/OpenStream
+  "{controller: 'joint_velocity_impedance', timeout_s: 0.5}"` (a `gains:`
+  field is accepted at open), then
+  `ros2 topic pub -r 50 /setpoint/joint_velocity
+  rammp_arm_interfaces/msg/JointSetpoint "{values: [0,0,0,0,0,0.05,0]}"`;
+  stop publishing → `/stream_status` shows the close (deadline);
+  `ros2 service call /close_stream rammp_arm_interfaces/srv/CloseStream "{}"`
+- D12: controller `ee_twist_impedance`, `ros2 topic pub -r 50 /setpoint/twist
+  rammp_arm_interfaces/msg/TwistSetpoint "{twist: {linear: {z: 0.02}}}"`
+- E14: `python3 .../kinova_gen3_ros2/test/conformance/run_conformance.py`
+  against the already-running node (`--no-motion` variant first). NOTE:
+  conformance does NOT cover `/set_gains` or goal gains profiles — the B
+  section above is the only coverage of the gains contract on the wire.
+
 ### A. Hold + defaults sanity (gravity floor + medium profile)
 1. `execute_joint_trajectory` short move, `control_mode=1`, **gains empty**
    (PROFILE_SESSION_DEFAULT). Expect: medium gains, no droop at rest
