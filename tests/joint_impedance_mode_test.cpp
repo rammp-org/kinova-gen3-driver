@@ -324,6 +324,39 @@ TEST(JointImpedance, ContinuousJointErrorTakesShortWayAroundTheWrap) {
   EXPECT_NEAR(spring, p.Kq[2] * true_err, 1e-9);
 }
 
+TEST(JointImpedance, JointTargetOnTheFarWrapBranchDoesNotMarchTheReference) {
+  // GoTo-under-impedance feeds plan samples through set_target(JointVec) in the
+  // PLANNER'S convention. Home has j3 = pi, exactly on the wrap boundary: the
+  // plan says +3.142 while the wrapped reference reads -3.141 -- the same
+  // angle. The rate limiter must fold that step; clamping the raw ~2*pi
+  // difference instead walks the reference around the circle at max_ref_speed
+  // and the joint physically spins the long way until the divergence guard
+  // aborts (seen on the arm 2026-10-06). A realistic max_ref_speed matters
+  // here: with a huge one the whole 2*pi step passes the clamp and the
+  // re-wrap below hides the bug.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(1.0);  // rad/s -- max_step 0.001 at 1 kHz
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.q[2] = wrap_to_pi(3.142);  // -3.14119, the far branch of +3.142
+  fb.qd.setZero();
+  m.on_enter(fb);
+
+  JointVec q_cmd = fb.q;
+  q_cmd[2] = 3.142;  // identical angle, planner's branch
+  m.set_target(q_cmd);
+
+  JointCommand c;
+  for (int k = 0; k < 100; ++k) m.compute(fb, 0.001, c);
+
+  // Folded step is ~0: the reference must stay put, not march 100 * 0.001 rad.
+  const double moved = wrap_to_pi(m.reference()[2] - fb.q[2]);
+  EXPECT_LT(std::abs(moved), 1e-3)
+      << "reference walked the long way around the wrap";
+}
+
 TEST(JointImpedance, ContinuousReferenceStaysBounded) {
   // The reference integrates open-loop. On a continuous joint it must not grow
   // without bound, or it drifts arbitrarily far from the wrapped measurement.

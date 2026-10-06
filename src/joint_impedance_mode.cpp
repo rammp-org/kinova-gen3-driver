@@ -142,9 +142,17 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   }
 
   // Bound reference speed so a teleported target ramps in instead of slamming.
+  // The step is folded for continuous joints: a trajectory target arrives in
+  // the PLANNER'S convention and can sit on the far branch of the wrap from
+  // the (-pi, pi]-wrapped reference (home's j3 = pi lands exactly on the
+  // boundary). The raw difference then reads ~2*pi and the reference marches a
+  // full turn at max_ref_speed -- on the arm, the joint visibly spinning the
+  // long way round until the divergence guard aborts the goal.
   for (int i = 0; i < kNumJoints; ++i) {
     const double max_step = p.max_ref_speed[i] * dt_s;
-    q_d_[i] = std::clamp(q_d_[i], q_prev[i] - max_step, q_prev[i] + max_step);
+    double step = q_d_[i] - q_prev[i];
+    if (continuous_[i]) step = wrap_to_pi(step);
+    q_d_[i] = q_prev[i] + std::clamp(step, -max_step, max_step);
   }
 
   // The velocity the reference is ACTUALLY moving at, taken here — after the
@@ -157,10 +165,10 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
                                         : JointVec(JointVec::Zero());
 
   // Keep the reference in the SAME representation as the measured angle, which
-  // the transport wraps to (-pi, pi]. Wrapping after the rate limit is safe: both
-  // sides of that clamp came from the same seed one small IK step apart, so it can
-  // never see a 2*pi jump. Kinematically a no-op -- Dynamics packs continuous
-  // joints as (cos, sin).
+  // the transport wraps to (-pi, pi]. The rate limit above folds its step, so
+  // the reference only ever moves max_step from its wrapped predecessor; this
+  // re-wrap is the fold-back at the boundary. Kinematically a no-op --
+  // Dynamics packs continuous joints as (cos, sin).
   for (int i = 0; i < kNumJoints; ++i)
     if (continuous_[i]) q_d_[i] = wrap_to_pi(q_d_[i]);
 
