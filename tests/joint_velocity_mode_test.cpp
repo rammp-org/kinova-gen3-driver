@@ -544,3 +544,17 @@ TEST(VelocityReference, LimitJointVelocityScalesUniformlyThenClamps) {
   kinova::limit_joint_velocity(zero_cap, qd2);
   EXPECT_DOUBLE_EQ(qd2[3], 0.0);
 }
+
+TEST(VelocityReference, TwistDlsDefaultsMatchJointVelocityParams) {
+  // TwistDlsParams hand-copies these defaults from JointVelocityParams
+  // (review finding): this test is the tripwire that forces a retune of one
+  // to visit the other, since the compliant twist path reads TwistDlsParams
+  // while the stiff path reads JointVelocityParams.
+  kinova::TwistDlsParams d;
+  kinova::JointVelocityParams p;
+  EXPECT_DOUBLE_EQ(d.dls_damping, p.dls_damping);
+  EXPECT_DOUBLE_EQ(d.w_threshold, p.w_threshold);
+  EXPECT_DOUBLE_EQ(d.dls_damping_max, p.dls_damping_max);
+  EXPECT_DOUBLE_EQ(d.posture_gain, p.posture_gain);
+  EXPECT_TRUE(d.q_rest.isApprox(p.q_rest));
+}

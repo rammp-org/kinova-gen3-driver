@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "kinova_lowlevel/units.h"
+#include "kinova_lowlevel/velocity_reference.h"  // limit_joint_velocity
 namespace kinova {
 
 // The leash constant and its rationale live in velocity_reference.h
@@ -88,18 +89,12 @@ void JointVelocityMode::on_enter(const JointFeedback& fb) {
 }
 
 void JointVelocityMode::limit(const JointVelocityParams& p, JointVec& qd) noexcept {
-  // Scale UNIFORMLY so the fastest joint just reaches its cap. A bare per-joint
-  // clamp would silently ROTATE the commanded EE twist when one joint saturates,
-  // which is the one thing a mode named "velocity" must not do.
-  double s = 1.0;
-  for (int i = 0; i < kNumJoints; ++i) {
-    const double a = std::abs(qd[i]);
-    if (a > p.max_qd[i] && a > 0.0) s = std::min(s, p.max_qd[i] / a);
-  }
-  qd *= s;
-  // Hard backstop: scaling covers the normal case, this holds even when max_qd
-  // contains a zero (scale would be 0/0) or the scale underflows.
-  for (int i = 0; i < kNumJoints; ++i) qd[i] = std::clamp(qd[i], -p.max_qd[i], p.max_qd[i]);
+  // One cap for both velocity paths: the shared helper carries the
+  // uniform-scale-then-clamp semantics (and its rationale), so the stiff and
+  // compliant streams cannot drift apart (review finding). The only
+  // difference is the source of the cap: this mode's user-configurable
+  // max_qd (URDF-seeded) vs the compliant path's raw URDF ratings.
+  kinova::limit_joint_velocity(p.max_qd, qd);
 }
 
 void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {

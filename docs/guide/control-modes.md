@@ -197,7 +197,7 @@ configuration, then runs an independent spring-damper on every joint.
 ### Gain profiles and the `ImpedanceGains` contract (v1.3)
 
 Through the interface layer (trajectory goals, stream opens, `set_gains`), a
-caller does not pass `JointImpedanceParams` — it passes a **`ImpedanceGains`**:
+caller does not pass `JointImpedanceParams` — it passes an **`ImpedanceGains`**:
 
 - **A named profile** — `soft`, `medium`, `stiff`. Each is a *complete*
   parameter set owned by the core (`interface/gains.h`), so `soft` means the

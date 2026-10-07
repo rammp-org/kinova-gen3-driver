@@ -1954,6 +1954,36 @@ TEST(Supervisor, ACompliantVelocityStreamIntegratesIntoTheImpedanceReference) {
   EXPECT_LT(ref[0], 0.06);
 }
 
+TEST(Supervisor, ABlockedCompliantStreamStopsFeedingForwardTheCommandedRate) {
+  // SimTransport is a static echo -- the arm never follows. Once the leash
+  // pins, the fed-forward rate must collapse to the ACHIEVED (zero) rate:
+  // feeding the commanded one keeps a standing D*qd damper push on top of
+  // the leash-bounded spring for as long as the client streams, breaking
+  // the leash's "this bounds how hard the spring pushes" contract (review
+  // finding).
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(1.0);  // pins the 0.1 rad leash within ~0.1 s
+  for (int i = 0; i < 40; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ff = f.imp.last_ref_velocity();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  EXPECT_LT(ff.cwiseAbs().maxCoeff(), 0.05)
+      << "damper still chasing the commanded rate against a pinned leash";
+}
+
 TEST(Supervisor, TheLeashCapsACompliantVelocityReferenceWhenTheArmLags) {
   // SimTransport is a static echo: measured q never moves. The windup guard
   // must cap the reference lead at the leash no matter how long the command

@@ -446,7 +446,7 @@ GainsCheck validate_custom(const JointGainValues&);      // {ok, message}; pure
 kinova::JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default);
 ```
 
-`TrajectoryGoal::gains` and `StreamOpenRequest::gains` carry a `ImpedanceGains`
+`TrajectoryGoal::gains` and `StreamOpenRequest::gains` carry an `ImpedanceGains`
 (trajectory gains apply at execution, stream gains at open);
 `GainsRequest::spec` carries one to `on_set_gains`, which validates and
 replaces the **session default** — what an absent spec resolves to, initially

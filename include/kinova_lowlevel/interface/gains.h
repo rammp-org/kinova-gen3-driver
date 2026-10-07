@@ -32,6 +32,11 @@ bool known_profile(GainsProfile p);
 // The complete parameter set a NAMED profile stands for. kCustom and
 // kSessionDefault are not names -- std::invalid_argument, fail loud.
 kinova::JointImpedanceParams profile_params(GainsProfile p);
+// base with ONLY the gain fields (Kq, zeta, max_tracking_error,
+// torque_limit) taken from profile. Profiles own the gains; everything else
+// in JointImpedanceParams belongs to the deployment and survives.
+kinova::JointImpedanceParams overlay_profile_gains(const kinova::JointImpedanceParams& base,
+                                                   const kinova::JointImpedanceParams& profile);
 // What a command's spec means, given the current session default:
 //   kSessionDefault -> session_default verbatim
 //   named profile   -> profile_params(p)

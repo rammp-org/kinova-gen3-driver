@@ -66,6 +66,16 @@ bool known_profile(GainsProfile p) {
   return false;
 }
 
+kinova::JointImpedanceParams overlay_profile_gains(
+    const kinova::JointImpedanceParams& base, const kinova::JointImpedanceParams& profile) {
+  kinova::JointImpedanceParams jp = base;
+  jp.Kq = profile.Kq;
+  jp.zeta = profile.zeta;
+  jp.max_tracking_error = profile.max_tracking_error;
+  jp.torque_limit = profile.torque_limit;
+  return jp;
+}
+
 kinova::JointImpedanceParams resolve_gains(const ImpedanceGains& s,
                                            const kinova::JointImpedanceParams& session_default) {
   switch (s.profile) {
@@ -79,7 +89,11 @@ kinova::JointImpedanceParams resolve_gains(const ImpedanceGains& s,
       return jp;
     }
     default:
-      return profile_params(s.profile);
+      // A profile owns the GAIN fields only. Returning profile_params raw
+      // would swap the whole struct and silently reset every deployment-
+      // tuned field (ik limits, cmd_timeout_s, ramp) to struct defaults on
+      // the first profiled command (review finding).
+      return overlay_profile_gains(session_default, profile_params(s.profile));
   }
 }
 }  // namespace kinova::interface

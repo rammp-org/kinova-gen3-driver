@@ -15,7 +15,7 @@ that heading to the new version and bumps `package.xml`.
 ### Added
 
 - **One gains contract on every impedance surface** (#63). Commands name their
-  compliance with a `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
+  compliance with an `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
   `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains
   (kq/zeta/torque_limit over the session default), or nothing — which means the
   session default, initially `medium`. Trajectory goals, stream opens
@@ -31,8 +31,8 @@ that heading to the new version and bumps `package.xml`.
   position goal, a non-impedance stream) are refused, not ignored.
 - **Target feedforward** (port of `feat/target-feedforward`). Joint-space
   targets carry `{q, qd, qdd}` (`JointTarget` through `JointTargetSink`);
-  `JointImpedanceMode` damps the velocity error against the achieved
-  (post-rate-limit) reference velocity and adds `M(q)·qdd`, removing the
+  `JointImpedanceMode` damps the velocity error against the commanded rate
+  (`t.qd`, clamped to `max_ref_speed`) and adds `M(q)·qdd`, removing the
   standing tracking lag `2ζ·qd·√(M/Kq)` on profiled trajectories. The executor
   feeds derivatives scaled into wall time under the speed scale (`qd·s`,
   `qdd·s²`). Teleop/pose/entry-hold paths and the staleness freeze are
@@ -42,8 +42,11 @@ that heading to the new version and bumps `package.xml`.
   measured before/after: within the noise floor (x86 sim, mean ~1.5 µs).
 - **Compliant velocity and twist streams**: `joint velocity × kImpedance` and
   `EE twist × kImpedance` pairs — the v1.1.1 integrate-into-a-held-reference
-  mechanism, factored out of `JointVelocityMode` and driven into
-  `JointImpedanceMode` at 1 kHz with velocity feedforward.
+  mechanism, factored out of `JointVelocityMode`. The SAMPLER integrates and
+  writes targets into `JointImpedanceMode` at its own rate (the 1 kHz mode
+  latches the newest target each cycle), feeding forward the rate the
+  reference actually advanced at — equal to the commanded rate in free
+  motion, zero once the leash pins against a blocked arm.
 
 ### Changed
 

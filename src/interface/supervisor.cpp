@@ -54,6 +54,13 @@ Supervisor::Supervisor(const SupervisorDeps& d)
   pump_dyn_.velocity_limits(v_max_);
   for (int i = 0; i < kinova::kNumJoints; ++i)
     continuous_[i] = !std::isfinite(q_lower_[i]) && !std::isfinite(q_upper_[i]);
+  // The session default = MEDIUM GAINS over the mode's CONSTRUCTED params.
+  // Seeding from profile_params alone made the first kSessionDefault
+  // resolution replace the whole struct, silently resetting every
+  // deployment-tuned non-gain field -- ik limits, cmd_timeout_s, ramp -- to
+  // struct defaults (review finding).
+  session_default_params_ =
+      overlay_profile_gains(imp_.params(), profile_params(GainsProfile::kMedium));
 }
 Supervisor::~Supervisor() { stop(); }
 
@@ -194,11 +201,17 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       q_meas = sampled_q(ok, fb.q, q_meas);  // the leash needs MEASURED q, never a phantom zero
       std::lock_guard<std::mutex> l(stream_mtx_);
       // Re-checked under the lock: a close that landed since the test above has
-      // already latched the hold, and one more target would overwrite it.
+      // already latched the hold, and one more target would overwrite it. The
+      // KIND and MODE are re-read too: a close-plus-reopen that both landed in
+      // the gap would otherwise have this tick integrate the dead session's
+      // stale command into a different-kind session (review finding).
       // have_q_meas: before the FIRST good read, q_meas is the Zero
       // initializer and the leash would drag the reference toward the zero
       // posture (review finding) -- skip the tick, the mode keeps holding.
-      if (stream_open_.load() && have_q_meas) {
+      if (stream_open_.load() && have_q_meas &&
+          session_.control_mode() == ControlModeKind::kImpedance &&
+          (session_.kind() == SetpointKind::kJointVelocity ||
+           session_.kind() == SetpointKind::kEeTwist)) {
         JointVec qd = JointVec::Zero();
         if (session_.kind() == SetpointKind::kEeTwist) {
           {
@@ -214,12 +227,27 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         // scaled to the URDF rating, loudly bounded instead of silently
         // integrated at whatever rate the leash lets it drag the arm.
         kinova::limit_joint_velocity(v_max_, qd);
+        const JointVec q_ref_prev = stream_q_ref_;
         integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas,
                                     kinova::kVelocityRefMaxLead, continuous_, q_lower_, q_upper_);
         kinova::JointTarget t;
         t.q = stream_q_ref_;
-        t.qd = qd;
-        t.has_velocity = true;  // free feedforward: damp toward the commanded rate, not zero
+        // Feed forward the rate the reference ACTUALLY advanced at, not the
+        // commanded one. In free motion they are equal (no pulsing: the mode
+        // holds this rate steady between writes). When the leash pins against
+        // a blocked arm the achieved rate goes to zero, and the damper term
+        // dies with it -- the commanded rate would keep a standing D*qd push
+        // on top of the leash-bounded spring for as long as the client
+        // streams, breaking the leash's "this bounds how hard the spring
+        // pushes" contract (review finding).
+        if (tick_dt > 0.0) {
+          for (int i = 0; i < kinova::kNumJoints; ++i) {
+            double step = stream_q_ref_[i] - q_ref_prev[i];
+            if (continuous_[i]) step = kinova::wrap_to_pi(step);
+            t.qd[i] = step / tick_dt;
+          }
+        }
+        t.has_velocity = true;  // free feedforward: damp toward the achieved rate, not zero
         imp_.set_joint_target(t);
       }
     }
@@ -277,6 +305,21 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
         r.error_string = "trajectory execution supports position and impedance only";
+        action_.settle(in.id, r);
+        continue;
+      }
+      // Same second layer for the gains: this path is reachable without
+      // on_trajectory_goal's accept-time checks (see the mode check above).
+      // An out-of-enum profile would throw out of resolve_gains on THIS
+      // thread, and unvalidated custom gains below the gravity floor would
+      // reach the arm -- the exact #64 failure (review finding).
+      if (in.goal.control_mode == ControlModeKind::kImpedance &&
+          (!known_profile(in.goal.gains.profile) ||
+           (in.goal.gains.profile == GainsProfile::kCustom &&
+            !validate_custom(in.goal.gains.custom).ok))) {
+        TrajectoryResult r;
+        r.error_code = result_code::kInvalidGoal;
+        r.error_string = "gains failed validation at execution";
         action_.settle(in.id, r);
         continue;
       }
@@ -396,6 +439,11 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         // means the default at promotion, and the finished goal's tuning dies
         // with it. Queue promotion cannot cross modes (rejected at drain), so
         // the running mode is the stashed goal's mode.
+        // Known window: st.promoted is reported AFTER the tick that executed
+        // the promoted goal's first sample, so that one sampler period runs
+        // under the finished goal's gains (the mode's gain ramp spans it).
+        // Closing it means promoting outside the executor's tick -- not worth
+        // the restructure for ~one period at a goal boundary.
         if (active_mode_kind_.load() == ControlModeKind::kImpedance)
           apply_impedance_gains(queued_gains);
         active_id = queued_id;

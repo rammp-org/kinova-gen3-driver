@@ -133,3 +133,29 @@ TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
     EXPECT_LE(kTorqueLimitFloor[i], kTorqueLimitCeil[i]);
   }
 }
+
+TEST(Gains, NamedProfileOverlaysGainsOntoTheSessionDefault) {
+  // Profiles own the GAIN fields only. Returning profile_params raw from
+  // resolve_gains swapped the whole struct, so the first profiled (or bare)
+  // command silently reset every deployment-tuned non-gain field -- ik
+  // limits, cmd_timeout_s, gain_ramp_s -- to struct defaults (review
+  // finding).
+  JointImpedanceParams base;  // stands in for a deployment-tuned default
+  base.cmd_timeout_s = 0.777;
+  base.gain_ramp_s = 1.25;
+  base.max_ref_speed = JointVec::Constant(0.321);
+
+  ImpedanceGains s;
+  s.profile = GainsProfile::kSoft;
+  const JointImpedanceParams out = resolve_gains(s, base);
+
+  const JointImpedanceParams soft = profile_params(GainsProfile::kSoft);
+  EXPECT_TRUE(out.Kq.isApprox(soft.Kq));
+  EXPECT_DOUBLE_EQ(out.zeta, soft.zeta);
+  EXPECT_DOUBLE_EQ(out.max_tracking_error, soft.max_tracking_error);
+  EXPECT_TRUE(out.torque_limit.isApprox(soft.torque_limit));
+  // ...and everything the deployment tuned survives.
+  EXPECT_DOUBLE_EQ(out.cmd_timeout_s, 0.777);
+  EXPECT_DOUBLE_EQ(out.gain_ramp_s, 1.25);
+  EXPECT_TRUE(out.max_ref_speed.isApprox(JointVec::Constant(0.321)));
+}
