@@ -54,6 +54,18 @@ kinova::JointImpedanceParams profile_params(GainsProfile p) {
   throw std::invalid_argument("profile_params: not a named profile");
 }
 
+bool known_profile(GainsProfile p) {
+  switch (p) {
+    case GainsProfile::kSessionDefault:
+    case GainsProfile::kSoft:
+    case GainsProfile::kMedium:
+    case GainsProfile::kStiff:
+    case GainsProfile::kCustom:
+      return true;
+  }
+  return false;
+}
+
 kinova::JointImpedanceParams resolve_gains(const GainsSpec& s,
                                            const kinova::JointImpedanceParams& session_default) {
   switch (s.profile) {

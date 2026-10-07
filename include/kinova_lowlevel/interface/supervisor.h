@@ -237,6 +237,9 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // against the RT loop): the sampler's integrate step clamps against them.
   JointVec q_lower_ = JointVec::Zero();
   JointVec q_upper_ = JointVec::Zero();
+  JointVec v_max_ = JointVec::Zero();  // URDF velocity ratings: the compliant
+                                       // stream cap, same source the stiff
+                                       // velocity mode seeds its max_qd from
   // pump_dyn_ is shared: the pump computes fk/jacobian for state publishing,
   // the sampler needs the jacobian for the twist resolution. Both threads are
   // non-RT; this mutex never appears on the RT path. Taken AFTER stream_mtx_

@@ -29,12 +29,15 @@ struct Trajectory {
   double duration_s() const { return points.empty() ? 0.0 : points.back().t_s; }
 };
 
+// Position only -- sample_target(tr, t_s).q, for callers with no profile use.
 kinova::JointVec sample(const Trajectory& tr, double t_s);
-// The full reference at t_s: q from sample(), qd/qdd as the derivatives of the
-// very polynomial sample() evaluates — so the feedforward always describes the
-// curve being commanded. has_velocity/has_acceleration are set only when the
-// trajectory actually carried a profile; outside the span the reference holds
-// still, so qd/qdd are reported as zero WITH has_velocity set.
+// The full reference at t_s: q, and qd/qdd as the derivatives of the very
+// polynomial q comes from (one evaluation, one copy of the coefficients) — so
+// the feedforward always describes the curve being commanded.
+// has_velocity/has_acceleration are set only when the trajectory actually
+// carried a profile; wherever the reference is pinned (outside the span, or a
+// duplicate-timestamp segment) it is not moving, so qd/qdd are reported as
+// zero WITH has_velocity set.
 kinova::JointTarget sample_target(const Trajectory& tr, double t_s);
 
 enum class Preemption { kQueue, kLatestWins };

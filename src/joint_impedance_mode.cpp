@@ -115,6 +115,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   // and never while the staleness freeze is latched (the hold must not be
   // fought by a damper chasing a profile nobody is maintaining).
   bool ff_velocity = false, ff_acceleration = false;
+  JointVec qd_cmd = JointVec::Zero();
   JointVec qdd_ff = JointVec::Zero();
 
   if (frozen_) {
@@ -126,6 +127,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
     const JointTarget& t = ext_q_target_[jt_active_.load(std::memory_order_acquire)];
     q_d_ = t.q;
     ff_velocity = t.has_velocity;
+    if (ff_velocity) qd_cmd = t.qd;
     ff_acceleration = t.has_velocity && t.has_acceleration;
     if (ff_acceleration) qdd_ff = t.qdd;
     last_ik_ = IkResult{};
@@ -155,14 +157,19 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
     q_d_[i] = q_prev[i] + std::clamp(step, -max_step, max_step);
   }
 
-  // The velocity the reference is ACTUALLY moving at, taken here — after the
-  // rate limit, before the wrap. Using the achieved reference rather than the
-  // planner's qd keeps the feedforward honest when the limiter clamps: we feed
-  // forward the motion we are commanding, not the motion we were asked for. The
-  // clamp above also bounds it by max_ref_speed, so a teleported target cannot
-  // produce a feedforward spike.
-  qd_ref_ = (dt_s > 0.0 && ff_velocity) ? JointVec((q_d_ - q_prev) / dt_s)
-                                        : JointVec(JointVec::Zero());
+  // The COMMANDED rate, not per-cycle reference deltas. Targets can arrive
+  // slower than compute runs (the sampler paces with sleep_for and jitters):
+  // a delta-derived rate is N*qd on the cycle after a write and zero on the
+  // other N-1, so the damper chatters at the beat frequency instead of
+  // damping toward the commanded rate (review finding). The max_ref_speed
+  // clamp keeps the feedforward honest against the rate limiter above: never
+  // feed forward a motion faster than the reference is allowed to make.
+  if (ff_velocity) {
+    for (int i = 0; i < kNumJoints; ++i)
+      qd_ref_[i] = std::clamp(qd_cmd[i], -p.max_ref_speed[i], p.max_ref_speed[i]);
+  } else {
+    qd_ref_.setZero();
+  }
 
   // Keep the reference in the SAME representation as the measured angle, which
   // the transport wraps to (-pi, pi]. The rate limit above folds its step, so

@@ -683,6 +683,22 @@ TEST(SampleTarget, DerivativesMatchFiniteDifferencesOfSample) {
   }
 }
 
+TEST(SampleTarget, ProfiledTrajectoryAlwaysReportsAVelocityOpinion) {
+  // has_velocity must hold at EVERY query of a profiled trajectory -- edges,
+  // normal segments, and duplicate-timestamp (zero-span) segments alike. A
+  // flag that flickered off flipped the impedance damper to absolute-velocity
+  // damping for exactly those ticks (review finding).
+  kinova::interface::Trajectory tr = profiled(false);
+  kinova::interface::JointWaypoint dup{vec7(0.5), 1.0};  // duplicates w1's t_s
+  dup.qd = vec7(0.0);
+  tr.points.insert(tr.points.begin() + 2, dup);
+  for (double t = -0.2; t <= 2.2; t += 0.01) {
+    const auto ref = kinova::interface::sample_target(tr, t);
+    EXPECT_TRUE(ref.has_velocity) << "t=" << t;
+    EXPECT_FALSE(ref.qd.hasNaN()) << "t=" << t;
+  }
+}
+
 TEST(SampleTarget, PositionsOnlyTrajectoryCarriesNoProfile) {
   const auto ref = kinova::interface::sample_target(ramp(2.0), 1.0);
   EXPECT_FALSE(ref.has_velocity);

@@ -51,6 +51,7 @@ Supervisor::Supervisor(const SupervisorDeps& d)
   // against the RT loop, so this is read here in the constructor rather than
   // per mode switch.
   pump_dyn_.joint_limits(q_lower_, q_upper_);
+  pump_dyn_.velocity_limits(v_max_);
   for (int i = 0; i < kinova::kNumJoints; ++i)
     continuous_[i] = !std::isfinite(q_lower_[i]) && !std::isfinite(q_upper_[i]);
 }
@@ -105,8 +106,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
   GoalId active_id{};
   bool have_active = false;
   JointVec q_meas = JointVec::Zero();  // last-good measured q; reused when a snapshot read fails
+  bool have_q_meas = false;            // false until the FIRST successful snapshot read:
+                                       // q_meas is still the Zero initializer before that,
+                                       // and nothing downstream may treat it as a posture
   GoalId queued_id{};
   bool have_queued = false;
+  GainsSpec queued_gains{};  // the queued goal's spec, resolved and applied at promotion
   auto last_tick = clock::now();  // for the compliant-velocity integration dt
   while (running_.load(std::memory_order_acquire)) {
     // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
@@ -185,11 +190,15 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
          session_.kind() == SetpointKind::kEeTwist)) {
       JointFeedback fb;
       const bool ok = snap_.load(fb);
+      have_q_meas = have_q_meas || ok;
       q_meas = sampled_q(ok, fb.q, q_meas);  // the leash needs MEASURED q, never a phantom zero
       std::lock_guard<std::mutex> l(stream_mtx_);
       // Re-checked under the lock: a close that landed since the test above has
       // already latched the hold, and one more target would overwrite it.
-      if (stream_open_.load()) {
+      // have_q_meas: before the FIRST good read, q_meas is the Zero
+      // initializer and the leash would drag the reference toward the zero
+      // posture (review finding) -- skip the tick, the mode keeps holding.
+      if (stream_open_.load() && have_q_meas) {
         JointVec qd = JointVec::Zero();
         if (session_.kind() == SetpointKind::kEeTwist) {
           {
@@ -201,6 +210,10 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         } else {
           qd = stream_qd_cmd_;
         }
+        // Same cap the stiff velocity path runs: a wrong-units command gets
+        // scaled to the URDF rating, loudly bounded instead of silently
+        // integrated at whatever rate the leash lets it drag the arm.
+        kinova::limit_joint_velocity(v_max_, qd);
         integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas,
                                     kinova::kVelocityRefMaxLead, continuous_, q_lower_, q_upper_);
         kinova::JointTarget t;
@@ -277,12 +290,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       //     runs skips the rebind, so traj_ keeps writing the previous sink.
       // Either way the arm sits still and the goal settles SUCCESSFUL. Testing
       // both makes the rebind a no-op at worst.
-      // EVERY impedance goal applies its resolved gains -- mode switch or not.
-      // Resolution happens here (execution), not at accept: the session default
-      // is whatever it is when the goal RUNS. No goal's gains outlive it: the
-      // next bare goal resolves kSessionDefault and overwrites them.
-      if (in.goal.control_mode == ControlModeKind::kImpedance)
-        apply_impedance_gains(in.goal.gains);
+      // NOTE: gains are applied when the goal STARTS RUNNING, after submit
+      // accepts (below) -- not here at drain. Applying at drain mutated the
+      // RUNNING goal's compliance for a queued goal, and even for one rejected
+      // two checks later (review finding). A queued goal's spec is stashed and
+      // resolved at promotion, so kSessionDefault still means "the default
+      // when the goal runs".
       if (in.goal.control_mode != traj_bound_kind_ ||
           in.goal.control_mode != active_mode_kind_.load()) {
         if (have_active) {  // cross-mode goal slipped past the accept-time pre-check (in_flight_
@@ -321,6 +334,11 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       }
       if (!have_active) {
         // idle -> active: the executor adopts immediately regardless of preemption.
+        // EVERY impedance goal applies its resolved gains as it starts -- mode
+        // switch or not. No goal's gains outlive it: the next bare goal
+        // resolves kSessionDefault and overwrites them.
+        if (in.goal.control_mode == ControlModeKind::kImpedance)
+          apply_impedance_gains(in.goal.gains);
         active_id = in.id;
         have_active = true;
         in_flight_.store(true);
@@ -337,6 +355,10 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
           action_.settle(queued_id, r);
           have_queued = false;
         }
+        // The latest-wins goal takes over at the next cycle boundary: its
+        // gains are the running tuning from here.
+        if (in.goal.control_mode == ControlModeKind::kImpedance)
+          apply_impedance_gains(in.goal.gains);
         active_id = in.id;
       } else {
         // kQueue: this goal waits behind the active one. The executor overwrites any
@@ -347,6 +369,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
           action_.settle(queued_id, r);
         }
         queued_id = in.id;
+        queued_gains = in.goal.gains;  // applied at PROMOTION, not now: the
+                                       // active goal keeps its own tuning
         have_queued = true;  // active_id / in_flight_ untouched
       }
     }
@@ -354,6 +378,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     if (traj_->is_active()) {
       JointFeedback fb;
       const bool ok = snap_.load(fb);        // sequence the read; don't rely on arg eval order
+      have_q_meas = have_q_meas || ok;
       q_meas = sampled_q(ok, fb.q, q_meas);  // failed read -> reuse last-good q (no phantom zero)
       const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed_override_.load());
       TrajectoryFeedback fbk;
@@ -367,6 +392,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
           r.error_code = result_code::kSuccessful;
           action_.settle(active_id, r);
         }
+        // The queued goal runs NOW, so its gains resolve now -- kSessionDefault
+        // means the default at promotion, and the finished goal's tuning dies
+        // with it. Queue promotion cannot cross modes (rejected at drain), so
+        // the running mode is the stashed goal's mode.
+        if (active_mode_kind_.load() == ControlModeKind::kImpedance)
+          apply_impedance_gains(queued_gains);
         active_id = queued_id;
         have_queued = false;  // promoted goal is now active; have_active/in_flight_ stay true
       }
@@ -405,6 +436,9 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (g.control_mode == ControlModeKind::kVelocity || g.control_mode == ControlModeKind::kTorque) {
     return GoalResponse::kReject;  // trajectory execution is position/impedance only
   }
+  // An out-of-enum profile byte must die here: resolve_gains on it throws on
+  // the sampler thread, where nothing catches (std::terminate mid-motion).
+  if (!known_profile(g.gains.profile)) return GoalResponse::kReject;
   // Gains that cannot act are a caller bug -- reject loudly, don't ignore.
   if (g.control_mode == ControlModeKind::kPosition &&
       g.gains.profile != GainsProfile::kSessionDefault)
@@ -494,6 +528,8 @@ void Supervisor::apply_impedance_gains(const GainsSpec& s) {
 // tuning it opened with (open-time-only semantics, spec open item resolved);
 // the next bare command picks the new default up.
 GainsResult Supervisor::on_set_gains(const GainsRequest& r) {
+  if (!known_profile(r.spec.profile))
+    return {false, "unknown gains profile: expected soft, medium, stiff or custom"};
   if (r.spec.profile == GainsProfile::kSessionDefault)
     return {false, "set_gains needs a named profile or custom gains"};
   if (r.spec.profile == GainsProfile::kCustom) {
@@ -599,21 +635,23 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
             "timeout_s must be > 0: an unbounded stream has no safe-stop"};
   if (!pair_supported(r.kind, r.control_mode))
     return {false, result_code::kStreamRejected, "unsupported (setpoint kind, control mode) pair"};
+  if (!known_profile(r.gains.profile))
+    return {false, result_code::kStreamRejected,
+            "unknown gains profile: expected session-default, soft, medium, stiff or custom"};
   // Gains that cannot act are a caller bug -- reject loudly, don't ignore.
   if (r.control_mode != ControlModeKind::kImpedance &&
       r.gains.profile != GainsProfile::kSessionDefault)
     return {false, result_code::kStreamRejected, "gains supplied for a non-impedance stream"};
-  if (r.control_mode == ControlModeKind::kImpedance) {
-    if (r.gains.profile == GainsProfile::kCustom) {
-      const GainsCheck c = validate_custom(r.gains.custom);
-      if (!c.ok) return {false, result_code::kStreamRejected, c.message};
-    }
-    // Applied BEFORE the mode switch so the first impedance cycle already runs
-    // this session's tuning. If session_.open later refuses, the gains stay on
-    // imp_ harmlessly: every next impedance command applies its own resolution,
-    // so nothing can run under them.
-    apply_impedance_gains(r.gains);
+  if (r.control_mode == ControlModeKind::kImpedance &&
+      r.gains.profile == GainsProfile::kCustom) {
+    const GainsCheck c = validate_custom(r.gains.custom);
+    if (!c.ok) return {false, result_code::kStreamRejected, c.message};
   }
+  // NOTE: the gains are applied AFTER session_.open accepts, below. Applying
+  // here looked harmless but mutated a live impedance HOLD on a refused open
+  // (review finding): the hold keeps running under gains of a session that
+  // never existed. Setpoints only land once stream_open_ is true, so applying
+  // after acceptance still precedes the first setpoint-driven cycle.
 
   // Switch modes BEFORE the session is marked open, so no setpoint can land mid-switch.
   const ControlModeKind want = r.control_mode;
@@ -678,6 +716,9 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
       vel_.set_command_timeout(-1.0);
     return res;
   }
+  // The session exists from here on: its gains become the live tuning now,
+  // before any setpoint can land (stream_open_ below is what admits them).
+  if (r.control_mode == ControlModeKind::kImpedance) apply_impedance_gains(r.gains);
   stream_open_.store(true);  // marked LAST
   return res;
 }

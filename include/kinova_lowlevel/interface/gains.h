@@ -24,6 +24,11 @@ struct GainsCheck {
 };
 // Bounds-check raw (kCustom) gains. Pure; callable from any thread.
 GainsCheck validate_custom(const JointImpedanceGains& g);
+// True iff p is one of the five enumerators. A GainsSpec arrives as a raw
+// byte from the C++ API (the ROS boundary filters its own); an out-of-enum
+// value must die at ACCEPT, because resolve_gains on it throws on the
+// sampler thread, where nothing catches.
+bool known_profile(GainsProfile p);
 // The complete parameter set a NAMED profile stands for. kCustom and
 // kSessionDefault are not names -- std::invalid_argument, fail loud.
 kinova::JointImpedanceParams profile_params(GainsProfile p);

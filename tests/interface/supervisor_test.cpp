@@ -1758,6 +1758,63 @@ TEST(SupervisorGains, RejectsGainsOnAPositionGoal) {
   EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
 }
 
+TEST(SupervisorGains, RejectsAnUnknownProfileByteOnEverySurface) {
+  // An out-of-enum byte otherwise reaches resolve_gains, which throws on the
+  // sampler thread, where nothing catches: std::terminate mid-motion (review
+  // finding). The ROS boundary filters its own; the C++ API must too.
+  SupFix f;  // no threads needed: all three are pure pre-checks
+  interface::GainsSpec s;
+  s.profile = static_cast<GainsProfile>(7);
+  EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
+  interface::GainsRequest gr;
+  gr.spec = s;
+  EXPECT_FALSE(f.sup.on_set_gains(gr).accepted);
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains = s;
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+}
+
+TEST(SupervisorGains, QueuedGoalGainsApplyAtPromotionNotAtDrain) {
+  // A queued goal's gains used to land the moment the goal was drained,
+  // mutating the RUNNING goal's compliance mid-motion (review finding). They
+  // must apply when the queued goal is promoted, and kSessionDefault must
+  // resolve at promotion time.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g1 = imp_goal(0.05);
+  g1.trajectory = ramp7(0.0, 0.05, 1.0);  // long enough to be mid-flight below
+  interface::GoalId id1{};
+  id1[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g1), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id1, g1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(450));  // mode settle + mid-flight
+
+  interface::GainsSpec s;
+  s.profile = GainsProfile::kStiff;
+  interface::TrajectoryGoal g2 = imp_goal(0.08, s);
+  g2.trajectory = ramp7(0.05, 0.08, 0.3);
+  g2.preemption = interface::Preemption::kQueue;
+  interface::GoalId id2{};
+  id2[0] = 2;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g2), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id2, g2);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));  // g1 still running
+  const JointImpedanceParams mid = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(mid.Kq))
+      << "queued goal's gains leaked into the running goal";
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));  // g1 done, g2 promoted + done
+  f.sup.stop();
+  f.teardown();
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(profile_params(GainsProfile::kStiff).Kq))
+      << "promotion did not apply the queued goal's gains";
+}
+
 TEST(SupervisorGains, ImpedanceStreamOpensWithRequestedProfile) {
   SupFix f;
   f.sup.start();

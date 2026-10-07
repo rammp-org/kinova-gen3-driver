@@ -676,10 +676,11 @@ TEST(JointImpedance, ProfiledTargetCancelsDampingAtReferenceVelocity) {
   m.compute(fb, dt, c_plain);
   EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);  // no profile, no ff
 
-  // Same motion WITH a profile: qd_ref = achieved step / dt = v, damper ~0.
+  // Same motion WITH a profile: qd_ref = the COMMANDED rate v, damper ~0.
   m.on_enter(fb);  // reset reference to fb.q
   JointTarget t;
   t.q = JointVec(fb.q.array() + v * dt);
+  t.qd = JointVec::Constant(v);  // has_velocity means qd is meaningful
   t.has_velocity = true;
   JointCommand c_ff;
   m.set_joint_target(t);
@@ -689,6 +690,30 @@ TEST(JointImpedance, ProfiledTargetCancelsDampingAtReferenceVelocity) {
   const JointVec Dq = m.last_damping();
   for (int i = 0; i < kNumJoints; ++i)
     EXPECT_NEAR(c_ff.torque[i] - c_plain.torque[i], Dq[i] * v, 1e-6);
+}
+
+TEST(JointImpedance, FeedforwardHoldsTheCommandedRateBetweenTargetWrites) {
+  // Targets can arrive slower than compute runs (the sampler paces with
+  // sleep_for and jitters). The feedforward must damp toward the COMMANDED
+  // rate on every cycle; a delta-derived rate is N*qd on the cycle after a
+  // write and zero on the other N-1 (review finding).
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 0.01);
+  t.qd = JointVec::Constant(0.2);
+  t.has_velocity = true;
+  m.set_joint_target(t);  // ONE write...
+  JointCommand c;
+  for (int k = 0; k < 5; ++k) {  // ...five cycles
+    m.compute(fb, 0.001, c);
+    for (int i = 0; i < kNumJoints; ++i)
+      EXPECT_NEAR(m.last_ref_velocity()[i], 0.2, 1e-9) << "cycle " << k << " joint " << i;
+  }
 }
 
 TEST(JointImpedance, RateLimiterBoundsTheFedForwardVelocity) {
@@ -701,12 +726,14 @@ TEST(JointImpedance, RateLimiterBoundsTheFedForwardVelocity) {
   fb.qd.setZero();
   m.on_enter(fb);
   JointTarget t;
-  t.q = JointVec(fb.q.array() + 1.0);  // teleported target
+  t.q = JointVec(fb.q.array() + 1.0);          // teleported target...
+  t.qd = JointVec::Constant(1000.0);           // ...with an absurd commanded rate
   t.has_velocity = true;
   JointCommand c;
   m.set_joint_target(t);
   m.compute(fb, 0.001, c);
-  // Achieved reference velocity == the clamp, not the 1000 rad/s implied ask.
+  // Fed-forward velocity == the clamp, not the 1000 rad/s ask: the feedforward
+  // may never describe a motion faster than the reference is allowed to make.
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(m.last_ref_velocity()[i], 0.5, 1e-9);
 }
 
@@ -721,6 +748,7 @@ TEST(JointImpedance, StalenessFreezeZeroesTheFeedforward) {
   m.on_enter(fb);
   JointTarget t;
   t.q = JointVec(fb.q.array() + 0.3);
+  t.qd = JointVec::Constant(0.3);
   t.has_velocity = true;
   m.set_joint_target(t);
   JointCommand c;

@@ -522,3 +522,25 @@ TEST(JointVelocityModeTwist, TheDampingRampIsWhatSeparatesTheseTwoSolves) {
   EXPECT_TRUE(at_cap);
   EXPECT_LT(ramped.cwiseAbs().maxCoeff(), 0.5 * v_max.minCoeff());
 }
+
+#include "kinova_lowlevel/velocity_reference.h"
+
+TEST(VelocityReference, LimitJointVelocityScalesUniformlyThenClamps) {
+  // The shared cap the compliant stream path runs (review finding: it had no
+  // counterpart to JointVelocityMode::limit). Uniform scaling preserves the
+  // commanded direction; the per-joint clamp is the backstop.
+  kinova::JointVec v_max = kinova::JointVec::Constant(1.0);
+  v_max[6] = 0.5;
+  kinova::JointVec qd;
+  qd << 0.2, -0.2, 0.2, 0.2, 0.2, 0.2, 1.0;  // joint 7 at 2x its cap
+  kinova::limit_joint_velocity(v_max, qd);
+  EXPECT_NEAR(qd[6], 0.5, 1e-12);            // fastest joint lands ON its cap
+  EXPECT_NEAR(qd[0], 0.1, 1e-12);            // the rest scale with it (x0.5)
+  EXPECT_NEAR(qd[1], -0.1, 1e-12);           // sign preserved
+
+  kinova::JointVec zero_cap = v_max;
+  zero_cap[3] = 0.0;                          // 0/0 guard: the clamp holds
+  kinova::JointVec qd2 = kinova::JointVec::Constant(0.3);
+  kinova::limit_joint_velocity(zero_cap, qd2);
+  EXPECT_DOUBLE_EQ(qd2[3], 0.0);
+}

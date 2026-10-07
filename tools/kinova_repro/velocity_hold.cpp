@@ -82,8 +82,15 @@ int main(int argc, char** argv) {
     auto next = [&] { return std::string(i + 1 < argc ? argv[++i] : ""); };
     if (a == "--ip") ip = next();
     else if (a == "--variant") variant = next();
-    else if (a == "--duration") duration = std::stod(next());
-    else if (a == "--max-drift-deg") max_drift_deg = std::stod(next());
+    else if (a == "--duration" || a == "--max-drift-deg") {
+      // stod on a flag given no value throws uncaught; die with usage instead.
+      try {
+        (a == "--duration" ? duration : max_drift_deg) = std::stod(next());
+      } catch (const std::exception&) {
+        std::fprintf(stderr, "%s needs a numeric value\n", a.c_str());
+        return 2;
+      }
+    }
     else { std::fprintf(stderr, "unknown arg %s\n", a.c_str()); return 2; }
   }
   if (!variant.empty() && variant != "echo" && variant != "latch") {
@@ -204,12 +211,19 @@ int main(int argc, char** argv) {
   try { base.SetServoingMode(sm); } catch (...) {}
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-  std::printf("\nvariant=%s  elapsed=%.2fs  ticks=%ld (%.0f Hz)%s\n", variant.c_str(), elapsed,
-              ticks, ticks / elapsed, aborted ? "  ABORTED: drift limit" : "");
-  std::printf("joint  drift_deg  drift_rate_deg_s  mean_qd_deg_s  mean_torque_Nm\n");
-  for (int i = 0; i < n; ++i) {
-    std::printf("%5d  %+9.3f  %+16.4f  %+13.4f  %+14.3f\n", i + 1, dq[i], dq[i] / elapsed,
-                qd_sum[i] / ticks, tau_sum[i] / ticks);
+  // Zero-iteration exit (Ctrl-C before the first Refresh, duration <= 0)
+  // would otherwise print NaN/inf in a report meant to go to Kinova as-is.
+  if (ticks == 0 || elapsed <= 0.0) {
+    std::printf("\nvariant=%s  elapsed=%.2fs  ticks=%ld -- no cycles ran, no rates to report\n",
+                variant.c_str(), elapsed, ticks);
+  } else {
+    std::printf("\nvariant=%s  elapsed=%.2fs  ticks=%ld (%.0f Hz)%s\n", variant.c_str(), elapsed,
+                ticks, ticks / elapsed, aborted ? "  ABORTED: drift limit" : "");
+    std::printf("joint  drift_deg  drift_rate_deg_s  mean_qd_deg_s  mean_torque_Nm\n");
+    for (int i = 0; i < n; ++i) {
+      std::printf("%5d  %+9.3f  %+16.4f  %+13.4f  %+14.3f\n", i + 1, dq[i], dq[i] / elapsed,
+                  qd_sum[i] / ticks, tau_sum[i] / ticks);
+    }
   }
 
   tcp_sess.CloseSession();

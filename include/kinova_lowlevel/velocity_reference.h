@@ -50,6 +50,22 @@ inline void integrate_leashed_reference(JointVec& q_ref, const JointVec& qd, dou
   }
 }
 
+// Cap a joint-velocity command against the URDF ratings, the same shape as
+// JointVelocityMode::limit: scale UNIFORMLY so the fastest joint just reaches
+// its cap (a bare per-joint clamp would rotate a commanded EE twist when one
+// joint saturates), then hard-clamp as the backstop. The compliant stream
+// path must cap like the stiff path does -- a wrong-units qd would otherwise
+// integrate silently and drag the arm on the leash (review finding).
+inline void limit_joint_velocity(const JointVec& v_max, JointVec& qd) noexcept {
+  double s = 1.0;
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double a = std::abs(qd[i]);
+    if (a > v_max[i] && a > 0.0) s = std::min(s, v_max[i] / a);
+  }
+  qd *= s;
+  for (int i = 0; i < kNumJoints; ++i) qd[i] = std::clamp(qd[i], -v_max[i], v_max[i]);
+}
+
 // Parameters for the twist resolution. Field semantics and defaults are
 // identical to the matching JointVelocityParams fields -- see that struct's
 // comments for the damping/manipulability rationale and the measured numbers
