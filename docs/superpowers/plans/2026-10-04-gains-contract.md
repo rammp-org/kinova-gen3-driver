@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** One validated `GainsSpec` contract (named profiles + raw escape) on trajectory goals, stream opens, and `set_gains`, with no gain leakage, no partial resets, and no mode-switch gating.
+**Goal:** One validated `ImpedanceGains` contract (named profiles + raw escape) on trajectory goals, stream opens, and `set_gains`, with no gain leakage, no partial resets, and no mode-switch gating.
 
 **Architecture:** A new pure unit (`interface/gains.h|cpp`) owns the profile table, validation bounds, and spec→params resolution. The Supervisor keeps a mutex-guarded session default and applies resolved gains on every impedance goal execution and impedance stream open; `on_set_gains` un-stubs into "replace the session default." The RT path is untouched — all changes live on the backend/sampler threads.
 
@@ -32,26 +32,26 @@
 ### Task 1: Gains vocabulary, profile table, validation
 
 **Files:**
-- Modify: `include/kinova_lowlevel/interface/value_types.h:92-96` (add `GainsProfile`, `GainsSpec` next to `JointImpedanceGains`)
+- Modify: `include/kinova_lowlevel/interface/value_types.h:92-96` (add `GainsProfile`, `ImpedanceGains` next to `JointGainValues`)
 - Create: `include/kinova_lowlevel/interface/gains.h`
 - Create: `src/interface/gains.cpp`
 - Create: `tests/interface/gains_test.cpp`
 - Modify: `CMakeLists.txt:106-109` (lib sources), `:356-360` (test sources)
 
 **Interfaces:**
-- Consumes: `JointImpedanceParams` (`joint_impedance_mode.h:13`), `JointImpedanceGains` (`value_types.h:92`), `Dynamics` (test only).
+- Consumes: `JointImpedanceParams` (`joint_impedance_mode.h:13`), `JointGainValues` (`value_types.h:92`), `Dynamics` (test only).
 - Produces (later tasks and the ROS repo rely on these exact names):
   - `enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom }`
-  - `struct GainsSpec { GainsProfile profile = GainsProfile::kSessionDefault; JointImpedanceGains custom{}; }` (both in `value_types.h`)
+  - `struct ImpedanceGains { GainsProfile profile = GainsProfile::kSessionDefault; JointGainValues custom{}; }` (both in `value_types.h`)
   - `kinova::JointImpedanceParams profile_params(GainsProfile)` — named entries only; throws `std::invalid_argument` for `kCustom`/`kSessionDefault`
   - `struct GainsCheck { bool ok = false; std::string message; }`
-  - `GainsCheck validate_custom(const JointImpedanceGains&)`
-  - `JointImpedanceParams resolve_gains(const GainsSpec&, const JointImpedanceParams& session_default)`
+  - `GainsCheck validate_custom(const JointGainValues&)`
+  - `JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default)`
   - bounds constants: `kKqMin`, `kKqMax`, `kZetaMin`, `kZetaMax`, `kTorqueLimitFloor`, `kTorqueLimitCeil` (all in `kinova::interface`, declared in `gains.h`)
 
 - [ ] **Step 1: Add the spec types to `value_types.h`**
 
-Directly below `JointImpedanceGains` (line 96):
+Directly below `JointGainValues` (line 96):
 
 ```cpp
 // How a command names its compliance. kSessionDefault = "whatever the session
@@ -59,9 +59,9 @@ Directly below `JointImpedanceGains` (line 96):
 // complete, core-owned parameter sets; kCustom overrides kq/zeta/torque_limit
 // on top of the session default and MUST pass validate_custom at accept time.
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
-struct GainsSpec {
+struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointImpedanceGains custom{};  // read iff profile == kCustom
+  JointGainValues custom{};  // read iff profile == kCustom
 };
 ```
 
@@ -76,8 +76,8 @@ using namespace kinova;
 using namespace kinova::interface;
 
 namespace {
-JointImpedanceGains good() {
-  JointImpedanceGains g;
+JointGainValues good() {
+  JointGainValues g;
   g.kq = (JointVec() << 80, 80, 80, 80, 30, 30, 30).finished();
   g.zeta = 0.5;
   g.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
@@ -90,7 +90,7 @@ TEST(GainsValidation, AcceptsTheModeDefaults) { EXPECT_TRUE(validate_custom(good
 TEST(GainsValidation, RejectsZeroTorqueLimit) {
   // THE #64 shape: a zero-filled message default. The clamp would eat gravity
   // and the arm falls. Must be refused with a reason, never clamped.
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.torque_limit = JointVec::Zero();
   const GainsCheck c = validate_custom(g);
   EXPECT_FALSE(c.ok);
@@ -98,13 +98,13 @@ TEST(GainsValidation, RejectsZeroTorqueLimit) {
 }
 
 TEST(GainsValidation, RejectsTorqueLimitBelowGravityFloor) {
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.torque_limit = kTorqueLimitFloor * 0.5;
   EXPECT_FALSE(validate_custom(g).ok);
 }
 
 TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.kq[2] = std::numeric_limits<double>::quiet_NaN();  // NaN survives std::clamp in compute()
   EXPECT_FALSE(validate_custom(g).ok);
   g = good();
@@ -124,7 +124,7 @@ TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
 TEST(GainsProfiles, EveryNamedEntryPassesItsOwnValidation) {
   for (GainsProfile p : {GainsProfile::kSoft, GainsProfile::kMedium, GainsProfile::kStiff}) {
     const JointImpedanceParams jp = profile_params(p);
-    JointImpedanceGains g;
+    JointGainValues g;
     g.kq = jp.Kq;
     g.zeta = jp.zeta;
     g.torque_limit = jp.torque_limit;
@@ -150,7 +150,7 @@ TEST(GainsProfiles, NamelessKindsThrow) {
 
 TEST(GainsResolve, SessionDefaultReturnsTheSessionDefault) {
   JointImpedanceParams def = profile_params(GainsProfile::kSoft);
-  const JointImpedanceParams r = resolve_gains(GainsSpec{}, def);
+  const JointImpedanceParams r = resolve_gains(ImpedanceGains{}, def);
   EXPECT_TRUE(r.Kq.isApprox(def.Kq));
   EXPECT_DOUBLE_EQ(r.max_tracking_error, def.max_tracking_error);
 }
@@ -159,7 +159,7 @@ TEST(GainsResolve, CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault) {
   // No-partial-reset guarantee: leash/ramp/ref-speed come from the session
   // default, NOT from a default-constructed params (the old mode-switch bug).
   JointImpedanceParams def = profile_params(GainsProfile::kSoft);  // leash 0.45
-  GainsSpec s;
+  ImpedanceGains s;
   s.profile = GainsProfile::kCustom;
   s.custom = good();
   s.custom.zeta = 0.8;
@@ -232,7 +232,7 @@ struct GainsCheck {
   std::string message;
 };
 // Bounds-check raw (kCustom) gains. Pure; callable from any thread.
-GainsCheck validate_custom(const JointImpedanceGains& g);
+GainsCheck validate_custom(const JointGainValues& g);
 // The complete parameter set a NAMED profile stands for. kCustom and
 // kSessionDefault are not names -- std::invalid_argument, fail loud.
 kinova::JointImpedanceParams profile_params(GainsProfile p);
@@ -241,7 +241,7 @@ kinova::JointImpedanceParams profile_params(GainsProfile p);
 //   named profile   -> profile_params(p)
 //   kCustom         -> session_default with kq/zeta/torque_limit overridden
 //                      (validate_custom MUST have accepted it upstream)
-kinova::JointImpedanceParams resolve_gains(const GainsSpec& s,
+kinova::JointImpedanceParams resolve_gains(const ImpedanceGains& s,
                                            const kinova::JointImpedanceParams& session_default);
 }  // namespace kinova::interface
 ```
@@ -260,7 +260,7 @@ namespace kinova::interface {
 const JointVec kTorqueLimitFloor = (JointVec() << 5, 25, 5, 15, 2, 3, 0.5).finished();
 const JointVec kTorqueLimitCeil = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
 
-GainsCheck validate_custom(const JointImpedanceGains& g) {
+GainsCheck validate_custom(const JointGainValues& g) {
   auto fail = [](const std::string& m) { return GainsCheck{false, m}; };
   if (!std::isfinite(g.zeta) || g.zeta < kZetaMin || g.zeta > kZetaMax)
     return fail("zeta must be finite and in [" + std::to_string(kZetaMin) + ", " +
@@ -301,7 +301,7 @@ kinova::JointImpedanceParams profile_params(GainsProfile p) {
   throw std::invalid_argument("profile_params: not a named profile");
 }
 
-kinova::JointImpedanceParams resolve_gains(const GainsSpec& s,
+kinova::JointImpedanceParams resolve_gains(const ImpedanceGains& s,
                                            const kinova::JointImpedanceParams& session_default) {
   switch (s.profile) {
     case GainsProfile::kSessionDefault:
@@ -348,12 +348,12 @@ Expected: ALL PASS.
 ```bash
 git add include/kinova_lowlevel/interface/value_types.h include/kinova_lowlevel/interface/gains.h \
         src/interface/gains.cpp tests/interface/gains_test.cpp CMakeLists.txt
-git commit -m "feat(interface): GainsSpec vocabulary, profile table, accept-time validation (#63, #64)"
+git commit -m "feat(interface): ImpedanceGains vocabulary, profile table, accept-time validation (#63, #64)"
 ```
 
 ---
 
-### Task 2: Trajectory goals carry GainsSpec; gains apply on every impedance goal
+### Task 2: Trajectory goals carry ImpedanceGains; gains apply on every impedance goal
 
 **Files:**
 - Modify: `include/kinova_lowlevel/interface/value_types.h:98-112` (`TrajectoryGoal`)
@@ -363,10 +363,10 @@ git commit -m "feat(interface): GainsSpec vocabulary, profile table, accept-time
 - Modify: `tests/interface/supervisor_test.cpp:33,326,413` (old-field sites) + new tests
 
 **Interfaces:**
-- Consumes: `GainsSpec`, `validate_custom`, `resolve_gains`, `profile_params` (Task 1).
+- Consumes: `ImpedanceGains`, `validate_custom`, `resolve_gains`, `profile_params` (Task 1).
 - Produces:
-  - `TrajectoryGoal.gains` is now `GainsSpec` (no `has_gains`) — the ROS mapping (Plan 4) builds against this.
-  - `Supervisor::apply_impedance_gains(const GainsSpec&)` (private) — Task 3 reuses it at stream open.
+  - `TrajectoryGoal.gains` is now `ImpedanceGains` (no `has_gains`) — the ROS mapping (Plan 4) builds against this.
+  - `Supervisor::apply_impedance_gains(const ImpedanceGains&)` (private) — Task 3 reuses it at stream open.
   - `Supervisor` member `session_default_params_` + `gains_mtx_` — Task 3's `on_set_gains` writes it.
   - `JointImpedanceMode::params()` public — tests and diagnostics read the live tuning.
 
@@ -375,7 +375,7 @@ git commit -m "feat(interface): GainsSpec vocabulary, profile table, accept-time
 In `TrajectoryGoal` replace
 
 ```cpp
-  JointImpedanceGains gains{};
+  JointGainValues gains{};
   bool has_gains = false;
 ```
 
@@ -386,7 +386,7 @@ with
   // Defaults to the session default (initially the kMedium profile). A
   // position goal carrying a non-default spec is REJECTED: gains that cannot
   // act are a caller bug, surfaced loudly, not ignored.
-  GainsSpec gains{};
+  ImpedanceGains gains{};
 ```
 
 - [ ] **Step 2: Make `JointImpedanceMode::params()` public**
@@ -404,7 +404,7 @@ the public section (below `last_damping()`), with the comment:
 
 ```cpp
 namespace {
-interface::TrajectoryGoal imp_goal(double to, interface::GainsSpec spec = {}) {
+interface::TrajectoryGoal imp_goal(double to, interface::ImpedanceGains spec = {}) {
   interface::TrajectoryGoal g;
   g.trajectory = ramp7(0.0, to, 0.3);
   g.control_mode = interface::ControlModeKind::kImpedance;
@@ -437,7 +437,7 @@ TEST(SupervisorGains, CustomGainsDoNotLeakIntoTheNextGoal) {
   SupFix f;
   f.sup.start();
   f.run_rt();
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = interface::GainsProfile::kCustom;
   s.custom.kq = JointVec::Constant(50.0);
   s.custom.zeta = 0.9;
@@ -458,7 +458,7 @@ TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
   f.sup.start();
   f.run_rt();
   run_goal(f, imp_goal(0.03), 1);  // enter impedance with defaults
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = interface::GainsProfile::kStiff;
   run_goal(f, imp_goal(0.06, s), 2);  // same mode, new gains
   f.sup.stop();
@@ -470,7 +470,7 @@ TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
 
 TEST(SupervisorGains, RejectsInvalidCustomGainsAtAccept) {
   SupFix f;  // no threads needed: on_trajectory_goal is a pure pre-check
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = interface::GainsProfile::kCustom;  // all-zero custom = #64 shape
   EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
 }
@@ -497,12 +497,12 @@ point; proceed to Step 5.
 private section add:
 
 ```cpp
-  // Resolve a command's GainsSpec against the session default and push it into
+  // Resolve a command's ImpedanceGains against the session default and push it into
   // imp_. gains_mtx_ makes the two writer sites (sampler drain, backend stream
   // open) mutually exclusive on imp_.set_gains' single-writer double-buffer --
   // they are already mutually exclusive by the goal/stream gating, but that
   // argument is three files wide; the mutex makes it local. Never on the RT path.
-  void apply_impedance_gains(const GainsSpec& s);
+  void apply_impedance_gains(const ImpedanceGains& s);
   std::mutex gains_mtx_;  // guards session_default_params_ + serialises set_gains
   JointImpedanceParams session_default_params_ = profile_params(GainsProfile::kMedium);
 ```
@@ -510,7 +510,7 @@ private section add:
 `supervisor.cpp`:
 
 ```cpp
-void Supervisor::apply_impedance_gains(const GainsSpec& s) {
+void Supervisor::apply_impedance_gains(const ImpedanceGains& s) {
   std::lock_guard<std::mutex> l(gains_mtx_);
   imp_.set_gains(resolve_gains(s, session_default_params_));
 }
@@ -556,7 +556,7 @@ assertions — the RT path is untouched, prove it rather than assume it).
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A && git commit -m "feat(interface): trajectory goals carry GainsSpec; gains apply per goal, validated at accept (#63)"
+git add -A && git commit -m "feat(interface): trajectory goals carry ImpedanceGains; gains apply per goal, validated at accept (#63)"
 ```
 
 ---
@@ -571,8 +571,8 @@ git add -A && git commit -m "feat(interface): trajectory goals carry GainsSpec; 
 **Interfaces:**
 - Consumes: `apply_impedance_gains`, `session_default_params_`, `gains_mtx_` (Task 2); `validate_custom`, `resolve_gains` (Task 1).
 - Produces:
-  - `StreamOpenRequest.gains` (`GainsSpec`) — Plan 4's `OpenStream.srv` maps onto it.
-  - `GainsRequest.spec` (`GainsSpec`, replaces the `gains` member) — Plan 4's `SetGains.srv` maps onto it.
+  - `StreamOpenRequest.gains` (`ImpedanceGains`) — Plan 4's `OpenStream.srv` maps onto it.
+  - `GainsRequest.spec` (`ImpedanceGains`, replaces the `gains` member) — Plan 4's `SetGains.srv` maps onto it.
   - `on_set_gains` semantics: validates, replaces the session default, touches no live mode; next bare impedance command picks it up.
 
 - [ ] **Step 1: Extend the request types**
@@ -583,14 +583,14 @@ git add -A && git commit -m "feat(interface): trajectory goals carry GainsSpec; 
   // Compliance for an impedance session, resolved and applied AT OPEN. A
   // non-default spec on a non-impedance open is REJECTED. Mid-session gain
   // changes are deliberately out of scope for v1.3.0: close and re-open.
-  GainsSpec gains{};
+  ImpedanceGains gains{};
 ```
 
 `GainsRequest` becomes:
 
 ```cpp
 struct GainsRequest {
-  GainsSpec spec{};
+  ImpedanceGains spec{};
   Token token{};
 };
 ```
@@ -746,13 +746,13 @@ git add -A && git commit -m "feat(interface): streams open with gains; on_set_ga
 ### Task 4: Documentation and changelog
 
 **Files:**
-- Modify: `docs/interface.md` (gains contract section), `docs/guide/control-modes.md` (profiles table), `docs/reference/api.md` (GainsSpec, validation bounds, on_set_gains semantics), `CHANGELOG.md` (unreleased v1.3.0 section, breaking-change note)
+- Modify: `docs/interface.md` (gains contract section), `docs/guide/control-modes.md` (profiles table), `docs/reference/api.md` (ImpedanceGains, validation bounds, on_set_gains semantics), `CHANGELOG.md` (unreleased v1.3.0 section, breaking-change note)
 
 **Interfaces:** none (prose).
 
 - [ ] **Step 1: Write the docs**
 
-Cover, in the matching layer: the three-way `GainsSpec` (profile / custom /
+Cover, in the matching layer: the three-way `ImpedanceGains` (profile / custom /
 absent-means-session-default), the soft/medium/stiff table with its initial
 values and the note that the arm pass may retune them, the validation bounds
 (incl. the gravity-floor rationale), the no-leak and apply-per-command

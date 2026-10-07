@@ -185,7 +185,7 @@ control_msgs/JointTolerance[]         goal_tolerance      # reused from FJT
 builtin_interfaces/Duration           goal_time_tolerance # reused from FJT
 uint8   control_mode        # 0 = POSITION, 1 = IMPEDANCE      (our addition)
 uint8   preemption          # 0 = QUEUE,    1 = LATEST_WINS    (our addition)
-JointImpedanceGains gains   # used iff control_mode == IMPEDANCE (our addition)
+JointGainValues gains   # used iff control_mode == IMPEDANCE (our addition)
 string  sender_id           # arbitration hook (policy deferred) (our addition)
 ---
 # ---------- Result ----------   (identical shape to FJT)

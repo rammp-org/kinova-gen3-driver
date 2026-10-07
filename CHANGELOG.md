@@ -15,7 +15,7 @@ that heading to the new version and bumps `package.xml`.
 ### Added
 
 - **One gains contract on every impedance surface** (#63). Commands name their
-  compliance with a `GainsSpec`: a core-owned named profile (`soft` / `medium` /
+  compliance with a `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
   `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains
   (kq/zeta/torque_limit over the session default), or nothing — which means the
   session default, initially `medium`. Trajectory goals, stream opens
@@ -48,7 +48,7 @@ that heading to the new version and bumps `package.xml`.
 ### Changed
 
 - **BREAKING (C++):** `TrajectoryGoal` drops `has_gains`/`gains`
-  (`JointImpedanceGains`) for `GainsSpec gains`; `GainsRequest.gains` becomes
+  (`JointGainValues`) for `ImpedanceGains gains`; `GainsRequest.gains` becomes
   `GainsRequest.spec`; `StreamOpenRequest` gains a `gains` field;
   `JointTargetSink` implementers now override `set_joint_target(const
   JointTarget&)` (position-only `set_target` remains as a non-virtual

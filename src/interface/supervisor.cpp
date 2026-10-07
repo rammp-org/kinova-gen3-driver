@@ -111,7 +111,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
                                        // and nothing downstream may treat it as a posture
   GoalId queued_id{};
   bool have_queued = false;
-  GainsSpec queued_gains{};  // the queued goal's spec, resolved and applied at promotion
+  ImpedanceGains queued_gains{};  // the queued goal's spec, resolved and applied at promotion
   auto last_tick = clock::now();  // for the compliant-velocity integration dt
   while (running_.load(std::memory_order_acquire)) {
     // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
@@ -519,7 +519,7 @@ kinova::PoseTargetSink* Supervisor::pose_sink_for(ControlModeKind k) {
   }
   return nullptr;
 }
-void Supervisor::apply_impedance_gains(const GainsSpec& s) {
+void Supervisor::apply_impedance_gains(const ImpedanceGains& s) {
   std::lock_guard<std::mutex> l(gains_mtx_);
   imp_.set_gains(resolve_gains(s, session_default_params_));
 }

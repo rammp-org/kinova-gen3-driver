@@ -13,7 +13,7 @@ namespace kinova::interface {
 const JointVec kTorqueLimitFloor = (JointVec() << 0.5, 37.6, 14.5, 14.5, 3.7, 3.7, 0.5).finished();
 const JointVec kTorqueLimitCeil = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
 
-GainsCheck validate_custom(const JointImpedanceGains& g) {
+GainsCheck validate_custom(const JointGainValues& g) {
   auto fail = [](const std::string& m) { return GainsCheck{false, m}; };
   if (!std::isfinite(g.zeta) || g.zeta < kZetaMin || g.zeta > kZetaMax)
     return fail("zeta must be finite and in [" + std::to_string(kZetaMin) + ", " +
@@ -66,7 +66,7 @@ bool known_profile(GainsProfile p) {
   return false;
 }
 
-kinova::JointImpedanceParams resolve_gains(const GainsSpec& s,
+kinova::JointImpedanceParams resolve_gains(const ImpedanceGains& s,
                                            const kinova::JointImpedanceParams& session_default) {
   switch (s.profile) {
     case GainsProfile::kSessionDefault:

@@ -101,7 +101,7 @@ struct TrajectoryGoal {
   std::string sender_id;
   Token token{};
 };
-struct GainsRequest { JointImpedanceGains gains{}; Token token{}; };
+struct GainsRequest { JointGainValues gains{}; Token token{}; };
 struct CancelRequest { GoalId id{}; Token token{}; };   // new: cancel had no struct to carry a token
 ```
 

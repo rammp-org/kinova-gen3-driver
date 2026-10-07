@@ -10,8 +10,8 @@ using namespace kinova;
 using namespace kinova::interface;
 
 namespace {
-JointImpedanceGains good() {
-  JointImpedanceGains g;
+JointGainValues good() {
+  JointGainValues g;
   g.kq = (JointVec() << 80, 80, 80, 80, 30, 30, 30).finished();
   g.zeta = 0.5;
   g.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
@@ -24,7 +24,7 @@ TEST(GainsValidation, AcceptsTheModeDefaults) { EXPECT_TRUE(validate_custom(good
 TEST(GainsValidation, RejectsZeroTorqueLimit) {
   // THE #64 shape: a zero-filled message default. The clamp would eat gravity
   // and the arm falls. Must be refused with a reason, never clamped.
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.torque_limit = JointVec::Zero();
   const GainsCheck c = validate_custom(g);
   EXPECT_FALSE(c.ok);
@@ -32,13 +32,13 @@ TEST(GainsValidation, RejectsZeroTorqueLimit) {
 }
 
 TEST(GainsValidation, RejectsTorqueLimitBelowGravityFloor) {
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.torque_limit = kTorqueLimitFloor * 0.5;
   EXPECT_FALSE(validate_custom(g).ok);
 }
 
 TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
-  JointImpedanceGains g = good();
+  JointGainValues g = good();
   g.kq[2] = std::numeric_limits<double>::quiet_NaN();  // NaN survives std::clamp in compute()
   EXPECT_FALSE(validate_custom(g).ok);
   g = good();
@@ -58,7 +58,7 @@ TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
 TEST(GainsProfiles, EveryNamedEntryPassesItsOwnValidation) {
   for (GainsProfile p : {GainsProfile::kSoft, GainsProfile::kMedium, GainsProfile::kStiff}) {
     const JointImpedanceParams jp = profile_params(p);
-    JointImpedanceGains g;
+    JointGainValues g;
     g.kq = jp.Kq;
     g.zeta = jp.zeta;
     g.torque_limit = jp.torque_limit;
@@ -84,7 +84,7 @@ TEST(GainsProfiles, NamelessKindsThrow) {
 
 TEST(GainsResolve, SessionDefaultReturnsTheSessionDefault) {
   const JointImpedanceParams def = profile_params(GainsProfile::kSoft);
-  const JointImpedanceParams r = resolve_gains(GainsSpec{}, def);
+  const JointImpedanceParams r = resolve_gains(ImpedanceGains{}, def);
   EXPECT_TRUE(r.Kq.isApprox(def.Kq));
   EXPECT_DOUBLE_EQ(r.max_tracking_error, def.max_tracking_error);
 }
@@ -93,7 +93,7 @@ TEST(GainsResolve, CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault) {
   // No-partial-reset guarantee: leash/ramp/ref-speed come from the session
   // default, NOT from a default-constructed params (the old mode-switch bug).
   const JointImpedanceParams def = profile_params(GainsProfile::kSoft);  // leash 0.45
-  GainsSpec s;
+  ImpedanceGains s;
   s.profile = GainsProfile::kCustom;
   s.custom = good();
   s.custom.zeta = 0.8;

@@ -1678,7 +1678,7 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
 
 // ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----
 namespace {
-interface::TrajectoryGoal imp_goal(double to, interface::GainsSpec spec = {}) {
+interface::TrajectoryGoal imp_goal(double to, interface::ImpedanceGains spec = {}) {
   interface::TrajectoryGoal g;
   g.trajectory = ramp7(0.0, to, 0.3);
   g.control_mode = interface::ControlModeKind::kImpedance;
@@ -1711,7 +1711,7 @@ TEST(SupervisorGains, CustomGainsDoNotLeakIntoTheNextGoal) {
   SupFix f;
   f.sup.start();
   f.run_rt();
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = GainsProfile::kCustom;
   s.custom.kq = JointVec::Constant(50.0);
   s.custom.zeta = 0.9;
@@ -1732,7 +1732,7 @@ TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
   f.sup.start();
   f.run_rt();
   run_goal(f, imp_goal(0.03), 1);  // enter impedance with defaults
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = GainsProfile::kStiff;
   run_goal(f, imp_goal(0.06, s), 2);  // same mode, new gains
   f.sup.stop();
@@ -1744,7 +1744,7 @@ TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
 
 TEST(SupervisorGains, RejectsInvalidCustomGainsAtAccept) {
   SupFix f;  // no threads needed: on_trajectory_goal is a pure pre-check
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = GainsProfile::kCustom;  // all-zero custom = the known bad message default
   EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
 }
@@ -1763,7 +1763,7 @@ TEST(SupervisorGains, RejectsAnUnknownProfileByteOnEverySurface) {
   // sampler thread, where nothing catches: std::terminate mid-motion (review
   // finding). The ROS boundary filters its own; the C++ API must too.
   SupFix f;  // no threads needed: all three are pure pre-checks
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = static_cast<GainsProfile>(7);
   EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
   interface::GainsRequest gr;
@@ -1793,7 +1793,7 @@ TEST(SupervisorGains, QueuedGoalGainsApplyAtPromotionNotAtDrain) {
   f.sup.on_trajectory_accepted(id1, g1);
   std::this_thread::sleep_for(std::chrono::milliseconds(450));  // mode settle + mid-flight
 
-  interface::GainsSpec s;
+  interface::ImpedanceGains s;
   s.profile = GainsProfile::kStiff;
   interface::TrajectoryGoal g2 = imp_goal(0.08, s);
   g2.trajectory = ramp7(0.05, 0.08, 0.3);

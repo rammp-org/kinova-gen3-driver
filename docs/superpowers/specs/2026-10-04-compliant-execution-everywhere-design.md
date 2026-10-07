@@ -44,9 +44,9 @@ impedance, change nothing else, and it works.*
 
 ## Approved design decisions
 
-### 1. The gains contract: `GainsSpec`
+### 1. The gains contract: `ImpedanceGains`
 
-Every command that can run impedance carries one optional `GainsSpec`:
+Every command that can run impedance carries one optional `ImpedanceGains`:
 
 - **A profile name** — `soft`, `medium`, `stiff` (exact menu fixed during
   planning; small). **Names describe the gains** — there is no profile named
@@ -70,7 +70,7 @@ Three core-enforced guarantees:
    `has_gains = true` with message-default zeros on every impedance goal dies
    with the old fields.
 2. **No leakage.** Each command and each stream session resolves its own
-   `GainsSpec` at accept/open. A goal or stream without gains gets the session
+   `ImpedanceGains` at accept/open. A goal or stream without gains gets the session
    default — *not* whatever the previous caller left on the shared
    `JointImpedanceMode`. (Today a trajectory goal's gains silently persist
    into later `joint_impedance` streams.)
@@ -89,9 +89,9 @@ set-gains sets the defaults).
 
 | Surface | Change |
 | --- | --- |
-| `TrajectoryGoal` / `ExecuteJointTrajectory` | `has_gains + gains` replaced by `GainsSpec`. Mode choice unchanged. |
-| `StreamOpenRequest` / `open_stream` | Gains at open: `GainsSpec` added. Impedance streams stop inheriting leftovers. |
-| GoTo ee-pose / joint-config / preset | Grow `control_mode` + `GainsSpec`. Default stays position — pure opt-in, no behavior change for existing clients. |
+| `TrajectoryGoal` / `ExecuteJointTrajectory` | `has_gains + gains` replaced by `ImpedanceGains`. Mode choice unchanged. |
+| `StreamOpenRequest` / `open_stream` | Gains at open: `ImpedanceGains` added. Impedance streams stop inheriting leftovers. |
+| GoTo ee-pose / joint-config / preset | Grow `control_mode` + `ImpedanceGains`. Default stays position — pure opt-in, no behavior change for existing clients. |
 | `set_gains` | Real `CommandSink::on_set_gains` + new ROS service, token-gated. |
 
 The `CommandSink`/`StreamSink` signature changes break `kinova-gen3-ros2`;
@@ -158,7 +158,7 @@ with no gains behaves identically before and after a custom-gains goal.
 This **is** a breaking change, in two places:
 
 - **Driver C++ API:** `TrajectoryGoal` drops `has_gains`/`gains` for
-  `GainsSpec`, `StreamOpenRequest` grows a field, and `on_set_gains` goes from
+  `ImpedanceGains`, `StreamOpenRequest` grows a field, and `on_set_gains` goes from
   stub to real. Every consumer recompiles; code touching the old fields edits.
 - **ROS messages (`rammp_arm_interfaces`):** `ExecuteJointTrajectory` swaps
   its gains fields; the GoTo actions grow fields. Any `.msg` change breaks
@@ -175,7 +175,7 @@ driver v1.3.0** under that same practice, with a coordinated chain release
 2026-10-02 — acknowledged breaking, accepted because the pinned chain absorbs
 it. (Standing reminder for future projects: stay on 0.x until truly stable.)
 
-We deliberately do **not** keep the old gains fields alongside `GainsSpec` for
+We deliberately do **not** keep the old gains fields alongside `ImpedanceGains` for
 compatibility: ROS 2's type hashing gives no wire-compat reward for it, and
 keeping `has_gains` alive preserves exactly the zero-filled-gains footgun
 (#64) this release exists to kill.
@@ -195,7 +195,7 @@ keeping `has_gains` alive preserves exactly the zero-filled-gains footgun
 ## Decomposition (for planning)
 
 1. **#64 validation** — standalone, lands first.
-2. **Core gains contract** — `GainsSpec`, profiles, no-leak/no-reset
+2. **Core gains contract** — `ImpedanceGains`, profiles, no-leak/no-reset
    semantics, `on_set_gains`.
 3. **Target feedforward port** — with before/after benchmarks.
 4. **Shared integrator + impedance velocity/twist pairs.**
@@ -208,5 +208,5 @@ keeping `has_gains` alive preserves exactly the zero-filled-gains footgun
 - Exact profile menu and each profile's full parameter set.
 - Validation bounds (per-joint torque-limit floors vs. a gravity-headroom
   check).
-- Whether `GainsSpec` on `StreamOpenRequest` warrants a mid-session
+- Whether `ImpedanceGains` on `StreamOpenRequest` warrants a mid-session
   `set_gains` path too, or open-time only is enough for v1.3.0.

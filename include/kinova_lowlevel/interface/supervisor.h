@@ -149,12 +149,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   kinova::PoseTargetSink* pose_sink_for(ControlModeKind);
   // One teardown, four callers: graceful close, deadline expiry, IK fault, on_halt.
   void close_stream(StreamCloseCause);
-  // Resolve a command's GainsSpec against the session default and push it into
+  // Resolve a command's ImpedanceGains against the session default and push it into
   // imp_. gains_mtx_ makes the two writer sites (sampler drain, backend stream
   // open) mutually exclusive on imp_.set_gains' single-writer double-buffer --
   // they are already mutually exclusive by the goal/stream gating, but that
   // argument is three files wide; the mutex makes it local. Never on the RT path.
-  void apply_impedance_gains(const GainsSpec& s);
+  void apply_impedance_gains(const ImpedanceGains& s);
 
   JointPositionMode& pos_;
   JointImpedanceMode& imp_;
@@ -196,7 +196,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   static_assert(std::atomic<double>::is_always_lock_free,
                 "speed_override_ is read from the sampler thread; must be lock-free");
 
-  // What a bare command (GainsSpec{} == kSessionDefault) resolves to.
+  // What a bare command (ImpedanceGains{} == kSessionDefault) resolves to.
   // Initially the kMedium profile; replaced whole by on_set_gains. Guarded by
   // gains_mtx_, which also serialises the imp_.set_gains writer sites.
   std::mutex gains_mtx_;

@@ -9,7 +9,7 @@ execution + feedforward + the gains contract on every surface.)
 - driver `feat/63-compliant-everything` (base v1.2.0): gains contract (#63/#64),
   target feedforward, compliant velocity/twist pairs, benchmark_joint_impedance.
 - rammp_arm_interfaces + kinova-gen3-ros2 `feat/compliant-everything`:
-  GainsSpec messages, GoTo mode+gains, SetGains service, two new stream
+  ImpedanceGains messages, GoTo mode+gains, SetGains service, two new stream
   controllers. **Message changes = old and new nodes cannot talk; everything
   rebuilds together.**
 - Rollback at any point: redeploy the released chain (driver v1.2.0 tag,
@@ -22,7 +22,7 @@ execution + feedforward + the gains contract on every surface.)
   driver branch via the Makefile's CORE_REF escape hatch:
   driver = kinova-gen3-driver `feat/63-compliant-everything`.
 - Build rammp-interfaces-ros2 `feat/compliant-everything` IN THE WORKSPACE —
-  the rammp-base image's compiled interfaces copy is 1.1.0 and lacks GainsSpec.
+  the rammp-base image's compiled interfaces copy is 1.1.0 and lacks ImpedanceGains.
   (That branch is based on origin/main, not the stale local main.)
 - kinova_arm_ros2 branch: `feat/compliant-everything` (off dev).
 - UPDATE (evening 2026-10-04): the Jetson gate ALREADY RAN in the v13-ws

@@ -437,16 +437,16 @@ implements them.
 
 ```cpp
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
-struct GainsSpec {
+struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointImpedanceGains custom{};  // read iff profile == kCustom
+  JointGainValues custom{};  // read iff profile == kCustom
 };
 kinova::JointImpedanceParams profile_params(GainsProfile);  // named entries only; throws otherwise
-GainsCheck validate_custom(const JointImpedanceGains&);      // {ok, message}; pure
-kinova::JointImpedanceParams resolve_gains(const GainsSpec&, const JointImpedanceParams& session_default);
+GainsCheck validate_custom(const JointGainValues&);      // {ok, message}; pure
+kinova::JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default);
 ```
 
-`TrajectoryGoal::gains` and `StreamOpenRequest::gains` carry a `GainsSpec`
+`TrajectoryGoal::gains` and `StreamOpenRequest::gains` carry a `ImpedanceGains`
 (trajectory gains apply at execution, stream gains at open);
 `GainsRequest::spec` carries one to `on_set_gains`, which validates and
 replaces the **session default** — what an absent spec resolves to, initially

@@ -21,7 +21,7 @@ enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 // tracking failure and re-opening the same session will just reproduce it.
 enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
 
-struct JointImpedanceGains {
+struct JointGainValues {
   JointVec kq = JointVec::Zero();
   double zeta = 0.5;
   JointVec torque_limit = JointVec::Zero();
@@ -32,9 +32,9 @@ struct JointImpedanceGains {
 // complete, core-owned parameter sets; kCustom overrides kq/zeta/torque_limit
 // on top of the session default and MUST pass validate_custom at accept time.
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
-struct GainsSpec {
+struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointImpedanceGains custom{};  // read iff profile == kCustom
+  JointGainValues custom{};  // read iff profile == kCustom
 };
 
 // What a streaming client sends. The METHOD on StreamSink disambiguates which
@@ -49,7 +49,7 @@ struct StreamOpenRequest {
   // Compliance for an impedance session, resolved and applied AT OPEN. A
   // non-default spec on a non-impedance open is REJECTED. Mid-session gain
   // changes are deliberately out of scope for v1.3.0: close and re-open.
-  GainsSpec gains{};
+  ImpedanceGains gains{};
   Token token{};
 };
 struct StreamOpenResult {
@@ -123,7 +123,7 @@ struct TrajectoryGoal {
   // Defaults to the session default (initially the kMedium profile). A
   // position goal carrying a non-default spec is REJECTED: gains that cannot
   // act are a caller bug, surfaced loudly, not ignored.
-  GainsSpec gains{};
+  ImpedanceGains gains{};
   std::string sender_id;
   Token token{};  // every command carries its own authority
 };
@@ -155,7 +155,7 @@ struct ArmState {
   double speed_override = 1.0;
 };
 struct GainsRequest {
-  GainsSpec spec{};
+  ImpedanceGains spec{};
   Token token{};
 };
 struct GainsResult {
