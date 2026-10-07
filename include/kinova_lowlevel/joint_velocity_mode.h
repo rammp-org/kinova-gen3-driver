@@ -1,5 +1,4 @@
 #pragma once
-#include <Eigen/Cholesky>
 #include <array>
 #include <atomic>
 #include <limits>
@@ -8,6 +7,7 @@
 #include "kinova_lowlevel/command_watchdog.h"
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/velocity_reference.h"
 namespace kinova {
 
 struct JointVelocityParams {
@@ -111,7 +111,7 @@ class JointVelocityMode : public ControlMode {
   JointVec commanded() const noexcept { return qd_cmd_; }
   // Manipulability at the last twist solve, sqrt(det(J J^T)). 0 until a twist
   // has been solved. Worth watching: it is what drives the damping.
-  double last_manipulability() const noexcept { return w_last_; }
+  double last_manipulability() const noexcept { return twist_dls_.last_manipulability(); }
 
  private:
   void seed_limits(JointVelocityParams& p) const noexcept;
@@ -151,11 +151,7 @@ class JointVelocityMode : public ControlMode {
   JointVec qd_cmd_ = JointVec::Zero();
   JointVec q_ref_ = JointVec::Zero();  // integrated reference configuration
   Jacobian6 J_ = Jacobian6::Zero();
-  Eigen::Matrix<double, 6, 6> A_ = Eigen::Matrix<double, 6, 6>::Zero();
-  Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt_;
-  Vector6 y_ = Vector6::Zero();
-  JointVec bias_ = JointVec::Zero();
-  double w_last_ = 0.0;
+  TwistDlsSolver twist_dls_;  // shared DLS + null-space posture (velocity_reference.h)
 };
 
 }  // namespace kinova

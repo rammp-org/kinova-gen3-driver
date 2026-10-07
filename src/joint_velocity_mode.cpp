@@ -4,18 +4,12 @@
 #include <cmath>
 
 #include "kinova_lowlevel/units.h"
+#include "kinova_lowlevel/velocity_reference.h"  // limit_joint_velocity
 namespace kinova {
 
-namespace {
-// How far the reference may lead the MEASURED position, rad. This is the windup
-// guard for a blocked joint -- contact, a limit, an arm that cannot keep up:
-// without it the reference marches on while q stays put and the arm snaps across
-// the whole gap the instant it frees. Deliberately tighter than
-// JointPositionMode's 0.35 rad default: a velocity stream has no destination to
-// justify a long lead, and under contact this number IS the bound on how hard the
-// position servo pushes.
-constexpr double kMaxLead = 0.1;
-}  // namespace
+// The leash constant and its rationale live in velocity_reference.h
+// (kVelocityRefMaxLead): the Supervisor's compliant velocity/twist path shares
+// the same bound, deliberately.
 
 JointVelocityMode::JointVelocityMode(Dynamics& dyn, JointVelocityParams p) : dyn_(dyn) {
   // Cache the URDF limits once. set_params runs on a non-RT thread and must never
@@ -90,23 +84,17 @@ void JointVelocityMode::on_enter(const JointFeedback& fb) {
   qd_cmd_.setZero();
   q_ref_ = fb.q;  // hold where we are until a target arrives
   frozen_ = false;
-  w_last_ = 0.0;
+  twist_dls_.reset();
   wd_.reset();
 }
 
 void JointVelocityMode::limit(const JointVelocityParams& p, JointVec& qd) noexcept {
-  // Scale UNIFORMLY so the fastest joint just reaches its cap. A bare per-joint
-  // clamp would silently ROTATE the commanded EE twist when one joint saturates,
-  // which is the one thing a mode named "velocity" must not do.
-  double s = 1.0;
-  for (int i = 0; i < kNumJoints; ++i) {
-    const double a = std::abs(qd[i]);
-    if (a > p.max_qd[i] && a > 0.0) s = std::min(s, p.max_qd[i] / a);
-  }
-  qd *= s;
-  // Hard backstop: scaling covers the normal case, this holds even when max_qd
-  // contains a zero (scale would be 0/0) or the scale underflows.
-  for (int i = 0; i < kNumJoints; ++i) qd[i] = std::clamp(qd[i], -p.max_qd[i], p.max_qd[i]);
+  // One cap for both velocity paths: the shared helper carries the
+  // uniform-scale-then-clamp semantics (and its rationale), so the stiff and
+  // compliant streams cannot drift apart (review finding). The only
+  // difference is the source of the cap: this mode's user-configurable
+  // max_qd (URDF-seeded) vs the compliant path's raw URDF ratings.
+  kinova::limit_joint_velocity(p.max_qd, qd);
 }
 
 void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
@@ -142,24 +130,10 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointComma
     limit(p, qd_cmd_);
   }
 
-  // Integrate the (limited) velocity into the position reference, then the same
-  // tail JointPositionMode runs: leash to the measurement, keep continuous joints
-  // in the transport's (-pi, pi] representation, never command past a limit.
-  for (int i = 0; i < kNumJoints; ++i) {
-    q_ref_[i] += qd_cmd_[i] * dt_s;
-
-    // Leash the reference to the MEASURED position. A no-op whenever the arm is
-    // tracking; it only bites when the arm cannot follow. Continuous joints take
-    // the short way, or a reference just across the wrap reads as a 2*pi lead.
-    double lead = q_ref_[i] - fb.q[i];
-    if (continuous_[i]) lead = wrap_to_pi(lead);
-    q_ref_[i] = fb.q[i] + std::clamp(lead, -kMaxLead, kMaxLead);
-
-    if (continuous_[i])
-      q_ref_[i] = wrap_to_pi(q_ref_[i]);
-    else
-      q_ref_[i] = std::clamp(q_ref_[i], q_lower_urdf_[i], q_upper_urdf_[i]);
-  }
+  // Integrate the (limited) velocity into the position reference -- the shared
+  // integrate/leash/wrap/clamp step (velocity_reference.h).
+  integrate_leashed_reference(q_ref_, qd_cmd_, dt_s, fb.q, kVelocityRefMaxLead, continuous_,
+                              q_lower_urdf_, q_upper_urdf_);
 
   out.mode = ActuatorMode::kPosition;
   out.position = q_ref_;
@@ -175,42 +149,15 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointComma
 void JointVelocityMode::solve_twist(const JointVec& q, const Vector6& V,
                                     const JointVelocityParams& p, JointVec& qd_out) noexcept {
   dyn_.jacobian(q, J_);
-  A_.noalias() = J_ * J_.transpose();  // 6x6, symmetric positive semi-definite
-
-  // Decompose UNDAMPED first, purely to measure conditioning: LDLT hands us
-  // det(J J^T) as prod(D) for free, so manipulability costs no extra solve.
-  ldlt_.compute(A_);
-  const double w2 = ldlt_.vectorD().prod();
-  w_last_ = w2 > 0.0 ? std::sqrt(w2) : 0.0;
-
-  // Damping rises as manipulability falls. This is a REQUIRED part of the design,
-  // not a refinement: in velocity mode whatever is computed goes to the actuators,
-  // so there is no torque clamp standing behind a bad solve.
-  double lambda = p.dls_damping;
-  if (p.w_threshold > 0.0 && w_last_ < p.w_threshold) {
-    const double r = 1.0 - w_last_ / p.w_threshold;  // 0 at threshold, 1 at singular
-    lambda = p.dls_damping + (p.dls_damping_max - p.dls_damping) * r * r;
-  }
-  A_.diagonal().array() += lambda * lambda;
-  ldlt_.compute(A_);
-
-  // Task term: qd = J^T (J J^T + lambda^2 I)^-1 V
-  y_.noalias() = ldlt_.solve(V);
-  qd_out.noalias() = J_.transpose() * y_;
-
-  if (p.posture_gain == 0.0) return;
-
-  // Null-space posture bias, projected without ever forming the 7x7 projector:
-  //   (I - J^T (JJ^T + lambda^2 I)^-1 J) b  ==  b - J^T ((JJ^T + lambda^2 I)^-1 (J b))
-  // Continuous joints must take the SHORT way to the rest posture, or the bias
-  // pushes the joint most of a turn the wrong way.
-  for (int i = 0; i < kNumJoints; ++i) {
-    double d = p.q_rest[i] - q[i];
-    if (continuous_[i]) d = wrap_to_pi(d);
-    bias_[i] = p.posture_gain * d;
-  }
-  y_.noalias() = ldlt_.solve(J_ * bias_);
-  qd_out.noalias() += bias_ - J_.transpose() * y_;
+  // The DLS math (adaptive damping + null-space posture) lives in the shared
+  // solver (velocity_reference.h); this mode owns only the Jacobian call.
+  TwistDlsParams dp;
+  dp.dls_damping = p.dls_damping;
+  dp.w_threshold = p.w_threshold;
+  dp.dls_damping_max = p.dls_damping_max;
+  dp.posture_gain = p.posture_gain;
+  dp.q_rest = p.q_rest;
+  twist_dls_.solve(J_, q, V, dp, continuous_, qd_out);
 }
 
 }  // namespace kinova

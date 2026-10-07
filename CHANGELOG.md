@@ -12,6 +12,70 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
+### Added
+
+- **One gains contract on every impedance surface** (#63). Commands name their
+  compliance with an `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
+  `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains
+  (kq/zeta/torque_limit over the session default), or nothing — which means the
+  session default, initially `medium`. Trajectory goals, stream opens
+  (`StreamOpenRequest::gains`, applied at open) and `on_set_gains` (now real:
+  it validates and replaces the session default) all speak it. Gains apply on
+  EVERY impedance command — mode switch or not — and never leak into the next
+  command or session.
+- **Accept-time gain validation** (#64). Non-finite values, out-of-range
+  stiffness or damping ratio, and torque limits below the per-joint gravity
+  floor are refused with a reason, never clamped. The floors are pinned from
+  the measured worst-case URDF gravity (2F-85 model) and a test re-derives them
+  so a model change fails loudly. Gains on a surface where they cannot act (a
+  position goal, a non-impedance stream) are refused, not ignored.
+- **Target feedforward** (port of `feat/target-feedforward`). Joint-space
+  targets carry `{q, qd, qdd}` (`JointTarget` through `JointTargetSink`);
+  `JointImpedanceMode` damps the velocity error against the commanded rate
+  (`t.qd`, clamped to `max_ref_speed`) and adds `M(q)·qdd`, removing the
+  standing tracking lag `2ζ·qd·√(M/Kq)` on profiled trajectories. The executor
+  feeds derivatives scaled into wall time under the speed scale (`qd·s`,
+  `qdd·s²`). Teleop/pose/entry-hold paths and the staleness freeze are
+  unchanged — feedforward engages only when a target carries a profile.
+- **`benchmark_joint_impedance`**: sim benchmark for the joint impedance
+  compute path (`--track` streams profiled sinusoid targets). Feedforward cost
+  measured before/after: within the noise floor (x86 sim, mean ~1.5 µs).
+- **Compliant velocity and twist streams**: `joint velocity × kImpedance` and
+  `EE twist × kImpedance` pairs — the v1.1.1 integrate-into-a-held-reference
+  mechanism, factored out of `JointVelocityMode`. The SAMPLER integrates and
+  writes targets into `JointImpedanceMode` at its own rate (the 1 kHz mode
+  latches the newest target each cycle), feeding forward the rate the
+  reference actually advanced at — equal to the commanded rate in free
+  motion, zero once the leash pins against a blocked arm.
+
+### Changed
+
+- **BREAKING (C++):** `TrajectoryGoal` drops `has_gains`/`gains`
+  (`JointImpedanceGainValues`) for `ImpedanceGains gains`; `GainsRequest.gains` becomes
+  `GainsRequest.spec`; `StreamOpenRequest` gains a `gains` field;
+  `JointTargetSink` implementers now override `set_joint_target(const
+  JointTarget&)` (position-only `set_target` remains as a non-virtual
+  convenience). Ships as a minor per the pinned-chain practice recorded in the
+  spec's compatibility section; `kinova-gen3-ros2` and `rammp_arm_interfaces`
+  move in lockstep.
+- `JointImpedanceMode::params()` is public (gain read-back for tests and
+  diagnostics).
+- Review rounds (pre-release hardening, same change): gains apply when a
+  goal **starts running** (adoption or queue promotion), never at inbox
+  drain and never on a refused stream open; a named profile overlays its
+  **gain fields only** onto the session default (which seeds from the
+  mode's constructed params), so deployment tuning — IK limits,
+  `cmd_timeout_s`, ramp — survives every profiled or bare command; an
+  out-of-enum profile byte is refused at accept on all three surfaces
+  (goal, stream open, `set_gains`) and revalidated at drain; compliant
+  stream commands are capped to the URDF velocity ratings before
+  integrating, and their feedforward is the rate the reference actually
+  advanced at — zero once the leash pins against a blocked arm; the stream
+  tick re-reads the session kind and mode under the lock; a trajectory
+  target on the far wrap branch of a continuous joint no longer marches the
+  impedance reference a full turn (home's `j3 = π` sits exactly on the
+  boundary).
+
 ## [1.2.0] — 2026-10-02
 
 ### Added

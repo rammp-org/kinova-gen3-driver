@@ -324,6 +324,38 @@ TEST(JointImpedance, ContinuousJointErrorTakesShortWayAroundTheWrap) {
   EXPECT_NEAR(spring, p.Kq[2] * true_err, 1e-9);
 }
 
+TEST(JointImpedance, JointTargetOnTheFarWrapBranchDoesNotMarchTheReference) {
+  // GoTo-under-impedance feeds plan samples through set_target(JointVec) in the
+  // PLANNER'S convention. Home has j3 = pi, exactly on the wrap boundary: the
+  // plan says +3.142 while the wrapped reference reads -3.141 -- the same
+  // angle. The rate limiter must fold that step; clamping the raw ~2*pi
+  // difference instead walks the reference around the circle at max_ref_speed
+  // and the joint physically spins the long way until the divergence guard
+  // aborts (seen on the arm 2026-10-06). A realistic max_ref_speed matters
+  // here: with a huge one the whole 2*pi step passes the clamp and the
+  // re-wrap below hides the bug.
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(1.0);  // rad/s -- max_step 0.001 at 1 kHz
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.q[2] = wrap_to_pi(3.142);  // -3.14119, the far branch of +3.142
+  fb.qd.setZero();
+  m.on_enter(fb);
+
+  JointVec q_cmd = fb.q;
+  q_cmd[2] = 3.142;  // identical angle, planner's branch
+  m.set_target(q_cmd);
+
+  JointCommand c;
+  for (int k = 0; k < 100; ++k) m.compute(fb, 0.001, c);
+
+  // Folded step is ~0: the reference must stay put, not march 100 * 0.001 rad.
+  const double moved = wrap_to_pi(m.reference()[2] - fb.q[2]);
+  EXPECT_LT(std::abs(moved), 1e-3) << "reference walked the long way around the wrap";
+}
+
 TEST(JointImpedance, ContinuousReferenceStaysBounded) {
   // The reference integrates open-loop. On a continuous joint it must not grow
   // without bound, or it drifts arbitrarily far from the wrapped measurement.
@@ -625,4 +657,107 @@ TEST(JointImpedanceMode, AFreshCommandReleasesTheFreeze) {
   m.set_target(dyn.fk(JointVec::Constant(0.2)));  // stream resumes
   for (int i = 0; i < 30; ++i) m.compute(fb, 0.001, out);
   EXPECT_GT(std::abs(m.reference()[0]), 1e-6);  // tracking again
+}
+
+// ---- v1.3.0 target feedforward: damp the velocity error, not the velocity ----
+TEST(JointImpedance, ProfiledTargetCancelsDampingAtReferenceVelocity) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb;
+  fb.q = sample_q();
+  const double v = 0.4, dt = 0.001;
+  fb.qd.setConstant(v);  // the arm is moving exactly as commanded
+  m.on_enter(fb);
+
+  // Position-only target one step ahead: damper fights the motion (-Dq*v).
+  JointCommand c_plain;
+  m.set_target(JointVec(fb.q.array() + v * dt));
+  m.compute(fb, dt, c_plain);
+  EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);  // no profile, no ff
+
+  // Same motion WITH a profile: qd_ref = the COMMANDED rate v, damper ~0.
+  m.on_enter(fb);  // reset reference to fb.q
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + v * dt);
+  t.qd = JointVec::Constant(v);  // has_velocity means qd is meaningful
+  t.has_velocity = true;
+  JointCommand c_ff;
+  m.set_joint_target(t);
+  m.compute(fb, dt, c_ff);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(m.last_ref_velocity()[i], v, 1e-9);
+  // The two differ by exactly the damping term Dq*v (same e, same gravity).
+  const JointVec Dq = m.last_damping();
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c_ff.torque[i] - c_plain.torque[i], Dq[i] * v, 1e-6);
+}
+
+TEST(JointImpedance, FeedforwardHoldsTheCommandedRateBetweenTargetWrites) {
+  // Targets can arrive slower than compute runs (the sampler paces with
+  // sleep_for and jitters). The feedforward must damp toward the COMMANDED
+  // rate on every cycle; a delta-derived rate is N*qd on the cycle after a
+  // write and zero on the other N-1 (review finding).
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceMode m(dyn, static_params());
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 0.01);
+  t.qd = JointVec::Constant(0.2);
+  t.has_velocity = true;
+  m.set_joint_target(t);  // ONE write...
+  JointCommand c;
+  for (int k = 0; k < 5; ++k) {  // ...five cycles
+    m.compute(fb, 0.001, c);
+    for (int i = 0; i < kNumJoints; ++i)
+      EXPECT_NEAR(m.last_ref_velocity()[i], 0.2, 1e-9) << "cycle " << k << " joint " << i;
+  }
+}
+
+TEST(JointImpedance, RateLimiterBoundsTheFedForwardVelocity) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(0.5);  // clamp well below the asked-for jump
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 1.0);  // teleported target...
+  t.qd = JointVec::Constant(1000.0);   // ...with an absurd commanded rate
+  t.has_velocity = true;
+  JointCommand c;
+  m.set_joint_target(t);
+  m.compute(fb, 0.001, c);
+  // Fed-forward velocity == the clamp, not the 1000 rad/s ask: the feedforward
+  // may never describe a motion faster than the reference is allowed to make.
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(m.last_ref_velocity()[i], 0.5, 1e-9);
+}
+
+TEST(JointImpedance, StalenessFreezeZeroesTheFeedforward) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.cmd_timeout_s = 0.01;
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 0.3);
+  t.qd = JointVec::Constant(0.3);
+  t.has_velocity = true;
+  m.set_joint_target(t);
+  JointCommand c;
+  m.compute(fb, 0.001, c);  // fresh: tracking, ff active
+  EXPECT_GT(m.last_ref_velocity().norm(), 0.0);
+  m.compute(fb, 0.05, c);   // > cmd_timeout_s with no bump: stale
+  m.compute(fb, 0.001, c);  // frozen cycle
+  EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);
+  JointVec g;
+  dyn.gravity(fb.q, g);
+  // Frozen at measured q with zero measured velocity: pure gravity hold.
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i], 1e-9);
 }

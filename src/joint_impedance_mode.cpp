@@ -55,9 +55,9 @@ void JointImpedanceMode::set_target(const Pose& x_d) noexcept {
   wd_.bump();  // BOTH setters must bump, or a streamed pose reads as stale
 }
 
-void JointImpedanceMode::set_target(const JointVec& q_d) noexcept {
+void JointImpedanceMode::set_joint_target(const JointTarget& t) noexcept {
   const int next = 1 - jt_active_.load(std::memory_order_relaxed);
-  ext_q_target_[next] = q_d;
+  ext_q_target_[next] = t;
   jt_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kJoint, std::memory_order_release);
   wd_.bump();  // BOTH setters must bump, or a streamed pose reads as stale
@@ -110,13 +110,26 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   const TargetSource src = source_.load(std::memory_order_acquire);
   const JointVec q_prev = q_d_;
 
+  // Feedforward is used only when the active target actually carries a profile,
+  // so the pose/teleop/entry-hold paths keep their previous behaviour exactly —
+  // and never while the staleness freeze is latched (the hold must not be
+  // fought by a damper chasing a profile nobody is maintaining).
+  bool ff_velocity = false, ff_acceleration = false;
+  JointVec qd_cmd = JointVec::Zero();
+  JointVec qdd_ff = JointVec::Zero();
+
   if (frozen_) {
     // Frozen: q_d_ already holds fb.q. Resolving a target here would overwrite it.
   } else if (src == TargetSource::kJoint) {
     // Direct joint reference: command it straight through, IK bypassed. The rate
     // limit below still ramps a teleported target in from q_prev, so a distant
     // joint command is not slammed at the arm.
-    q_d_ = ext_q_target_[jt_active_.load(std::memory_order_acquire)];
+    const JointTarget& t = ext_q_target_[jt_active_.load(std::memory_order_acquire)];
+    q_d_ = t.q;
+    ff_velocity = t.has_velocity;
+    if (ff_velocity) qd_cmd = t.qd;
+    ff_acceleration = t.has_velocity && t.has_acceleration;
+    if (ff_acceleration) qdd_ff = t.qdd;
     last_ik_ = IkResult{};
   } else if (src == TargetSource::kPose) {
     const Pose target = ext_target_[ext_active_.load(std::memory_order_acquire)];
@@ -131,16 +144,38 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   }
 
   // Bound reference speed so a teleported target ramps in instead of slamming.
+  // The step is folded for continuous joints: a trajectory target arrives in
+  // the PLANNER'S convention and can sit on the far branch of the wrap from
+  // the (-pi, pi]-wrapped reference (home's j3 = pi lands exactly on the
+  // boundary). The raw difference then reads ~2*pi and the reference marches a
+  // full turn at max_ref_speed -- on the arm, the joint visibly spinning the
+  // long way round until the divergence guard aborts the goal.
   for (int i = 0; i < kNumJoints; ++i) {
     const double max_step = p.max_ref_speed[i] * dt_s;
-    q_d_[i] = std::clamp(q_d_[i], q_prev[i] - max_step, q_prev[i] + max_step);
+    double step = q_d_[i] - q_prev[i];
+    if (continuous_[i]) step = wrap_to_pi(step);
+    q_d_[i] = q_prev[i] + std::clamp(step, -max_step, max_step);
+  }
+
+  // The COMMANDED rate, not per-cycle reference deltas. Targets can arrive
+  // slower than compute runs (the sampler paces with sleep_for and jitters):
+  // a delta-derived rate is N*qd on the cycle after a write and zero on the
+  // other N-1, so the damper chatters at the beat frequency instead of
+  // damping toward the commanded rate (review finding). The max_ref_speed
+  // clamp keeps the feedforward honest against the rate limiter above: never
+  // feed forward a motion faster than the reference is allowed to make.
+  if (ff_velocity) {
+    for (int i = 0; i < kNumJoints; ++i)
+      qd_ref_[i] = std::clamp(qd_cmd[i], -p.max_ref_speed[i], p.max_ref_speed[i]);
+  } else {
+    qd_ref_.setZero();
   }
 
   // Keep the reference in the SAME representation as the measured angle, which
-  // the transport wraps to (-pi, pi]. Wrapping after the rate limit is safe: both
-  // sides of that clamp came from the same seed one small IK step apart, so it can
-  // never see a 2*pi jump. Kinematically a no-op -- Dynamics packs continuous
-  // joints as (cos, sin).
+  // the transport wraps to (-pi, pi]. The rate limit above folds its step, so
+  // the reference only ever moves max_step from its wrapped predecessor; this
+  // re-wrap is the fold-back at the boundary. Kinematically a no-op --
+  // Dynamics packs continuous joints as (cos, sin).
   for (int i = 0; i < kNumJoints; ++i)
     if (continuous_[i]) q_d_[i] = wrap_to_pi(q_d_[i]);
 
@@ -164,8 +199,18 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
     // for a decoupled per-joint spring-damper. max(0,...) guards the sqrt against
     // a non-PD mass matrix from a malformed URDF.
     Dq_last_[i] = 2.0 * p.zeta * std::sqrt(std::max(0.0, p.Kq[i] * M_(i, i)));
-    tau_[i] = p.Kq[i] * e - Dq_last_[i] * fb.qd[i];
+    // Damp the velocity ERROR, not the velocity. Without qd_ref_ the damper
+    // pulls against the arm precisely because it is moving as commanded, which
+    // costs a standing lag of 2*zeta*qd*sqrt(M/Kq) — ~0.085 rad per rad/s at
+    // joint 1 elbow-up. qd_ref_ is zero unless the target carried a profile, so
+    // the teleop/pose paths are unchanged.
+    tau_[i] = p.Kq[i] * e - Dq_last_[i] * (fb.qd[i] - qd_ref_[i]);
   }
+
+  // Inertial feedforward: the torque the planned acceleration needs, so the
+  // spring is not left to generate it out of tracking error. Only when the
+  // planner supplied qdd — M_ is already computed above, so this is one matvec.
+  if (ff_acceleration) tau_.noalias() += M_ * qdd_ff;
 
   // Ramp scales the spring 0->1 over gain_ramp_s on entry; gravity is ALWAYS
   // applied in full so the arm never sags while the spring fades in. ramp uses

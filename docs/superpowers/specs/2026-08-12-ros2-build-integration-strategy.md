@@ -124,7 +124,7 @@ kinova-gen3-driver/                 (THIS repo — plain CMake, no ROS)
 kinova_arm_ros2/                     (SEPARATE repo — the ROS2 frontend)
   kinova_arm.repos        vcs-imports kinova-gen3-driver (the core) into the workspace.
   kinova_arm_interfaces/   ament_cmake — ExecuteJointTrajectory.action
-                           + JointImpedanceGains.msg. rosidl codegen only.
+                           + JointImpedanceGainValues.msg. rosidl codegen only.
   kinova_arm_ros2/         ament_cmake — Ros2Backend (Layer B) + bring-up node.
                            find_package(kinova_lowlevel CONFIG) + rclcpp
                            + rclcpp_action + kinova_arm_interfaces.

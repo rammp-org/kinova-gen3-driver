@@ -194,6 +194,47 @@ configuration, then runs an independent spring-damper on every joint.
 > as a working starting point rather than characterised values —
 > [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6).
 
+### Gain profiles and the `ImpedanceGains` contract (v1.3)
+
+Through the interface layer (trajectory goals, stream opens, `set_gains`), a
+caller does not pass `JointImpedanceParams` — it passes an **`ImpedanceGains`**:
+
+- **A named profile** — `soft`, `medium`, `stiff`. Each is a complete set of
+  the **gain fields** — `Kq`, `zeta`, the tracking leash, the torque limits —
+  owned by the core (`interface/gains.h`), so `soft` means the same thing on
+  every surface and every deployment. Everything else in
+  `JointImpedanceParams` (IK tuning, `cmd_timeout_s`, ramp, reference speeds)
+  belongs to the deployment: a profile overlays its gains onto the session
+  default and never touches those. `medium` is `Kq (80×4, 30×3)`, `zeta 0.5`,
+  leash `0.35`; `soft` is `Kq (40×4, 15×3)`, `zeta 0.4`, leash `0.45`;
+  `stiff` is `Kq (160×4, 60×3)`, `zeta 0.7`, leash `0.25`.
+- **`custom`** — raw `{kq, zeta, torque_limit}` overriding just those three
+  fields of the session default. Validated at accept time: non-finite,
+  out-of-range (`kq ∈ [1, 400]`, `zeta ∈ [0.05, 2]`), or a torque limit below
+  the per-joint **gravity floor** is refused with a reason, never clamped — a
+  limit the clamp would use to eat gravity drops the arm.
+- **Nothing** — the *session default*, initially `medium`. `set_gains`
+  (Arbiter-gated) replaces the session default; it never touches a running
+  session. Gains apply on **every** impedance command — repeat-mode goals
+  included — and never leak into the next command or session.
+
+**Switching to impedance requires no tuning**: a goal with `control_mode =
+impedance` and no gains runs the medium profile, which is the deliverable the
+v1.3 on-arm pass tunes and documents.
+
+### Target feedforward (v1.3)
+
+A joint target may carry the planner's profile (`JointTarget{q, qd, qdd}`).
+When it does, the damper acts on the velocity **error** — against the
+commanded rate `t.qd`, clamped to `max_ref_speed` so the feedforward never
+describes a motion faster than the reference may make (and held steady
+between target writes, so a sampler running slower than the 1 kHz mode does
+not pulse the damper) — and `M(q)·qdd` is added so the
+spring is not left to generate the planned acceleration out of tracking error.
+This removes the standing lag `2ζ·qd·√(M/Kq)` on profiled trajectories.
+Position-only targets (teleop, poses, entry hold) and the staleness freeze
+behave exactly as before.
+
 ## Joint-Space Position — `JointPositionMode`
 
 Commands every actuator in `kPosition` and lets the actuator's own servo close

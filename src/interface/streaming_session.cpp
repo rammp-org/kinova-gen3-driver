@@ -12,7 +12,10 @@ bool pair_supported(SetpointKind k, ControlModeKind m) {
       return m == ControlModeKind::kTorque;
     case SetpointKind::kJointVelocity:
     case SetpointKind::kEeTwist:
-      return m == ControlModeKind::kVelocity;
+      // kVelocity is the stiff path (JointVelocityMode). kImpedance is the
+      // compliant one (#63): the Supervisor's sampler integrates the command
+      // into a leashed reference and drives JointImpedanceMode with it.
+      return m == ControlModeKind::kVelocity || m == ControlModeKind::kImpedance;
   }
   return false;
 }

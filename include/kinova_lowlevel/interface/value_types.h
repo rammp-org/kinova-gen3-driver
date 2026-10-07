@@ -21,6 +21,22 @@ enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 // tracking failure and re-opening the same session will just reproduce it.
 enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
 
+struct JointImpedanceGainValues {
+  JointVec kq = JointVec::Zero();
+  double zeta = 0.5;
+  JointVec torque_limit = JointVec::Zero();
+};
+
+// How a command names its compliance. kSessionDefault = "whatever the session
+// default points at" (initially the kMedium profile); named profiles are
+// complete, core-owned parameter sets; kCustom overrides kq/zeta/torque_limit
+// on top of the session default and MUST pass validate_custom at accept time.
+enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
+struct ImpedanceGains {
+  GainsProfile profile = GainsProfile::kSessionDefault;
+  JointImpedanceGainValues custom{};  // read iff profile == kCustom
+};
+
 // What a streaming client sends. The METHOD on StreamSink disambiguates which
 // struct applies -- there is deliberately no tag field on the setpoint itself,
 // so "kind says pose, pose field is garbage" is not representable.
@@ -30,6 +46,10 @@ struct StreamOpenRequest {
   SetpointKind kind = SetpointKind::kJointPosition;
   ControlModeKind control_mode = ControlModeKind::kPosition;
   double timeout_s = 0.1;  // <= 0 is REJECTED at open: no deadline, no safe-stop
+  // Compliance for an impedance session, resolved and applied AT OPEN. A
+  // non-default spec on a non-impedance open is REJECTED. Mid-session gain
+  // changes are deliberately out of scope for v1.3.0: close and re-open.
+  ImpedanceGains gains{};
   Token token{};
 };
 struct StreamOpenResult {
@@ -89,12 +109,6 @@ struct GripperState {
   double stamp_s = 0.0;
 };
 
-struct JointImpedanceGains {
-  JointVec kq = JointVec::Zero();
-  double zeta = 0.5;
-  JointVec torque_limit = JointVec::Zero();
-};
-
 struct TrajectoryGoal {
   Trajectory trajectory;
   JointVec path_tolerance = JointVec::Constant(-1.0);  // <0 disables (matches executor)
@@ -105,8 +119,11 @@ struct TrajectoryGoal {
   double speed_scale = 1.0;
   ControlModeKind control_mode = ControlModeKind::kPosition;
   Preemption preemption = Preemption::kLatestWins;
-  JointImpedanceGains gains{};
-  bool has_gains = false;
+  // Which compliance this goal runs under when control_mode == kImpedance.
+  // Defaults to the session default (initially the kMedium profile). A
+  // position goal carrying a non-default spec is REJECTED: gains that cannot
+  // act are a caller bug, surfaced loudly, not ignored.
+  ImpedanceGains gains{};
   std::string sender_id;
   Token token{};  // every command carries its own authority
 };
@@ -138,7 +155,7 @@ struct ArmState {
   double speed_override = 1.0;
 };
 struct GainsRequest {
-  JointImpedanceGains gains{};
+  ImpedanceGains spec{};
   Token token{};
 };
 struct GainsResult {

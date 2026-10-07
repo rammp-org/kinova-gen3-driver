@@ -30,7 +30,7 @@ TEST(ValueTypes, DefaultsAndResultCodes) {
   g.preemption = Preemption::kLatestWins;
   g.path_tolerance = JointVec::Constant(0.2);
   EXPECT_EQ(g.trajectory.points.size(), 0u);
-  EXPECT_FALSE(g.has_gains);
+  EXPECT_EQ(g.gains.profile, GainsProfile::kSessionDefault);
   EXPECT_EQ(result_code::kSuccessful, 0);
   EXPECT_EQ(result_code::kPathToleranceViolated, -4);
   EXPECT_EQ(result_code::kPreempted, -6);
@@ -323,10 +323,10 @@ TEST(Supervisor, RejectsCrossModeGoalThatSlipsInFlightPrecheck) {
   gi.control_mode = interface::ControlModeKind::kImpedance;
   gi.preemption = interface::Preemption::kQueue;
   gi.path_tolerance = JointVec::Constant(-1.0);
-  gi.has_gains = true;
-  gi.gains.kq = JointVec::Constant(60.0);
-  gi.gains.zeta = 0.6;
-  gi.gains.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  gi.gains.profile = GainsProfile::kCustom;
+  gi.gains.custom.kq = JointVec::Constant(60.0);
+  gi.gains.custom.zeta = 0.6;
+  gi.gains.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
   interface::GoalId p{};
   p[0] = 1;
   interface::GoalId i{};
@@ -410,10 +410,10 @@ TEST(Supervisor, SwitchesToImpedanceAtRest) {
   g.trajectory = ramp7(0.0, 0.03, 0.3);
   g.path_tolerance = JointVec::Constant(-1.0);
   g.control_mode = interface::ControlModeKind::kImpedance;
-  g.has_gains = true;
-  g.gains.kq = JointVec::Constant(60.0);
-  g.gains.zeta = 0.6;
-  g.gains.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  g.gains.profile = GainsProfile::kCustom;
+  g.gains.custom.kq = JointVec::Constant(60.0);
+  g.gains.custom.zeta = 0.6;
+  g.gains.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
   interface::GoalId id{};
   id[0] = 9;
   ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
@@ -831,8 +831,8 @@ TEST(Supervisor, StreamOpenRefusesABadRequestBeforeSwitchingModes) {
   interface::StreamOpenRequest negative;
   negative.timeout_s = -1.0;
   EXPECT_FALSE(f.sup.on_stream_open(negative).accepted);
-  interface::StreamOpenRequest bad_pair;  // velocity needs Plan 2
-  bad_pair.kind = interface::SetpointKind::kJointVelocity;
+  interface::StreamOpenRequest bad_pair;  // torque setpoints only drive torque mode
+  bad_pair.kind = interface::SetpointKind::kJointTorque;
   bad_pair.control_mode = interface::ControlModeKind::kImpedance;
   bad_pair.timeout_s = 1.0;
   EXPECT_FALSE(f.sup.on_stream_open(bad_pair).accepted);
@@ -1674,4 +1674,420 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
   EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
   EXPECT_GT(elapsed_s, 0.6)
       << "not meaningfully stretched -- the override may not be reaching tick()";
+}
+
+// ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----
+namespace {
+interface::TrajectoryGoal imp_goal(double to, interface::ImpedanceGains spec = {}) {
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, to, 0.3);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  g.gains = spec;
+  return g;
+}
+void run_goal(SupFix& f, const interface::TrajectoryGoal& g, uint8_t id0) {
+  interface::GoalId id{};
+  id[0] = id0;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(900));  // run + settle
+}
+}  // namespace
+
+TEST(SupervisorGains, ImpedanceGoalWithoutSpecRunsTheSessionDefault) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  run_goal(f, imp_goal(0.04), 1);
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, CustomGainsDoNotLeakIntoTheNextGoal) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::ImpedanceGains s;
+  s.profile = GainsProfile::kCustom;
+  s.custom.kq = JointVec::Constant(50.0);
+  s.custom.zeta = 0.9;
+  s.custom.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+  run_goal(f, imp_goal(0.03, s), 1);
+  EXPECT_NEAR(f.imp.params().Kq[0], 50.0, 1e-12);  // custom took effect...
+  run_goal(f, imp_goal(0.06), 2);                  // ...and a bare goal resets to default
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, GainsApplyEvenWithoutAModeSwitch) {
+  // Old bug: gains sat inside the mode-switch branch, so the second impedance
+  // goal's gains were silently ignored.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  run_goal(f, imp_goal(0.03), 1);  // enter impedance with defaults
+  interface::ImpedanceGains s;
+  s.profile = GainsProfile::kStiff;
+  run_goal(f, imp_goal(0.06, s), 2);  // same mode, new gains
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, RejectsInvalidCustomGainsAtAccept) {
+  SupFix f;  // no threads needed: on_trajectory_goal is a pure pre-check
+  interface::ImpedanceGains s;
+  s.profile = GainsProfile::kCustom;  // all-zero custom = the known bad message default
+  EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
+}
+
+TEST(SupervisorGains, RejectsGainsOnAPositionGoal) {
+  SupFix f;
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.gains.profile = GainsProfile::kStiff;  // cannot act in position mode
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+}
+
+TEST(SupervisorGains, RejectsAnUnknownProfileByteOnEverySurface) {
+  // An out-of-enum byte otherwise reaches resolve_gains, which throws on the
+  // sampler thread, where nothing catches: std::terminate mid-motion (review
+  // finding). The ROS boundary filters its own; the C++ API must too.
+  SupFix f;  // no threads needed: all three are pure pre-checks
+  interface::ImpedanceGains s;
+  s.profile = static_cast<GainsProfile>(7);
+  EXPECT_EQ(f.sup.on_trajectory_goal(imp_goal(0.05, s)), interface::GoalResponse::kReject);
+  interface::GainsRequest gr;
+  gr.spec = s;
+  EXPECT_FALSE(f.sup.on_set_gains(gr).accepted);
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains = s;
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+}
+
+TEST(SupervisorGains, QueuedGoalGainsApplyAtPromotionNotAtDrain) {
+  // A queued goal's gains used to land the moment the goal was drained,
+  // mutating the RUNNING goal's compliance mid-motion (review finding). They
+  // must apply when the queued goal is promoted, and kSessionDefault must
+  // resolve at promotion time.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g1 = imp_goal(0.05);
+  g1.trajectory = ramp7(0.0, 0.05, 1.0);  // long enough to be mid-flight below
+  interface::GoalId id1{};
+  id1[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g1), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id1, g1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(450));  // mode settle + mid-flight
+
+  interface::ImpedanceGains s;
+  s.profile = GainsProfile::kStiff;
+  interface::TrajectoryGoal g2 = imp_goal(0.08, s);
+  g2.trajectory = ramp7(0.05, 0.08, 0.3);
+  g2.preemption = interface::Preemption::kQueue;
+  interface::GoalId id2{};
+  id2[0] = 2;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g2), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id2, g2);
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));  // g1 still running
+  const JointImpedanceParams mid = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(mid.Kq))
+      << "queued goal's gains leaked into the running goal";
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));  // g1 done, g2 promoted + done
+  f.sup.stop();
+  f.teardown();
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(profile_params(GainsProfile::kStiff).Kq))
+      << "promotion did not apply the queued goal's gains";
+}
+
+TEST(SupervisorGains, ImpedanceStreamOpensWithRequestedProfile) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, StreamGainsDoNotLeakAcrossSessions) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  r.gains = {};  // bare re-open: session default, not the last session's stiff
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kMedium);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+}
+
+TEST(SupervisorGains, RejectsGainsOnANonImpedanceStream) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kVelocity;
+  r.timeout_s = 0.2;
+  r.gains.profile = GainsProfile::kSoft;  // cannot act here
+  EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
+  f.sup.stop();
+  f.teardown();
+}
+
+TEST(SupervisorGains, SetGainsReplacesTheSessionDefault) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::GainsRequest gr;
+  gr.spec.profile = GainsProfile::kSoft;
+  EXPECT_TRUE(f.sup.on_set_gains(gr).accepted);
+  run_goal(f, imp_goal(0.04), 1);  // bare goal now resolves to soft
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kSoft);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
+}
+
+TEST(SupervisorGains, SetGainsRejectsCircularAndInvalidSpecs) {
+  SupFix f;
+  interface::GainsRequest gr;  // kSessionDefault: "set the default to the default"
+  const interface::GainsResult r1 = f.sup.on_set_gains(gr);
+  EXPECT_FALSE(r1.accepted);
+  EXPECT_FALSE(r1.message.empty());
+  gr.spec.profile = GainsProfile::kCustom;  // all-zero custom: the known bad default
+  const interface::GainsResult r2 = f.sup.on_set_gains(gr);
+  EXPECT_FALSE(r2.accepted);
+  EXPECT_FALSE(r2.message.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Compliant velocity/twist (Plan 3, #63): the velocity kinds may open in
+// impedance, and the session runs the impedance mode, not the velocity mode.
+// ---------------------------------------------------------------------------
+
+TEST(Supervisor, CompliantVelocityAndTwistStreamsOpenInImpedance) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.5;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  interface::StreamStatus st = f.sup.on_query_stream();
+  EXPECT_TRUE(st.open);
+  EXPECT_EQ(st.kind, interface::SetpointKind::kJointVelocity);
+  EXPECT_EQ(st.control_mode, interface::ControlModeKind::kImpedance);
+  f.sup.on_stream_close({});
+
+  r.kind = interface::SetpointKind::kEeTwist;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  st = f.sup.on_query_stream();
+  EXPECT_TRUE(st.open);
+  EXPECT_EQ(st.kind, interface::SetpointKind::kEeTwist);
+  EXPECT_EQ(st.control_mode, interface::ControlModeKind::kImpedance);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+}
+
+TEST(Supervisor, ACompliantVelocityStreamIntegratesIntoTheImpedanceReference) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);  // rad/s; 0.5 s of it stays under the leash
+  for (int i = 0; i < 50; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Freeze q_d_ before reading it (reference() is RT-owned): close would latch
+  // the hold at measured q and the reference would walk straight back.
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  // ~0.5 s at 0.05 rad/s. The exact span is wall-clock (open -> teardown), so
+  // bound it rather than pin it: clearly moving at the commanded rate, clearly
+  // not pinned at the leash and not still at the entry pose.
+  EXPECT_GT(ref[0], 0.015);
+  EXPECT_LT(ref[0], 0.06);
+}
+
+TEST(Supervisor, ABlockedCompliantStreamStopsFeedingForwardTheCommandedRate) {
+  // SimTransport is a static echo -- the arm never follows. Once the leash
+  // pins, the fed-forward rate must collapse to the ACHIEVED (zero) rate:
+  // feeding the commanded one keeps a standing D*qd damper push on top of
+  // the leash-bounded spring for as long as the client streams, breaking
+  // the leash's "this bounds how hard the spring pushes" contract (review
+  // finding).
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(1.0);  // pins the 0.1 rad leash within ~0.1 s
+  for (int i = 0; i < 40; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ff = f.imp.last_ref_velocity();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  EXPECT_LT(ff.cwiseAbs().maxCoeff(), 0.05)
+      << "damper still chasing the commanded rate against a pinned leash";
+}
+
+TEST(Supervisor, TheLeashCapsACompliantVelocityReferenceWhenTheArmLags) {
+  // SimTransport is a static echo: measured q never moves. The windup guard
+  // must cap the reference lead at the leash no matter how long the command
+  // runs -- this is the bound on how hard the spring can push under contact.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(1.0);  // 0.4 s of this would be 0.4 rad unleashed
+  for (int i = 0; i < 40; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  for (int i = 0; i < kNumJoints; ++i) {
+    EXPECT_LE(ref[i], kVelocityRefMaxLead + 1e-6) << "joint " << i;
+    EXPECT_GT(ref[i], 0.09) << "joint " << i;  // it reached the leash, not stalled short
+  }
+}
+
+TEST(Supervisor, ACompliantTwistStreamResolvesThroughTheJacobian) {
+  SupFix f(0.2);  // off the straight-up pose so the Jacobian is well-conditioned
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kEeTwist;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::TwistSetpoint sp;
+  sp.twist = Vector6::Zero();
+  sp.twist[0] = 0.05;  // 5 cm/s along x
+  for (int i = 0; i < 50; ++i) {
+    f.sup.on_setpoint_twist(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+
+  // A nonzero twist must produce a nonzero qd through the DLS resolution, which
+  // the integrator then turns into reference motion off the entry pose.
+  EXPECT_GT((ref - f.init.q).cwiseAbs().maxCoeff(), 1e-3);
+}
+
+TEST(Supervisor, AStaleCompliantVelocitySessionClosesAndHoldsAtMeasuredQ) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.1;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 5; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  // Go quiet past the deadline: the sampler must close the session (the
+  // staleness authority for these pairs -- the sampler's own 1 kHz writes keep
+  // the mode watchdog fresh by design) and latch the hold at MEASURED q.
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  EXPECT_FALSE(f.sup.stream_is_open());
+  EXPECT_EQ(f.sup.stream_close_cause(), interface::StreamCloseCause::kDeadlineExpired);
+
+  f.teardown();
+  const JointVec ref = f.imp.reference();
+  f.sup.stop();
+  // Measured q never moved (static sim echo), so the hold walks the reference
+  // back to the entry pose.
+  EXPECT_NEAR(ref.cwiseAbs().maxCoeff(), 0.0, 0.02);
+}
+
+TEST(SupervisorGains, GainsAtOpenApplyToACompliantVelocityStream) {
+  // The gains-at-open logic keys on the CONTROL MODE, so the new pairs get it
+  // for free -- this test pins that down rather than assuming it.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointVelocity;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 0.5;
+  r.gains.profile = GainsProfile::kStiff;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  f.teardown();
+  const JointImpedanceParams want = profile_params(GainsProfile::kStiff);
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
+  EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
 }

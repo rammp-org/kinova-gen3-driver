@@ -57,9 +57,9 @@ void JointPositionMode::set_params(const JointPositionParams& p) noexcept {
   params_active_.store(next, std::memory_order_release);
 }
 
-void JointPositionMode::set_target(const JointVec& q_d) noexcept {
+void JointPositionMode::set_joint_target(const JointTarget& t) noexcept {
   const int next = 1 - ext_active_.load(std::memory_order_relaxed);
-  ext_target_[next] = q_d;
+  ext_target_[next] = t.q;  // derivatives ignored: see the header note
   ext_active_.store(next, std::memory_order_release);
   source_.store(TargetSource::kJoint, std::memory_order_release);
   wd_.bump();  // must be LAST: its release publishes everything above it

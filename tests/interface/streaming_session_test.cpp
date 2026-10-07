@@ -30,8 +30,12 @@ TEST(StreamingSession, SupportedPairsOpenAndUnsupportedAreRefused) {
   s.close();
   EXPECT_TRUE(s.open(req(SetpointKind::kJointVelocity, ControlModeKind::kVelocity), 0.0).accepted);
   s.close();
-  // Nonsense pairing -- a client that thinks it streams twist into impedance is told.
-  EXPECT_FALSE(s.open(req(SetpointKind::kEeTwist, ControlModeKind::kImpedance), 0.0).accepted);
+  EXPECT_TRUE(s.open(req(SetpointKind::kJointVelocity, ControlModeKind::kImpedance), 0.0).accepted);
+  s.close();
+  EXPECT_TRUE(s.open(req(SetpointKind::kEeTwist, ControlModeKind::kImpedance), 0.0).accepted);
+  s.close();
+  // Nonsense pairing -- a client that thinks it streams torque into impedance is told.
+  EXPECT_FALSE(s.open(req(SetpointKind::kJointTorque, ControlModeKind::kImpedance), 0.0).accepted);
 }
 
 TEST(StreamingSession, ZeroOrNegativeTimeoutIsRefused) {
@@ -96,9 +100,15 @@ TEST(PairSupported, EePoseIsNowSupportedInPositionMode) {
   EXPECT_TRUE(pair_supported(SetpointKind::kEePose, ControlModeKind::kPosition));
 }
 
+TEST(PairSupported, VelocityKindsAreNowSupportedInImpedanceMode) {
+  // Plan 3 (#63): the same integrate-into-a-leashed-reference mechanism, but
+  // driven into JointImpedanceMode -- compliant velocity/twist.
+  EXPECT_TRUE(pair_supported(SetpointKind::kJointVelocity, ControlModeKind::kImpedance));
+  EXPECT_TRUE(pair_supported(SetpointKind::kEeTwist, ControlModeKind::kImpedance));
+}
+
 TEST(PairSupported, VelocityKindsAreStillRefusedInEveryOtherMode) {
-  for (auto m :
-       {ControlModeKind::kPosition, ControlModeKind::kImpedance, ControlModeKind::kTorque}) {
+  for (auto m : {ControlModeKind::kPosition, ControlModeKind::kTorque}) {
     EXPECT_FALSE(pair_supported(SetpointKind::kJointVelocity, m));
     EXPECT_FALSE(pair_supported(SetpointKind::kEeTwist, m));
   }

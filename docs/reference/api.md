@@ -433,6 +433,51 @@ implements them.
 | `void estop_clear()` | leaves the latch, to *no owner*; works in any mode |
 | `ArbitrationStatus status() const` | mode, e-stop latch, owner, generation, rejection count |
 
+### Gains contract — `interface/gains.h`, `interface/value_types.h`
+
+```cpp
+enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
+struct ImpedanceGains {
+  GainsProfile profile = GainsProfile::kSessionDefault;
+  JointImpedanceGainValues custom{};  // read iff profile == kCustom
+};
+kinova::JointImpedanceParams profile_params(GainsProfile);  // named entries only; throws otherwise
+GainsCheck validate_custom(const JointImpedanceGainValues&);      // {ok, message}; pure
+bool known_profile(GainsProfile);  // accept-time guard: out-of-enum bytes die at the boundary
+// base with ONLY the gain fields (Kq, zeta, leash, torque_limit) taken from profile
+kinova::JointImpedanceParams overlay_profile_gains(const JointImpedanceParams& base, const JointImpedanceParams& profile);
+kinova::JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default);
+```
+
+`TrajectoryGoal::gains` and `StreamOpenRequest::gains` carry an `ImpedanceGains`
+(trajectory gains apply at execution, stream gains at open);
+`GainsRequest::spec` carries one to `on_set_gains`, which validates and
+replaces the **session default** — what an absent spec resolves to, initially
+`kMedium` — and never touches a live session. Validation bounds are public
+(`kKqMin/Max`, `kZetaMin/Max`, `kTorqueLimitFloor/Ceil`); the floors are the
+per-joint gravity headroom, pinned from the measured worst-case URDF gravity
+and re-derived by `GainsFloor.FloorsCoverWorstCaseGravityWithMargin`. Gains on
+a surface where they cannot act (position goal, non-impedance stream) are
+refused. A `JointImpedanceMode` exposes `params()` (RT-safe snapshot) for gain
+read-back.
+
+### `JointTarget` — `joint_target_sink.h`
+
+```cpp
+struct JointTarget { JointVec q, qd, qdd; bool has_velocity; bool has_acceleration; };
+class JointTargetSink {
+  virtual void set_joint_target(const JointTarget&) noexcept = 0;  // modes implement this
+  void set_target(const JointVec& q_d) noexcept;  // convenience: JointTarget{q}, non-virtual
+};
+```
+
+`interface::sample_target(tr, t_s)` returns the reference **and** the
+derivatives of the very polynomial `sample()` evaluates; the executor scales
+them into wall time under the speed scale (`qd·s`, `qdd·s²`) before handing
+them to the sink. `JointImpedanceMode` consumes the profile as feedforward
+(velocity-error damping + `M·qdd`); `JointPositionMode` ignores the
+derivatives by design.
+
 ### `TrajectoryGoal::speed_scale` — `interface/value_types.h`
 
 `TrajectoryGoal` carries `double speed_scale = 1.0`, in `[kMinSpeedScale,

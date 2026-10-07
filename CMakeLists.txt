@@ -102,11 +102,13 @@ set(KINOVA_LIB_SOURCES
     src/joint_impedance_mode.cpp
     src/joint_position_mode.cpp
     src/joint_velocity_mode.cpp
+    src/velocity_reference.cpp
     src/rt_executor.cpp
     src/interface/trajectory_executor.cpp
     src/interface/supervisor.cpp
     src/interface/arbiter.cpp
-    src/interface/streaming_session.cpp)
+    src/interface/streaming_session.cpp
+    src/interface/gains.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -174,6 +176,19 @@ else()
     # the vendored libKortexApiCpp.a is x86-64 only and would fail to link into an
     # aarch64 executable.
     target_compile_definitions(benchmark_grav_comp PRIVATE KINOVA_NO_KORTEX)
+endif()
+
+# benchmark_joint_impedance runs JointImpedanceMode through the RtExecutor and
+# reports timing -- the baseline instrument for the target-feedforward work.
+# Verified with --sim (SimTransport), same posture as the cartesian benchmark.
+add_executable(benchmark_joint_impedance apps/benchmark_joint_impedance.cpp)
+target_link_libraries(benchmark_joint_impedance PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(benchmark_joint_impedance PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    target_include_directories(benchmark_joint_impedance PRIVATE ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(benchmark_joint_impedance PRIVATE _OS_UNIX)
+else()
+    target_compile_definitions(benchmark_joint_impedance PRIVATE KINOVA_NO_KORTEX)
 endif()
 
 # benchmark_cartesian_impedance runs CartesianImpedanceMode through the
@@ -351,13 +366,15 @@ add_executable(unit_tests
     tests/joint_impedance_mode_test.cpp
     tests/joint_position_mode_test.cpp
     tests/joint_velocity_mode_test.cpp
+    tests/velocity_reference_test.cpp
     tests/teleop_protocol_test.cpp
     tests/feedback_tap_test.cpp
     tests/interface/trajectory_executor_test.cpp
     tests/interface/execution_integration_test.cpp
     tests/interface/supervisor_test.cpp
     tests/interface/arbiter_test.cpp
-    tests/interface/streaming_session_test.cpp)
+    tests/interface/streaming_session_test.cpp
+    tests/interface/gains_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 

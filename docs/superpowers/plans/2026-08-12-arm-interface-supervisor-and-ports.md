@@ -122,7 +122,7 @@ namespace interface {
 - Test: `tests/interface/supervisor_test.cpp` (new file; first test lives here)
 
 **Interfaces:**
-- Produces: `interface::GoalId` (`std::array<uint8_t,16>`), `interface::JointImpedanceGains {JointVec kq; double zeta; JointVec torque_limit;}`, `interface::TrajectoryGoal`, `interface::TrajectoryFeedback`, `interface::TrajectoryResult`, `interface::ArmState`, `interface::GainsRequest/GainsResult`, enums `GoalResponse{kAccept,kReject}` / `CancelResponse{kAccept,kReject}`, and `namespace result_code { constexpr int kSuccessful=0,kInvalidGoal=-1,kPathToleranceViolated=-4,kGoalToleranceViolated=-5,kPreempted=-6; }`.
+- Produces: `interface::GoalId` (`std::array<uint8_t,16>`), `interface::JointImpedanceGainValues {JointVec kq; double zeta; JointVec torque_limit;}`, `interface::TrajectoryGoal`, `interface::TrajectoryFeedback`, `interface::TrajectoryResult`, `interface::ArmState`, `interface::GainsRequest/GainsResult`, enums `GoalResponse{kAccept,kReject}` / `CancelResponse{kAccept,kReject}`, and `namespace result_code { constexpr int kSuccessful=0,kInvalidGoal=-1,kPathToleranceViolated=-4,kGoalToleranceViolated=-5,kPreempted=-6; }`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -169,7 +169,7 @@ namespace kinova::interface {
 
 using GoalId = std::array<uint8_t, 16>;          // mirrors a ROS2 action UUID
 
-struct JointImpedanceGains { JointVec kq = JointVec::Zero(); double zeta = 0.5;
+struct JointImpedanceGainValues { JointVec kq = JointVec::Zero(); double zeta = 0.5;
                              JointVec torque_limit = JointVec::Zero(); };
 
 struct TrajectoryGoal {
@@ -179,7 +179,7 @@ struct TrajectoryGoal {
   double   goal_time_tolerance_s = 0.0;
   ControlModeKind control_mode = ControlModeKind::kPosition;
   Preemption      preemption   = Preemption::kLatestWins;
-  JointImpedanceGains gains{};
+  JointImpedanceGainValues gains{};
   bool has_gains = false;
   std::string sender_id;
 };
@@ -188,7 +188,7 @@ struct TrajectoryFeedback { JointVec desired=JointVec::Zero(), actual=JointVec::
 struct TrajectoryResult   { int error_code = 0; std::string error_string; JointVec final_error = JointVec::Zero(); };
 struct ArmState { JointVec q=JointVec::Zero(), qd=JointVec::Zero(), tau=JointVec::Zero();
                   Pose ee_pose; bool fault=false; double stamp_s=0.0; };
-struct GainsRequest { JointImpedanceGains gains{}; };
+struct GainsRequest { JointImpedanceGainValues gains{}; };
 struct GainsResult  { bool accepted=false; std::string message; };
 
 enum class GoalResponse   { kAccept, kReject };

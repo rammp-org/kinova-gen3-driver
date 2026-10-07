@@ -11,6 +11,7 @@
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
+#include "kinova_lowlevel/interface/gains.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/streaming_session.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"
@@ -20,6 +21,7 @@
 #include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/joint_velocity_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
+#include "kinova_lowlevel/velocity_reference.h"
 namespace kinova::interface {
 
 // Reuse the last-good measured q when a lock-free feedback-snapshot read fails
@@ -147,6 +149,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   kinova::PoseTargetSink* pose_sink_for(ControlModeKind);
   // One teardown, four callers: graceful close, deadline expiry, IK fault, on_halt.
   void close_stream(StreamCloseCause);
+  // Resolve a command's ImpedanceGains against the session default and push it into
+  // imp_. gains_mtx_ makes the two writer sites (sampler drain, backend stream
+  // open) mutually exclusive on imp_.set_gains' single-writer double-buffer --
+  // they are already mutually exclusive by the goal/stream gating, but that
+  // argument is three files wide; the mutex makes it local. Never on the RT path.
+  void apply_impedance_gains(const ImpedanceGains& s);
 
   JointPositionMode& pos_;
   JointImpedanceMode& imp_;
@@ -188,6 +196,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   static_assert(std::atomic<double>::is_always_lock_free,
                 "speed_override_ is read from the sampler thread; must be lock-free");
 
+  // What a bare command (ImpedanceGains{} == kSessionDefault) resolves to.
+  // Initially the kMedium profile; replaced whole by on_set_gains. Guarded by
+  // gains_mtx_, which also serialises the imp_.set_gains writer sites.
+  std::mutex gains_mtx_;
+  JointImpedanceParams session_default_params_ = profile_params(GainsProfile::kMedium);
+
   StreamingSession session_;              // streaming-tier lifecycle
   std::atomic<bool> stream_open_{false};  // mirrors session_, read by the sampler + goal pre-check
   // Why the last session ended. Written by whichever thread ran the teardown,
@@ -205,6 +219,32 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   JointVec stream_hold_q_ = JointVec::Zero();   // last-good measured q for the teardown hold
   bool have_hold_q_ = false;                    // false until the first successful snapshot read
   std::chrono::steady_clock::time_point t0_{};  // time origin for session stamps; set in start()
+
+  // Compliant velocity/twist sessions (#63). The backend thread only STORES the
+  // latest command here (client rates are irregular); the SAMPLER integrates it
+  // into a leashed position reference at its own fixed rate and is the ONLY
+  // writer of imp_'s joint target while such a session is open -- a direct
+  // backend write would put two writers on one single-writer double buffer.
+  // All three are guarded by stream_mtx_ (seeded at open, read/advanced by the
+  // sampler tick, overwritten by setpoints).
+  JointVec stream_q_ref_ = JointVec::Zero();   // integrated reference configuration
+  JointVec stream_qd_cmd_ = JointVec::Zero();  // latest joint-velocity command
+  kinova::Vector6 stream_twist_cmd_ = kinova::Vector6::Zero();  // latest EE twist command
+  kinova::TwistDlsSolver stream_dls_;                           // sampler-only solver scratch
+  kinova::TwistDlsParams stream_dls_params_{};  // defaults match JointVelocityParams
+  kinova::Jacobian6 sampler_J_;                 // sampler-only, filled under dyn_mtx_
+  // URDF joint limits, cached in the constructor (Dynamics is not thread-safe
+  // against the RT loop): the sampler's integrate step clamps against them.
+  JointVec q_lower_ = JointVec::Zero();
+  JointVec q_upper_ = JointVec::Zero();
+  JointVec v_max_ = JointVec::Zero();  // URDF velocity ratings: the compliant
+                                       // stream cap, same source the stiff
+                                       // velocity mode seeds its max_qd from
+  // pump_dyn_ is shared: the pump computes fk/jacobian for state publishing,
+  // the sampler needs the jacobian for the twist resolution. Both threads are
+  // non-RT; this mutex never appears on the RT path. Taken AFTER stream_mtx_
+  // when both are held (sampler tick) -- keep that order.
+  std::mutex dyn_mtx_;
 
   kinova::Jacobian6 pump_J_;  // preallocated; pump thread only
 

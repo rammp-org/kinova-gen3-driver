@@ -4,3 +4,6 @@ build-tsan/
 local_tools/
 .worktrees/
 .superpowers/
+
+# mkdocs build output
+site/
