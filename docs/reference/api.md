@@ -439,10 +439,10 @@ implements them.
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
 struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointGainValues custom{};  // read iff profile == kCustom
+  JointImpedanceGainValues custom{};  // read iff profile == kCustom
 };
 kinova::JointImpedanceParams profile_params(GainsProfile);  // named entries only; throws otherwise
-GainsCheck validate_custom(const JointGainValues&);      // {ok, message}; pure
+GainsCheck validate_custom(const JointImpedanceGainValues&);      // {ok, message}; pure
 bool known_profile(GainsProfile);  // accept-time guard: out-of-enum bytes die at the boundary
 // base with ONLY the gain fields (Kq, zeta, leash, torque_limit) taken from profile
 kinova::JointImpedanceParams overlay_profile_gains(const JointImpedanceParams& base, const JointImpedanceParams& profile);

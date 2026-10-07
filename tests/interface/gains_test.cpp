@@ -11,8 +11,8 @@ using namespace kinova;
 using namespace kinova::interface;
 
 namespace {
-JointGainValues good() {
-  JointGainValues g;
+JointImpedanceGainValues good() {
+  JointImpedanceGainValues g;
   g.kq = (JointVec() << 80, 80, 80, 80, 30, 30, 30).finished();
   g.zeta = 0.5;
   g.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
@@ -25,7 +25,7 @@ TEST(GainsValidation, AcceptsTheModeDefaults) { EXPECT_TRUE(validate_custom(good
 TEST(GainsValidation, RejectsZeroTorqueLimit) {
   // THE #64 shape: a zero-filled message default. The clamp would eat gravity
   // and the arm falls. Must be refused with a reason, never clamped.
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.torque_limit = JointVec::Zero();
   const GainsCheck c = validate_custom(g);
   EXPECT_FALSE(c.ok);
@@ -33,13 +33,13 @@ TEST(GainsValidation, RejectsZeroTorqueLimit) {
 }
 
 TEST(GainsValidation, RejectsTorqueLimitBelowGravityFloor) {
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.torque_limit = kTorqueLimitFloor * 0.5;
   EXPECT_FALSE(validate_custom(g).ok);
 }
 
 TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.kq[2] = std::numeric_limits<double>::quiet_NaN();  // NaN survives std::clamp in compute()
   EXPECT_FALSE(validate_custom(g).ok);
   g = good();
@@ -59,7 +59,7 @@ TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
 TEST(GainsProfiles, EveryNamedEntryPassesItsOwnValidation) {
   for (GainsProfile p : {GainsProfile::kSoft, GainsProfile::kMedium, GainsProfile::kStiff}) {
     const JointImpedanceParams jp = profile_params(p);
-    JointGainValues g;
+    JointImpedanceGainValues g;
     g.kq = jp.Kq;
     g.zeta = jp.zeta;
     g.torque_limit = jp.torque_limit;

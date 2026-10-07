@@ -23,7 +23,7 @@ struct GainsCheck {
   std::string message;
 };
 // Bounds-check raw (kCustom) gains. Pure; callable from any thread.
-GainsCheck validate_custom(const JointGainValues& g);
+GainsCheck validate_custom(const JointImpedanceGainValues& g);
 // True iff p is one of the five enumerators. An ImpedanceGains arrives as a raw
 // byte from the C++ API (the ROS boundary filters its own); an out-of-enum
 // value must die at ACCEPT, because resolve_gains on it throws on the

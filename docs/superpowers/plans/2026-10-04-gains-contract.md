@@ -32,26 +32,26 @@
 ### Task 1: Gains vocabulary, profile table, validation
 
 **Files:**
-- Modify: `include/kinova_lowlevel/interface/value_types.h:92-96` (add `GainsProfile`, `ImpedanceGains` next to `JointGainValues`)
+- Modify: `include/kinova_lowlevel/interface/value_types.h:92-96` (add `GainsProfile`, `ImpedanceGains` next to `JointImpedanceGainValues`)
 - Create: `include/kinova_lowlevel/interface/gains.h`
 - Create: `src/interface/gains.cpp`
 - Create: `tests/interface/gains_test.cpp`
 - Modify: `CMakeLists.txt:106-109` (lib sources), `:356-360` (test sources)
 
 **Interfaces:**
-- Consumes: `JointImpedanceParams` (`joint_impedance_mode.h:13`), `JointGainValues` (`value_types.h:92`), `Dynamics` (test only).
+- Consumes: `JointImpedanceParams` (`joint_impedance_mode.h:13`), `JointImpedanceGainValues` (`value_types.h:92`), `Dynamics` (test only).
 - Produces (later tasks and the ROS repo rely on these exact names):
   - `enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom }`
-  - `struct ImpedanceGains { GainsProfile profile = GainsProfile::kSessionDefault; JointGainValues custom{}; }` (both in `value_types.h`)
+  - `struct ImpedanceGains { GainsProfile profile = GainsProfile::kSessionDefault; JointImpedanceGainValues custom{}; }` (both in `value_types.h`)
   - `kinova::JointImpedanceParams profile_params(GainsProfile)` — named entries only; throws `std::invalid_argument` for `kCustom`/`kSessionDefault`
   - `struct GainsCheck { bool ok = false; std::string message; }`
-  - `GainsCheck validate_custom(const JointGainValues&)`
+  - `GainsCheck validate_custom(const JointImpedanceGainValues&)`
   - `JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default)`
   - bounds constants: `kKqMin`, `kKqMax`, `kZetaMin`, `kZetaMax`, `kTorqueLimitFloor`, `kTorqueLimitCeil` (all in `kinova::interface`, declared in `gains.h`)
 
 - [ ] **Step 1: Add the spec types to `value_types.h`**
 
-Directly below `JointGainValues` (line 96):
+Directly below `JointImpedanceGainValues` (line 96):
 
 ```cpp
 // How a command names its compliance. kSessionDefault = "whatever the session
@@ -61,7 +61,7 @@ Directly below `JointGainValues` (line 96):
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
 struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointGainValues custom{};  // read iff profile == kCustom
+  JointImpedanceGainValues custom{};  // read iff profile == kCustom
 };
 ```
 
@@ -76,8 +76,8 @@ using namespace kinova;
 using namespace kinova::interface;
 
 namespace {
-JointGainValues good() {
-  JointGainValues g;
+JointImpedanceGainValues good() {
+  JointImpedanceGainValues g;
   g.kq = (JointVec() << 80, 80, 80, 80, 30, 30, 30).finished();
   g.zeta = 0.5;
   g.torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
@@ -90,7 +90,7 @@ TEST(GainsValidation, AcceptsTheModeDefaults) { EXPECT_TRUE(validate_custom(good
 TEST(GainsValidation, RejectsZeroTorqueLimit) {
   // THE #64 shape: a zero-filled message default. The clamp would eat gravity
   // and the arm falls. Must be refused with a reason, never clamped.
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.torque_limit = JointVec::Zero();
   const GainsCheck c = validate_custom(g);
   EXPECT_FALSE(c.ok);
@@ -98,13 +98,13 @@ TEST(GainsValidation, RejectsZeroTorqueLimit) {
 }
 
 TEST(GainsValidation, RejectsTorqueLimitBelowGravityFloor) {
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.torque_limit = kTorqueLimitFloor * 0.5;
   EXPECT_FALSE(validate_custom(g).ok);
 }
 
 TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
-  JointGainValues g = good();
+  JointImpedanceGainValues g = good();
   g.kq[2] = std::numeric_limits<double>::quiet_NaN();  // NaN survives std::clamp in compute()
   EXPECT_FALSE(validate_custom(g).ok);
   g = good();
@@ -124,7 +124,7 @@ TEST(GainsValidation, RejectsNonFiniteAndNegativeFields) {
 TEST(GainsProfiles, EveryNamedEntryPassesItsOwnValidation) {
   for (GainsProfile p : {GainsProfile::kSoft, GainsProfile::kMedium, GainsProfile::kStiff}) {
     const JointImpedanceParams jp = profile_params(p);
-    JointGainValues g;
+    JointImpedanceGainValues g;
     g.kq = jp.Kq;
     g.zeta = jp.zeta;
     g.torque_limit = jp.torque_limit;
@@ -232,7 +232,7 @@ struct GainsCheck {
   std::string message;
 };
 // Bounds-check raw (kCustom) gains. Pure; callable from any thread.
-GainsCheck validate_custom(const JointGainValues& g);
+GainsCheck validate_custom(const JointImpedanceGainValues& g);
 // The complete parameter set a NAMED profile stands for. kCustom and
 // kSessionDefault are not names -- std::invalid_argument, fail loud.
 kinova::JointImpedanceParams profile_params(GainsProfile p);
@@ -260,7 +260,7 @@ namespace kinova::interface {
 const JointVec kTorqueLimitFloor = (JointVec() << 5, 25, 5, 15, 2, 3, 0.5).finished();
 const JointVec kTorqueLimitCeil = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
 
-GainsCheck validate_custom(const JointGainValues& g) {
+GainsCheck validate_custom(const JointImpedanceGainValues& g) {
   auto fail = [](const std::string& m) { return GainsCheck{false, m}; };
   if (!std::isfinite(g.zeta) || g.zeta < kZetaMin || g.zeta > kZetaMax)
     return fail("zeta must be finite and in [" + std::to_string(kZetaMin) + ", " +
@@ -375,7 +375,7 @@ git commit -m "feat(interface): ImpedanceGains vocabulary, profile table, accept
 In `TrajectoryGoal` replace
 
 ```cpp
-  JointGainValues gains{};
+  JointImpedanceGainValues gains{};
   bool has_gains = false;
 ```
 

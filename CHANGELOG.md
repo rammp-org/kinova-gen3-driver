@@ -51,7 +51,7 @@ that heading to the new version and bumps `package.xml`.
 ### Changed
 
 - **BREAKING (C++):** `TrajectoryGoal` drops `has_gains`/`gains`
-  (`JointGainValues`) for `ImpedanceGains gains`; `GainsRequest.gains` becomes
+  (`JointImpedanceGainValues`) for `ImpedanceGains gains`; `GainsRequest.gains` becomes
   `GainsRequest.spec`; `StreamOpenRequest` gains a `gains` field;
   `JointTargetSink` implementers now override `set_joint_target(const
   JointTarget&)` (position-only `set_target` remains as a non-virtual

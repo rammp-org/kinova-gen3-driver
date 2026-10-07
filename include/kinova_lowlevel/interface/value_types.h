@@ -21,7 +21,7 @@ enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
 // tracking failure and re-opening the same session will just reproduce it.
 enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
 
-struct JointGainValues {
+struct JointImpedanceGainValues {
   JointVec kq = JointVec::Zero();
   double zeta = 0.5;
   JointVec torque_limit = JointVec::Zero();
@@ -34,7 +34,7 @@ struct JointGainValues {
 enum class GainsProfile { kSessionDefault, kSoft, kMedium, kStiff, kCustom };
 struct ImpedanceGains {
   GainsProfile profile = GainsProfile::kSessionDefault;
-  JointGainValues custom{};  // read iff profile == kCustom
+  JointImpedanceGainValues custom{};  // read iff profile == kCustom
 };
 
 // What a streaming client sends. The METHOD on StreamSink disambiguates which

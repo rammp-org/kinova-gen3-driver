@@ -201,7 +201,7 @@ v1 decision that a command fully describes its own intent:
 
 ```cpp
 struct TrajectoryGoal { /* ...existing... */ std::string sender_id; Token token{}; };
-struct GainsRequest   { JointGainValues gains{};                Token token{}; };
+struct GainsRequest   { JointImpedanceGainValues gains{};                Token token{}; };
 struct CancelRequest  { GoalId id{};                                Token token{}; };  // new
 ```
 
