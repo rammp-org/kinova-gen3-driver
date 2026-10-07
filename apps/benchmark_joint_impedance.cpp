@@ -166,7 +166,8 @@ int main(int argc, char** argv) {
       const double amp = 0.3, hz = 0.2, w = 2.0 * M_PI * hz;
       const auto t0 = std::chrono::steady_clock::now();
       while (!g_stop.load(std::memory_order_acquire)) {
-        const double ts = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        const double ts =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         JointTarget t_cmd;  // analytic profile: exercises the feedforward path
         t_cmd.q = JointVec::Constant(amp * std::sin(w * ts));
         t_cmd.qd = JointVec::Constant(amp * w * std::cos(w * ts));

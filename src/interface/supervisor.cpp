@@ -218,8 +218,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
             std::lock_guard<std::mutex> dl(dyn_mtx_);  // stream_mtx_ -> dyn_mtx_, never reversed
             pump_dyn_.jacobian(q_meas, sampler_J_);
           }
-          stream_dls_.solve(sampler_J_, q_meas, stream_twist_cmd_, stream_dls_params_,
-                            continuous_, qd);
+          stream_dls_.solve(sampler_J_, q_meas, stream_twist_cmd_, stream_dls_params_, continuous_,
+                            qd);
         } else {
           qd = stream_qd_cmd_;
         }
@@ -228,8 +228,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         // integrated at whatever rate the leash lets it drag the arm.
         kinova::limit_joint_velocity(v_max_, qd);
         const JointVec q_ref_prev = stream_q_ref_;
-        integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas,
-                                    kinova::kVelocityRefMaxLead, continuous_, q_lower_, q_upper_);
+        integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas, kinova::kVelocityRefMaxLead,
+                                    continuous_, q_lower_, q_upper_);
         kinova::JointTarget t;
         t.q = stream_q_ref_;
         // Feed forward the rate the reference ACTUALLY advanced at, not the
@@ -414,13 +414,13 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         queued_id = in.id;
         queued_gains = in.goal.gains;  // applied at PROMOTION, not now: the
                                        // active goal keeps its own tuning
-        have_queued = true;  // active_id / in_flight_ untouched
+        have_queued = true;            // active_id / in_flight_ untouched
       }
     }
     // 2) tick the active trajectory
     if (traj_->is_active()) {
       JointFeedback fb;
-      const bool ok = snap_.load(fb);        // sequence the read; don't rely on arg eval order
+      const bool ok = snap_.load(fb);  // sequence the read; don't rely on arg eval order
       have_q_meas = have_q_meas || ok;
       q_meas = sampled_q(ok, fb.q, q_meas);  // failed read -> reuse last-good q (no phantom zero)
       const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed_override_.load());
@@ -493,8 +493,8 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
     return GoalResponse::kReject;
   // Custom gains are bounds-checked at ACCEPT, so a bad request dies with the
   // goal response instead of reaching the arm (#64).
-  if (g.control_mode == ControlModeKind::kImpedance &&
-      g.gains.profile == GainsProfile::kCustom && !validate_custom(g.gains.custom).ok)
+  if (g.control_mode == ControlModeKind::kImpedance && g.gains.profile == GainsProfile::kCustom &&
+      !validate_custom(g.gains.custom).ok)
     return GoalResponse::kReject;
   // in_flight_ implies a goal is running, so a stream cannot be open and
   // active_mode_kind_ is one of the same two kinds g.control_mode was just
@@ -690,8 +690,7 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if (r.control_mode != ControlModeKind::kImpedance &&
       r.gains.profile != GainsProfile::kSessionDefault)
     return {false, result_code::kStreamRejected, "gains supplied for a non-impedance stream"};
-  if (r.control_mode == ControlModeKind::kImpedance &&
-      r.gains.profile == GainsProfile::kCustom) {
+  if (r.control_mode == ControlModeKind::kImpedance && r.gains.profile == GainsProfile::kCustom) {
     const GainsCheck c = validate_custom(r.gains.custom);
     if (!c.ok) return {false, result_code::kStreamRejected, c.message};
   }

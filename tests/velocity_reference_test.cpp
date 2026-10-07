@@ -26,8 +26,8 @@ TEST(VelocityReference, IntegratesTheVelocityIntoTheReference) {
   const JointVec qd = JointVec::Constant(0.5);
   const double dt = 0.001;
   for (int i = 0; i < 100; ++i)  // 100 ms at 0.5 rad/s -> 0.05 rad, well inside the leash
-    integrate_leashed_reference(q_ref, qd, dt, q_meas, kVelocityRefMaxLead, f.continuous,
-                                f.q_lower, f.q_upper);
+    integrate_leashed_reference(q_ref, qd, dt, q_meas, kVelocityRefMaxLead, f.continuous, f.q_lower,
+                                f.q_upper);
   EXPECT_NEAR(q_ref[0], 0.05, 1e-9);
 }
 
@@ -111,7 +111,7 @@ TEST(TwistDls, PostureBiasActsOnlyInTheNullSpace) {
   JointVec qd = JointVec::Zero();
   std::array<bool, kNumJoints> cont{};
   s.solve(J, q, Vector6::Zero(), p, cont, qd);
-  EXPECT_GT(qd.cwiseAbs().maxCoeff(), 0.0);   // the bias is doing something...
-  EXPECT_LT((J * qd).norm(), 1e-3);           // ...without moving the end effector
-  EXPECT_GT(qd.dot(p.q_rest - q), 0.0);       // and it points toward the rest posture
+  EXPECT_GT(qd.cwiseAbs().maxCoeff(), 0.0);  // the bias is doing something...
+  EXPECT_LT((J * qd).norm(), 1e-3);          // ...without moving the end effector
+  EXPECT_GT(qd.dot(p.q_rest - q), 0.0);      // and it points toward the rest posture
 }

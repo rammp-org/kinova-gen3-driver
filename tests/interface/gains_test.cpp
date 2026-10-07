@@ -1,3 +1,5 @@
+#include "kinova_lowlevel/interface/gains.h"
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -5,7 +7,6 @@
 #include <limits>
 
 #include "kinova_lowlevel/dynamics.h"
-#include "kinova_lowlevel/interface/gains.h"
 using namespace kinova;
 using namespace kinova::interface;
 

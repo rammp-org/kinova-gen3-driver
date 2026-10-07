@@ -227,12 +227,12 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // backend write would put two writers on one single-writer double buffer.
   // All three are guarded by stream_mtx_ (seeded at open, read/advanced by the
   // sampler tick, overwritten by setpoints).
-  JointVec stream_q_ref_ = JointVec::Zero();      // integrated reference configuration
-  JointVec stream_qd_cmd_ = JointVec::Zero();     // latest joint-velocity command
+  JointVec stream_q_ref_ = JointVec::Zero();   // integrated reference configuration
+  JointVec stream_qd_cmd_ = JointVec::Zero();  // latest joint-velocity command
   kinova::Vector6 stream_twist_cmd_ = kinova::Vector6::Zero();  // latest EE twist command
-  kinova::TwistDlsSolver stream_dls_;             // sampler-only solver scratch
-  kinova::TwistDlsParams stream_dls_params_{};    // defaults match JointVelocityParams
-  kinova::Jacobian6 sampler_J_;                   // sampler-only, filled under dyn_mtx_
+  kinova::TwistDlsSolver stream_dls_;                           // sampler-only solver scratch
+  kinova::TwistDlsParams stream_dls_params_{};  // defaults match JointVelocityParams
+  kinova::Jacobian6 sampler_J_;                 // sampler-only, filled under dyn_mtx_
   // URDF joint limits, cached in the constructor (Dynamics is not thread-safe
   // against the RT loop): the sampler's integrate step clamps against them.
   JointVec q_lower_ = JointVec::Zero();

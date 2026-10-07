@@ -31,8 +31,7 @@ constexpr double kVelocityRefMaxLead = 0.1;
 inline void integrate_leashed_reference(JointVec& q_ref, const JointVec& qd, double dt_s,
                                         const JointVec& q_meas, double max_lead,
                                         const std::array<bool, kNumJoints>& continuous,
-                                        const JointVec& q_lower,
-                                        const JointVec& q_upper) noexcept {
+                                        const JointVec& q_lower, const JointVec& q_upper) noexcept {
   for (int i = 0; i < kNumJoints; ++i) {
     q_ref[i] += qd[i] * dt_s;
 

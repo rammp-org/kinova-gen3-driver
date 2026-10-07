@@ -353,8 +353,7 @@ TEST(JointImpedance, JointTargetOnTheFarWrapBranchDoesNotMarchTheReference) {
 
   // Folded step is ~0: the reference must stay put, not march 100 * 0.001 rad.
   const double moved = wrap_to_pi(m.reference()[2] - fb.q[2]);
-  EXPECT_LT(std::abs(moved), 1e-3)
-      << "reference walked the long way around the wrap";
+  EXPECT_LT(std::abs(moved), 1e-3) << "reference walked the long way around the wrap";
 }
 
 TEST(JointImpedance, ContinuousReferenceStaysBounded) {
@@ -726,8 +725,8 @@ TEST(JointImpedance, RateLimiterBoundsTheFedForwardVelocity) {
   fb.qd.setZero();
   m.on_enter(fb);
   JointTarget t;
-  t.q = JointVec(fb.q.array() + 1.0);          // teleported target...
-  t.qd = JointVec::Constant(1000.0);           // ...with an absurd commanded rate
+  t.q = JointVec(fb.q.array() + 1.0);  // teleported target...
+  t.qd = JointVec::Constant(1000.0);   // ...with an absurd commanded rate
   t.has_velocity = true;
   JointCommand c;
   m.set_joint_target(t);
@@ -752,10 +751,10 @@ TEST(JointImpedance, StalenessFreezeZeroesTheFeedforward) {
   t.has_velocity = true;
   m.set_joint_target(t);
   JointCommand c;
-  m.compute(fb, 0.001, c);              // fresh: tracking, ff active
+  m.compute(fb, 0.001, c);  // fresh: tracking, ff active
   EXPECT_GT(m.last_ref_velocity().norm(), 0.0);
-  m.compute(fb, 0.05, c);               // > cmd_timeout_s with no bump: stale
-  m.compute(fb, 0.001, c);              // frozen cycle
+  m.compute(fb, 0.05, c);   // > cmd_timeout_s with no bump: stale
+  m.compute(fb, 0.001, c);  // frozen cycle
   EXPECT_NEAR(m.last_ref_velocity().norm(), 0.0, 1e-12);
   JointVec g;
   dyn.gravity(fb.q, g);

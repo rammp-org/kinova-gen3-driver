@@ -534,12 +534,12 @@ TEST(VelocityReference, LimitJointVelocityScalesUniformlyThenClamps) {
   kinova::JointVec qd;
   qd << 0.2, -0.2, 0.2, 0.2, 0.2, 0.2, 1.0;  // joint 7 at 2x its cap
   kinova::limit_joint_velocity(v_max, qd);
-  EXPECT_NEAR(qd[6], 0.5, 1e-12);            // fastest joint lands ON its cap
-  EXPECT_NEAR(qd[0], 0.1, 1e-12);            // the rest scale with it (x0.5)
-  EXPECT_NEAR(qd[1], -0.1, 1e-12);           // sign preserved
+  EXPECT_NEAR(qd[6], 0.5, 1e-12);   // fastest joint lands ON its cap
+  EXPECT_NEAR(qd[0], 0.1, 1e-12);   // the rest scale with it (x0.5)
+  EXPECT_NEAR(qd[1], -0.1, 1e-12);  // sign preserved
 
   kinova::JointVec zero_cap = v_max;
-  zero_cap[3] = 0.0;                          // 0/0 guard: the clamp holds
+  zero_cap[3] = 0.0;  // 0/0 guard: the clamp holds
   kinova::JointVec qd2 = kinova::JointVec::Constant(0.3);
   kinova::limit_joint_velocity(zero_cap, qd2);
   EXPECT_DOUBLE_EQ(qd2[3], 0.0);

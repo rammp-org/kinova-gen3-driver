@@ -20,8 +20,8 @@ GainsCheck validate_custom(const JointGainValues& g) {
                 std::to_string(kZetaMax) + "]");
   for (int i = 0; i < kNumJoints; ++i) {
     if (!std::isfinite(g.kq[i]) || g.kq[i] < kKqMin || g.kq[i] > kKqMax)
-      return fail("kq[" + std::to_string(i) + "] must be finite and in [" +
-                  std::to_string(kKqMin) + ", " + std::to_string(kKqMax) + "]");
+      return fail("kq[" + std::to_string(i) + "] must be finite and in [" + std::to_string(kKqMin) +
+                  ", " + std::to_string(kKqMax) + "]");
     if (!std::isfinite(g.torque_limit[i]) || g.torque_limit[i] < kTorqueLimitFloor[i] ||
         g.torque_limit[i] > kTorqueLimitCeil[i])
       return fail("torque_limit[" + std::to_string(i) + "] must be finite and in [" +
@@ -66,8 +66,8 @@ bool known_profile(GainsProfile p) {
   return false;
 }
 
-kinova::JointImpedanceParams overlay_profile_gains(
-    const kinova::JointImpedanceParams& base, const kinova::JointImpedanceParams& profile) {
+kinova::JointImpedanceParams overlay_profile_gains(const kinova::JointImpedanceParams& base,
+                                                   const kinova::JointImpedanceParams& profile) {
   kinova::JointImpedanceParams jp = base;
   jp.Kq = profile.Kq;
   jp.zeta = profile.zeta;
