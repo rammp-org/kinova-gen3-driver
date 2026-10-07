@@ -443,6 +443,9 @@ struct ImpedanceGains {
 };
 kinova::JointImpedanceParams profile_params(GainsProfile);  // named entries only; throws otherwise
 GainsCheck validate_custom(const JointGainValues&);      // {ok, message}; pure
+bool known_profile(GainsProfile);  // accept-time guard: out-of-enum bytes die at the boundary
+// base with ONLY the gain fields (Kq, zeta, leash, torque_limit) taken from profile
+kinova::JointImpedanceParams overlay_profile_gains(const JointImpedanceParams& base, const JointImpedanceParams& profile);
 kinova::JointImpedanceParams resolve_gains(const ImpedanceGains&, const JointImpedanceParams& session_default);
 ```
 

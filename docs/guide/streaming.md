@@ -130,9 +130,15 @@ the measured position — but drive it into `JointImpedanceMode` instead of a
 stiff position servo. Push on the arm and it yields like any other impedance
 session; the leash bounds the spring stretch, so under sustained contact the
 contact force saturates at roughly `Kq × 0.1 rad` per joint instead of winding
-up. The commanded `qd` is also fed forward as the mode's reference velocity,
-so the damper pulls toward the commanded rate rather than fighting it (the
-same feedforward trajectory execution uses).
+up. The rate the reference **actually advances at** is also fed forward as
+the mode's reference velocity, so in free motion the damper pulls toward the
+commanded rate rather than fighting it — and when the leash pins against a
+blocked arm, the fed-forward rate goes to zero with it, so the contact force
+stays bounded by the spring stretch alone. Commands are also capped to the
+URDF velocity ratings (uniform scale, direction preserved) before they
+integrate, the same cap the stiff velocity mode enforces: a wrong-units `qd`
+is bounded loudly instead of dragging the arm at whatever rate the leash
+allows.
 
 Differences from the `× velocity` pairs that matter to a client:
 

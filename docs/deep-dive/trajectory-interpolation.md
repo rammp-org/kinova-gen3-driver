@@ -122,15 +122,18 @@ inside the RT loop would remove it.
 `TrajectoryGoal::speed_scale` and `Supervisor::set_speed_override` slow a goal
 down by dilating `TrajectoryExecutor`'s own clock: each tick accumulates
 `traj_t += dt_wall * scale` instead of `traj_t += dt_wall`, then calls
-`sample(tr, traj_t)` exactly as before. `sample()` never sees the scale — the
-path it interpolates is byte-for-byte the plan the goal carried. Running the
-same geometric path at a slower clock means every derivative the planner's
-polynomial carries scales with the clock rate: commanded velocity scales with
-`s`, acceleration with `s²`. This falls straight out of the chain rule for a
-time-reparameterised curve; there is no separate place in the code that scales
-`qd`/`qdd`, and there should never be one — `sample()` returns a position, and
-`JointTargetSink` only accepts a position, so a derivative-scaling path would
-have no consumer.
+`sample_target(tr, traj_t)` exactly as before. The sampler never sees the
+scale — the path it interpolates is byte-for-byte the plan the goal carried.
+Running the same geometric path at a slower clock means every derivative the
+planner's polynomial carries scales with the clock rate: commanded velocity
+scales with `s`, acceleration with `s²`, straight out of the chain rule for a
+time-reparameterised curve. Since the v1.3 feedforward port the executor is
+the one place that applies it: the tick scales the sampled `qd` by the
+effective scale and `qdd` by its square before handing the target to
+`JointTargetSink`, so the damper and `M(q)·qdd` term always describe the
+slowed curve actually being commanded. (`sample_target` is the single
+evaluator — position and derivatives come from one set of Hermite
+coefficients; `sample()` is just its position.)
 
 The effective scale is `min(goal_scale, override_scale)`, clamped to
 `[kMinSpeedScale, 1.0]` (`kMinSpeedScale = 0.01` — zero would stop the

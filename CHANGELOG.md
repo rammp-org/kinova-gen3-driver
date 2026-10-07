@@ -60,6 +60,21 @@ that heading to the new version and bumps `package.xml`.
   move in lockstep.
 - `JointImpedanceMode::params()` is public (gain read-back for tests and
   diagnostics).
+- Review rounds (pre-release hardening, same change): gains apply when a
+  goal **starts running** (adoption or queue promotion), never at inbox
+  drain and never on a refused stream open; a named profile overlays its
+  **gain fields only** onto the session default (which seeds from the
+  mode's constructed params), so deployment tuning — IK limits,
+  `cmd_timeout_s`, ramp — survives every profiled or bare command; an
+  out-of-enum profile byte is refused at accept on all three surfaces
+  (goal, stream open, `set_gains`) and revalidated at drain; compliant
+  stream commands are capped to the URDF velocity ratings before
+  integrating, and their feedforward is the rate the reference actually
+  advanced at — zero once the leash pins against a blocked arm; the stream
+  tick re-reads the session kind and mode under the lock; a trajectory
+  target on the far wrap branch of a continuous joint no longer marches the
+  impedance reference a full turn (home's `j3 = π` sits exactly on the
+  boundary).
 
 ## [1.2.0] — 2026-10-02
 
