@@ -89,7 +89,8 @@ leaking into each other. When editing, preserve these invariants:
   All formatting/CSV/histogram work happens on a non-RT drain thread.
 - **`rt_system`**: `mlockall`, `SCHED_FIFO`, core affinity, `/dev/cpu_dma_latency`
   pin — startup/shutdown only. Runs unprivileged after a one-time
-  `scripts/rt_grant_once.sh`; degrades to `SCHED_OTHER` without it.
+  `rammp-deployments/scripts/rt_grant_once.sh`; degrades to `SCHED_OTHER`
+  without it.
 - **`joint_types`/`units`**: fixed-size 7-DOF POD value types, alloc-free.
   `kNumJoints=7`. No KORTEX/Pinocchio types leak here.
 
