@@ -104,9 +104,10 @@ void Supervisor::pump_loop() {
         pump_dyn_.gravity(fb.q, pump_g_);
       }
       s.ee_twist = pump_J_ * fb.qd;
-      // KORTEX feedback torque is reaction-signed, so g(q) + tau is the external
-      // joint torque in the command convention -- see ArmState::ee_wrench.
-      s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ + fb.tau);
+      // Quasi-statics in the one normalized convention (JointFeedback::tau):
+      // motor + external = gravity, so the externally applied joint torque is
+      // g(q) - tau. See ArmState::ee_wrench.
+      s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ - fb.tau);
       s.speed_override = speed_override_.load();
       state_snap_.store(s);
       stream_.publish_state(s);

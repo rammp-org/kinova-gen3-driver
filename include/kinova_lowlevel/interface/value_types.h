@@ -142,19 +142,16 @@ struct TrajectoryResult {
 // Deliberately not read from the arm's own tool_twist: that would be a different frame
 // and a different model from the ee_pose beside it, and the two would silently disagree.
 struct ArmState {
+  // tau is in the one normalized convention -- see JointFeedback::tau.
   JointVec q = JointVec::Zero(), qd = JointVec::Zero(), tau = JointVec::Zero();
   Pose ee_pose;
   Vector6 ee_twist = Vector6::Zero();
   // Measured external wrench at the tool: what the ENVIRONMENT applies to the EE,
   // [force; torque] in N / N*m, same frame/model/sample doctrine as ee_twist above.
-  // Quasi-static estimate from the joint-torque residual, F = pinv(J^T)(g(q) + tau):
-  // KORTEX feedback torque is reaction-signed (measured ~ -g(q) at free hold,
-  // verified on the lab arm), so g + tau is the externally applied joint torque.
-  // NOT KORTEX's tool_external_wrench, which stops updating in LOW_LEVEL_SERVOING
-  // (kortex#52). Contact-detection grade, not force-control grade: the residual
-  // noise floor is ~1-2.5 N*m at the proximal joints (a few N at the tool), and
-  // Coriolis/inertial torques are ignored -- see the 2026-10-04 ee-wrench spec.
-  // In sim this field is meaningless (SimTransport synthesises no torque).
+  // Quasi-static estimate F = pinv(J^T)(g(q) - tau); contact-detection grade, not
+  // force-control grade; NaN while the arm reports a fault. Derivation, accuracy
+  // floor, and why KORTEX's own wrench is unusable (kortex#52):
+  // docs/superpowers/specs/2026-10-04-ee-wrench-design.md.
   Vector6 ee_wrench = Vector6::Zero();
   bool fault = false;
   double stamp_s = 0.0;

@@ -29,6 +29,7 @@ class SimTransport : public Transport {
   void set_gripper_blocked_at(float position) { gripper_block_ = position; }
 
  private:
+  void step_torque(const JointCommand&);
   void step_gripper(const GripperCommand&);
   JointFeedback state_;
   JointCommand last_cmd_;

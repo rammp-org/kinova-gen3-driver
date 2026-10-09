@@ -17,6 +17,10 @@ enum class ActuatorMode : uint8_t { kPosition, kVelocity, kTorque, kCurrent };
 struct JointFeedback {
   JointVec q = JointVec::Zero();
   JointVec qd = JointVec::Zero();
+  // Measured joint torque in the COMMAND convention: the torque the actuator
+  // applies, ~ +g(q) at free hold -- same sign as JointCommand::torque. KORTEX
+  // reports it reaction-signed; KortexTransport flips it at the boundary, and
+  // SimTransport echoes the commanded torque. tau - g(q) is the model residual.
   JointVec tau = JointVec::Zero();
   JointVec current = JointVec::Zero();
   uint64_t frame_id = 0;

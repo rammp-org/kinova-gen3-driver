@@ -14,14 +14,24 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
-- `ArmState::ee_wrench`: a measured external EE wrench, estimated in the
-  Supervisor's pump from the joint-torque residual
-  (`F = pinv(Jᵀ)(g(q) + τ_raw)`, damped). Wrench the environment applies to the
-  tool, `[force; torque]` in N / N·m, `LOCAL_WORLD_ALIGNED` at the tool — same
-  frame/model/sample as `ee_twist`. Quasi-static, contact-detection grade;
-  KORTEX's `tool_external_wrench` is unavailable in `LOW_LEVEL_SERVOING`, and
-  feedback torque is reaction-signed — see
-  `docs/superpowers/specs/2026-10-04-ee-wrench-design.md` (#73).
+- `ArmState::ee_wrench`: a measured external EE wrench (the wrench the
+  environment applies to the tool, `[force; torque]` in N / N·m,
+  `LOCAL_WORLD_ALIGNED`), estimated in the Supervisor's pump from the
+  joint-torque residual — same frame/model/sample as `ee_twist`. Quasi-static,
+  contact-detection grade; NaN while the arm reports a fault. Derivation and
+  accuracy floor: `docs/superpowers/specs/2026-10-04-ee-wrench-design.md` (#73).
+
+### Breaking
+
+- **Feedback torque is now normalized at the Transport boundary** (#73 review).
+  `JointFeedback::tau` / `ArmState::tau` are in the command convention — the
+  torque the actuator applies, ≈ `+g(q)` at free hold — instead of KORTEX's raw
+  reaction sign (≈ `−g(q)`). `KortexTransport` flips the sign where degrees
+  become radians; `SimTransport` echoes the commanded torque in torque mode.
+  Consumers that correlate `tau` with the model (gravity residuals, contact
+  monitors, `/joint_states` effort downstream) see the sign flip; the dry-run
+  gravity check's "residual should be small" promise is now actually true on
+  hardware.
 - **One gains contract on every impedance surface** (#63). Commands name their
   compliance with an `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
   `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains

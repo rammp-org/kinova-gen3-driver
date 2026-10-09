@@ -1508,15 +1508,15 @@ TEST(Supervisor, QueryStateReportsEeTwistConsistentWithEePose) {
   EXPECT_GT(s.ee_twist.norm(), 1e-6) << "twist is the default, not a computed value";
 }
 
-// ee_wrench carries the KORTEX sign convention through the whole pipeline: feedback
-// torque is reaction-signed (measured ~ -g(q) at rest, verified on the lab arm), so
-// tau = -g means "nothing touching the arm" and must give a zero wrench exactly.
+// Feedback torque arrives in the normalized command convention (the Transport
+// boundary flips KORTEX's reaction sign), so tau = +g is "the motors hold the
+// arm, nothing touching it" and must give a zero wrench exactly.
 TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
   kinova::Dynamics ref{URDF_PATH};
   JointFeedback fb = make_feedback(0.3);
   kinova::JointVec g;
   ref.gravity(fb.q, g);
-  fb.tau = -g;
+  fb.tau = g;
   SupFix f(fb);
   f.sup.start();
   f.run_rt();
@@ -1530,9 +1530,10 @@ TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
       << "free hold reported a phantom wrench: " << s.ee_wrench.transpose();
 }
 
-// An external wrench enters the joints as tau_raw = -g + J^T F (reaction sign); the
-// pump must map it back to F. Expected value computed independently of the pump's
-// own model objects, mirroring the ee_twist consistency test above.
+// An external wrench F unloads the motors: quasi-statically tau = g - J^T F
+// (normalized convention), and the pump must map that back to F. Expected value
+// computed independently of the pump's own model objects, mirroring the
+// ee_twist consistency test above.
 TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
   kinova::Dynamics ref{URDF_PATH};
   JointFeedback fb = make_feedback(0.3);
@@ -1542,7 +1543,7 @@ TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
   ref.jacobian(fb.q, J);
   kinova::Vector6 F;
   F << 4.0, -2.0, 7.0, 0.3, -0.1, 0.2;  // environment-on-tool
-  fb.tau = -g + J.transpose() * F;
+  fb.tau = g - J.transpose() * F;
   SupFix f(fb);
   f.sup.start();
   f.run_rt();

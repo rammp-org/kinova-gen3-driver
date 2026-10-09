@@ -206,7 +206,10 @@ int main(int argc, char** argv) {
   // Connects and reads feedback only (never enters LOW_LEVEL_SERVOING, never
   // commands torque). Prints measured joint torque vs gravity(q) per joint so
   // you can verify the URDF/dynamics against the real arm before trusting any
-  // torque. Move the arm by hand/pendant between readings.
+  // torque. Move the arm by hand/pendant between readings. fb.tau arrives
+  // normalized to the command convention (~ +g at free hold; the Transport
+  // boundary flips KORTEX's reaction sign), so tau - g reads ~zero when the
+  // model matches -- the "should be small" promise below depends on that flip.
   if (dry_run) {
     t.connect();
     std::cout << "[dry-run] READ-ONLY gravity check — NO torque commanded, arm "
