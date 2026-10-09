@@ -6,6 +6,10 @@ namespace kinova {
 void TwistDlsSolver::solve(const Jacobian6& J, const JointVec& q, const Vector6& V,
                            const TwistDlsParams& p, const std::array<bool, kNumJoints>& continuous,
                            JointVec& qd_out) noexcept {
+  // NOT damped_jjt() (cartesian.h), alone of the repo's damped-pinv sites:
+  // the Gram matrix must be decomposed UNDAMPED first so manipulability falls
+  // out of the LDLT for free, and the adaptive lambda^2 below is then added to
+  // the matrix already in hand rather than re-forming it.
   A_.noalias() = J * J.transpose();  // 6x6, symmetric positive semi-definite
 
   // Decompose UNDAMPED first, purely to measure conditioning: LDLT hands us

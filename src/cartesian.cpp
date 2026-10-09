@@ -13,8 +13,8 @@ Vector6 pose_error(const Pose& desired, const Pose& current) {
 }
 
 Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext, double damping) {
-  Eigen::Matrix<double, 6, 6> A = J * J.transpose();
-  A.diagonal().array() += damping * damping;
+  Eigen::Matrix<double, 6, 6> A;
+  damped_jjt(J, damping, A);
   return A.ldlt().solve(J * tau_ext);
 }
 }  // namespace kinova

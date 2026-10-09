@@ -6,6 +6,19 @@ namespace kinova {
 // world-frame stiffness. Eigen-only — no Pinocchio.
 Vector6 pose_error(const Pose& desired, const Pose& current);
 
+// A = J·Jᵀ + λ²I — the damped Gram matrix behind every damped-pseudoinverse
+// solve in the repo (the wrench estimator below, the impedance null-space
+// projector, DiffIk). ONE place to change the regularization if it ever
+// evolves (e.g. scaling λ with ‖J‖). velocity_reference.cpp alone cannot use
+// it: it factors the UNDAMPED Gram matrix first to read manipulability off
+// the LDLT for free, then adds its adaptive λ² to the matrix it already
+// holds. Fixed-size, alloc-free.
+inline void damped_jjt(const Jacobian6& J, double damping,
+                       Eigen::Matrix<double, 6, 6>& A_out) {
+  A_out.noalias() = J * J.transpose();
+  A_out.diagonal().array() += damping * damping;
+}
+
 // Map an external joint-torque residual to the EE wrench that explains it:
 // F = (J·Jᵀ + λ²I)⁻¹ J · tau_ext — the damped pseudoinverse of Jᵀ, solving
 // tau_ext = Jᵀ·F in the least-squares sense. Per direction the gain is
