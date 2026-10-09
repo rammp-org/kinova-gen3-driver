@@ -19,7 +19,7 @@ TEST(TeleopProtocol, PacketSizes) {
 
 TEST(TeleopProtocol, Constants) {
   EXPECT_EQ(tp::kMagic, 0x4B544C50u);  // "KTLP"
-  EXPECT_EQ(tp::kVersion, 1u);
+  EXPECT_EQ(tp::kVersion, 2u);  // v2: tau semantics flipped to command convention
   EXPECT_EQ(tp::kNumJointsProto, 7);
 }
 
