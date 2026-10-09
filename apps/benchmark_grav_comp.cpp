@@ -216,6 +216,13 @@ int main(int argc, char** argv) {
                  "stays under its own control.\n"
                  "          Move it to a few poses (pendant/web app); residual "
                  "should be small if the URDF matches.\n";
+    // The sim's motor echo only runs when torque is commanded, and dry-run
+    // never commands: sim tau stays 0 and the residual prints as -g(q). Say
+    // so, or the "URDF payload mismatch" hint below misdiagnoses a perfectly
+    // matched model. The check is only meaningful against the real arm.
+    if (use_sim)
+      std::cout << "          [--sim] expect residual = -gravity: the sim "
+                   "reports zero torque until torque is commanded.\n";
     JointFeedback fb;
     JointVec tau_g;
     const auto start = std::chrono::steady_clock::now();
