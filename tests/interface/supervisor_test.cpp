@@ -111,6 +111,9 @@ struct SupFix {
   std::thread rt;
 
   explicit SupFix(double q0 = 0.0, double qd0 = 0.0) : init(make_feedback(q0, qd0)), sim(init) {}
+  // Seed the full initial feedback (the q/qd overload can't set tau, which the
+  // ee_wrench tests need to control exactly).
+  explicit SupFix(const JointFeedback& fb) : init(fb), sim(init) {}
 
   void run_rt() {
     rt = std::thread([&] { exec.run(stop); });
@@ -1503,6 +1506,86 @@ TEST(Supervisor, QueryStateReportsEeTwistConsistentWithEePose) {
   EXPECT_TRUE(s.ee_twist.isApprox(expected, 1e-9))
       << "ee_twist " << s.ee_twist.transpose() << " != J*qd " << expected.transpose();
   EXPECT_GT(s.ee_twist.norm(), 1e-6) << "twist is the default, not a computed value";
+}
+
+// Feedback torque arrives in the normalized command convention (the Transport
+// boundary flips KORTEX's reaction sign), so tau = +g is "the motors hold the
+// arm, nothing touching it" and must give a zero wrench exactly.
+TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
+  kinova::Dynamics ref{URDF_PATH};
+  JointFeedback fb = make_feedback(0.3);
+  kinova::JointVec g;
+  ref.gravity(fb.q, g);
+  fb.tau = g;
+  SupFix f(fb);
+  f.sup.start();
+  // Drive the pump's seqlock directly instead of running the RT executor: the
+  // executor's idle hold is kTorque/zero, which SimTransport's motor echo would
+  // faithfully report as tau = 0 (a limp arm), clobbering the seeded torque
+  // this test is about. The pump is the unit here, not the RT loop.
+  f.snap.store(fb);
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  EXPECT_LT(s.ee_wrench.norm(), 1e-9)
+      << "free hold reported a phantom wrench: " << s.ee_wrench.transpose();
+}
+
+// An external wrench F unloads the motors: quasi-statically tau = g - J^T F
+// (normalized convention), and the pump must map that back to F. Expected value
+// computed independently of the pump's own model objects, mirroring the
+// ee_twist consistency test above.
+TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
+  kinova::Dynamics ref{URDF_PATH};
+  JointFeedback fb = make_feedback(0.3);
+  // Elbow-up home, the pose the arm works around (cartesian_test's
+  // well_conditioned_q): q = 0.3 everywhere is nearly the stretched candle,
+  // where the default damping attenuates BY DESIGN -- recovery accuracy is
+  // only promised away from singularities.
+  fb.q << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57;
+  kinova::JointVec g;
+  ref.gravity(fb.q, g);
+  kinova::Jacobian6 J;
+  ref.jacobian(fb.q, J);
+  kinova::Vector6 F;
+  F << 4.0, -2.0, 7.0, 0.3, -0.1, 0.2;  // environment-on-tool
+  fb.tau = g - J.transpose() * F;
+  SupFix f(fb);
+  f.sup.start();
+  f.snap.store(fb);  // seqlock driven directly -- see the free-hold test above
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  // 10%: the pump uses the default damping, whose working-pose bias is pinned
+  // in cartesian_test (DefaultDampingBiasIsSmallAtAWorkingPose).
+  EXPECT_TRUE(s.ee_wrench.isApprox(F, 0.1))
+      << "ee_wrench " << s.ee_wrench.transpose() << " != applied " << F.transpose();
+}
+
+// A faulted arm may deliver stale or zeroed torque; a confident wrench next to
+// fault=true is exactly the garbage a contact monitor would act on. NaN is the
+// runtime-checkable "no measurement".
+TEST(Supervisor, QueryStateReportsNaNEeWrenchUnderFault) {
+  JointFeedback fb = make_feedback(0.3);
+  fb.fault = true;
+  SupFix f(fb);
+  f.sup.start();
+  f.snap.store(fb);  // seqlock driven directly -- see the free-hold test above
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  EXPECT_TRUE(s.fault);
+  EXPECT_TRUE(s.ee_wrench.array().isNaN().all())
+      << "faulted wrench is not NaN: " << s.ee_wrench.transpose();
 }
 
 TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {

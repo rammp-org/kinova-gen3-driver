@@ -90,6 +90,21 @@ Vector6 pose_error(const Pose& desired, const Pose& current);
 Eigen-only (no Pinocchio). Position error in the world frame; orientation error as
 a shortest-path rotation vector. Singularity-free for orientation errors below π.
 
+### `ee_wrench_from_residual` — `cartesian.h`
+
+```cpp
+Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext,
+                                double damping = 0.05);
+//   returns (J·Jᵀ + λ²I)⁻¹ J · τ_ext   — damped pseudoinverse of Jᵀ
+```
+
+Eigen-only. Maps an external joint-torque residual to the EE wrench that
+explains it, with a hard amplification cap of `1/(2λ)` near singular poses. The
+Supervisor's pump uses it to fill `ArmState::ee_wrench` with `τ_ext = g(q) − τ`
+(the normalized convention — see `JointFeedback::tau`); NaN under a fault.
+Derivation, accuracy floor, and the λ trade:
+`docs/superpowers/specs/2026-10-04-ee-wrench-design.md`.
+
 ---
 
 ## Control modes

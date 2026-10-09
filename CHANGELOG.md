@@ -14,6 +14,13 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `ArmState::ee_wrench`: a measured external EE wrench (the wrench the
+  environment applies to the tool, `[force; torque]` in N / N·m,
+  `LOCAL_WORLD_ALIGNED`), estimated in the Supervisor's pump from the
+  joint-torque residual — same frame/model/sample as `ee_twist`. Quasi-static,
+  contact-detection grade; NaN while the arm reports a fault. Derivation and
+  accuracy floor: `docs/superpowers/specs/2026-10-04-ee-wrench-design.md` (#73).
+
 - **One gains contract on every impedance surface** (#63). Commands name their
   compliance with an `ImpedanceGains`: a core-owned named profile (`soft` / `medium` /
   `stiff`, each a complete `JointImpedanceParams`), `custom` raw gains
@@ -50,6 +57,17 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
+- **BREAKING (behavioral + wire):** feedback torque is normalized at the
+  Transport boundary (#73 review). `JointFeedback::tau` / `ArmState::tau` are
+  in the command convention — the torque the actuator applies, ≈ `+g(q)` at
+  free hold — instead of KORTEX's raw reaction sign (≈ `−g(q)`).
+  `KortexTransport` flips the sign where degrees become radians;
+  `SimTransport` echoes the commanded torque in torque mode. Consumers that
+  correlate `tau` with the model (gravity residuals, contact monitors,
+  `/joint_states` effort downstream) see the sign flip; the teleop protocol
+  bumps to `kVersion = 2` because `FeedbackPacket.tau` changes meaning on the
+  wire; the dry-run gravity check's "residual should be small" promise is now
+  actually true on hardware.
 - **BREAKING (C++):** `TrajectoryGoal` drops `has_gains`/`gains`
   (`JointImpedanceGainValues`) for `ImpedanceGains gains`; `GainsRequest.gains` becomes
   `GainsRequest.spec`; `StreamOpenRequest` gains a `gains` field;

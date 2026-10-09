@@ -3,6 +3,8 @@
 #include <Eigen/Cholesky>
 #include <algorithm>
 #include <cmath>
+
+#include "kinova_lowlevel/cartesian.h"  // damped_jjt
 namespace kinova {
 namespace {
 
@@ -50,10 +52,9 @@ IkResult DiffIkSolver::solve(const Pose& target, JointVec& q) {
     if (r.rot_err > p_.max_rot_err) e.tail<3>() *= p_.max_rot_err / r.rot_err;
 
     dyn_.jacobian(q, J_);
-    Eigen::Matrix<double, 6, 6> A = J_ * J_.transpose();
-    A.diagonal().array() += p_.damping * p_.damping;
-    // Fixed-size LDLT: no heap. Same pattern as the null-space projector in
-    // cartesian_impedance_mode.cpp. Explicit type rather than `auto` -- an Eigen
+    Eigen::Matrix<double, 6, 6> A;
+    damped_jjt(J_, p_.damping, A);
+    // Fixed-size LDLT: no heap. Explicit type rather than `auto` -- an Eigen
     // decomposition bound by `auto` can dangle on its operand.
     const Eigen::LDLT<Eigen::Matrix<double, 6, 6>> A_ldlt(A);
 

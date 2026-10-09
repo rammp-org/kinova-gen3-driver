@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "kinova_lowlevel/cartesian.h"  // damped_jjt
 #include "kinova_lowlevel/units.h"
 
 namespace kinova {
@@ -72,8 +73,8 @@ void CartesianImpedanceMode::compute(const JointFeedback& fb, double dt_s, Joint
     // Damped pseudo-inverse of Jᵀ:  (Jᵀ)⁺ = (J Jᵀ + λ²I)⁻¹ J   (6x7).
     // N = I - Jᵀ (Jᵀ)⁺ projects secondary joint torques into null(J), so they
     // produce no task-space wrench. Fixed-size LDLT — no heap allocation.
-    Eigen::Matrix<double, 6, 6> JJt = J_ * J_.transpose();
-    JJt.diagonal().array() += p.pinv_damping * p.pinv_damping;
+    Eigen::Matrix<double, 6, 6> JJt;
+    damped_jjt(J_, p.pinv_damping, JJt);
     Eigen::Matrix<double, 6, kNumJoints> JtPinv = JJt.ldlt().solve(J_);
     Eigen::Matrix<double, kNumJoints, kNumJoints> N =
         Eigen::Matrix<double, kNumJoints, kNumJoints>::Identity() - J_.transpose() * JtPinv;
