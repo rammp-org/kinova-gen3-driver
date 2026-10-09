@@ -1519,7 +1519,11 @@ TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
   fb.tau = g;
   SupFix f(fb);
   f.sup.start();
-  f.run_rt();
+  // Drive the pump's seqlock directly instead of running the RT executor: the
+  // executor's idle hold is kTorque/zero, which SimTransport's motor echo would
+  // faithfully report as tau = 0 (a limp arm), clobbering the seeded torque
+  // this test is about. The pump is the unit here, not the RT loop.
+  f.snap.store(fb);
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
   const interface::ArmState s = f.sup.on_query_state();
   f.sup.stop();
@@ -1537,6 +1541,11 @@ TEST(Supervisor, QueryStateReportsZeroEeWrenchAtFreeHold) {
 TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
   kinova::Dynamics ref{URDF_PATH};
   JointFeedback fb = make_feedback(0.3);
+  // Elbow-up home, the pose the arm works around (cartesian_test's
+  // well_conditioned_q): q = 0.3 everywhere is nearly the stretched candle,
+  // where the default damping attenuates BY DESIGN -- recovery accuracy is
+  // only promised away from singularities.
+  fb.q << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57;
   kinova::JointVec g;
   ref.gravity(fb.q, g);
   kinova::Jacobian6 J;
@@ -1546,15 +1555,37 @@ TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
   fb.tau = g - J.transpose() * F;
   SupFix f(fb);
   f.sup.start();
-  f.run_rt();
+  f.snap.store(fb);  // seqlock driven directly -- see the free-hold test above
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
   const interface::ArmState s = f.sup.on_query_state();
   f.sup.stop();
   f.teardown();
 
   ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
-  EXPECT_TRUE(s.ee_wrench.isApprox(F, 1e-3))
+  // 10%: the pump uses the default damping, whose working-pose bias is pinned
+  // in cartesian_test (DefaultDampingBiasIsSmallAtAWorkingPose).
+  EXPECT_TRUE(s.ee_wrench.isApprox(F, 0.1))
       << "ee_wrench " << s.ee_wrench.transpose() << " != applied " << F.transpose();
+}
+
+// A faulted arm may deliver stale or zeroed torque; a confident wrench next to
+// fault=true is exactly the garbage a contact monitor would act on. NaN is the
+// runtime-checkable "no measurement".
+TEST(Supervisor, QueryStateReportsNaNEeWrenchUnderFault) {
+  JointFeedback fb = make_feedback(0.3);
+  fb.fault = true;
+  SupFix f(fb);
+  f.sup.start();
+  f.snap.store(fb);  // seqlock driven directly -- see the free-hold test above
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  const interface::ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  EXPECT_TRUE(s.fault);
+  EXPECT_TRUE(s.ee_wrench.array().isNaN().all())
+      << "faulted wrench is not NaN: " << s.ee_wrench.transpose();
 }
 
 TEST(SupervisorSpeed, OverrideIsAcceptedInRangeAndRefusedOutside) {

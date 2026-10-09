@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <string>
 
 #include "kinova_lowlevel/cartesian.h"  // ee_wrench_from_residual
@@ -106,8 +107,13 @@ void Supervisor::pump_loop() {
       s.ee_twist = pump_J_ * fb.qd;
       // Quasi-statics in the one normalized convention (JointFeedback::tau):
       // motor + external = gravity, so the externally applied joint torque is
-      // g(q) - tau. See ArmState::ee_wrench.
-      s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ - fb.tau);
+      // g(q) - tau. See ArmState::ee_wrench. Under a fault the torque feedback
+      // may be stale or zeroed, so publish NaN -- a runtime-checkable "no
+      // measurement", not a confident garbage number beside a fault flag.
+      if (fb.fault)
+        s.ee_wrench.setConstant(std::numeric_limits<double>::quiet_NaN());
+      else
+        s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ - fb.tau);
       s.speed_override = speed_override_.load();
       state_snap_.store(s);
       stream_.publish_state(s);

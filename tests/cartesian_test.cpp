@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+
+#include "kinova_lowlevel/dynamics.h"
 using namespace kinova;
 
 TEST(PoseError, IdenticalPosesGiveZero) {
@@ -53,8 +55,6 @@ TEST(PoseError, LargeRotationTakesShortestPath) {
 // the real Gen3 model so the tests exercise the actual 6x7 geometry, including a
 // genuinely singular pose -- a synthetic J would prove less.
 
-#include "kinova_lowlevel/dynamics.h"
-
 namespace {
 // Elbow-up home (DiffIkParams::q_rest): far from singular, the pose the arm
 // actually works around.
@@ -70,9 +70,26 @@ TEST(EeWrench, RecoversAWrenchAppliedThroughJt) {
   Vector6 F;  // environment-on-tool: push along +x/-y/+z plus a twist
   F << 5.0, -3.0, 8.0, 0.4, -0.2, 0.6;
   const JointVec tau_ext = J.transpose() * F;
-  const Vector6 F_hat = ee_wrench_from_residual(J, tau_ext);
+  // Near-zero damping: this tests the SOLVE, the default's accuracy/robustness
+  // trade is pinned by the two tests below.
+  const Vector6 F_hat = ee_wrench_from_residual(J, tau_ext, 1e-6);
   EXPECT_TRUE(F_hat.isApprox(F, 1e-3))
       << "F_hat " << F_hat.transpose() << " != F " << F.transpose();
+}
+
+TEST(EeWrench, DefaultDampingBiasIsSmallAtAWorkingPose) {
+  // The default lambda buys a hard singular-pose cap (test below) at the price
+  // of a bias at working poses. This pins that price: a real contact must come
+  // through within ~10% where the arm actually operates, or the default is too
+  // heavy to be useful.
+  Dynamics dyn{URDF_PATH};
+  Jacobian6 J;
+  dyn.jacobian(well_conditioned_q(), J);
+  Vector6 F;
+  F << 5.0, -3.0, 8.0, 0.4, -0.2, 0.6;
+  const Vector6 F_hat = ee_wrench_from_residual(J, J.transpose() * F);
+  EXPECT_TRUE(F_hat.isApprox(F, 0.1))
+      << "F_hat " << F_hat.transpose() << " biased >10% from F " << F.transpose();
 }
 
 TEST(EeWrench, ZeroResidualGivesExactlyZero) {
@@ -85,15 +102,21 @@ TEST(EeWrench, ZeroResidualGivesExactlyZero) {
 
 TEST(EeWrench, DampingBoundsTheEstimateAtASingularPose) {
   // q = 0 is the fully-stretched candle: J loses rank and an undamped
-  // pinv(J^T) would turn a residual with a null-space component into an
-  // enormous phantom wrench. The damping must keep it finite, and more
-  // damping must never grow the estimate.
+  // pinv(J^T) would turn a residual's null-space component into an enormous
+  // phantom wrench. The damped per-direction gain peaks at 1/(2*lambda), so
+  // the estimate must honour the documented bound ||F|| <= ||tau||/(2*lambda):
+  // at the default lambda a noise-floor residual maps to tens of newtons, not
+  // the hundreds-to-thousands a DiffIk-sized lambda would permit. More damping
+  // must tighten the cap, never grow the estimate.
   Dynamics dyn{URDF_PATH};
   Jacobian6 J;
   dyn.jacobian(JointVec::Zero(), J);
-  const JointVec tau_ext = JointVec::Constant(5.0);  // deliberately not J^T * anything
-  const Vector6 light = ee_wrench_from_residual(J, tau_ext, 1e-3);
-  const Vector6 heavy = ee_wrench_from_residual(J, tau_ext, 0.1);
-  EXPECT_TRUE(light.allFinite());
-  EXPECT_LE(heavy.norm(), light.norm());
+  const JointVec tau_ext = JointVec::Constant(2.5);  // the proximal-joint noise floor
+  const Vector6 at_default = ee_wrench_from_residual(J, tau_ext);
+  const Vector6 heavier = ee_wrench_from_residual(J, tau_ext, 0.1);
+  EXPECT_TRUE(at_default.allFinite());
+  EXPECT_LE(at_default.norm(), tau_ext.norm() / (2 * 0.05))  // ~66 N for this residual
+      << "default damping does not deliver the documented 1/(2*lambda) cap";
+  EXPECT_LE(heavier.norm(), tau_ext.norm() / (2 * 0.1));
+  EXPECT_LE(heavier.norm(), at_default.norm());
 }

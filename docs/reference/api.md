@@ -94,23 +94,15 @@ a shortest-path rotation vector. Singularity-free for orientation errors below �
 
 ```cpp
 Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext,
-                                double damping = 1e-3);
+                                double damping = 0.05);
 //   returns (J·Jᵀ + λ²I)⁻¹ J · τ_ext   — damped pseudoinverse of Jᵀ
 ```
 
-Eigen-only. Maps an external joint-torque residual to the EE wrench that explains
-it, solving `τ_ext = Jᵀ·F` in the least-squares sense; the damping bounds the
-estimate at singular poses instead of letting a null-space residual become an
-enormous phantom wrench. The Supervisor's pump uses it to fill
-`ArmState::ee_wrench` with `τ_ext = g(q) + τ_raw` — KORTEX feedback torque is
-reaction-signed (measured ≈ `−g(q)` at free hold, verified on the lab arm), so
-that sum is the externally applied joint torque and the result is **the wrench
-the environment applies to the tool**, `[force; torque]` in N / N·m,
-`LOCAL_WORLD_ALIGNED` at the tool — same frame, model, and feedback sample as
-`ee_twist`. KORTEX's own `tool_external_wrench` is not an option: it stops
-updating in `LOW_LEVEL_SERVOING` (kortex#52). Quasi-static and
-contact-detection grade — the joint residual floor (~1–2.5 N·m proximally) maps
-to a few Newtons at the tool, and Coriolis/inertial torques are ignored; see
+Eigen-only. Maps an external joint-torque residual to the EE wrench that
+explains it, with a hard amplification cap of `1/(2λ)` near singular poses. The
+Supervisor's pump uses it to fill `ArmState::ee_wrench` with `τ_ext = g(q) − τ`
+(the normalized convention — see `JointFeedback::tau`); NaN under a fault.
+Derivation, accuracy floor, and the λ trade:
 `docs/superpowers/specs/2026-10-04-ee-wrench-design.md`.
 
 ---

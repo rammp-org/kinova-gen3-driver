@@ -99,3 +99,33 @@ may calibrate against the sim wrench.
   (environment-on-tool, world-aligned at the tool, quasi-static accuracy caveat).
 - `kinova_gen3_ros2/ros2_backend.cpp`: copy `s.ee_wrench[0..5]` in the same
   pump-tick publish that already fills pose and twist.
+
+## Review reconciliation (2026-10-09, PR #74)
+
+Decisions from the PR #74 review, now implemented — this section supersedes the
+matching parts above:
+
+- **Sign normalization is no longer deferred.** `KortexTransport` flips the
+  reaction-signed feedback torque at the Transport boundary (the same place
+  degrees become radians), so `JointFeedback::tau` / `ArmState::tau` carry ONE
+  convention: the torque the actuator applies, ≈ `+g(q)` at free hold. The
+  estimator residual is therefore `g(q) − τ`, the dry-run gravity check's
+  "residual should be small" promise is true as printed, and no consumer needs
+  the reaction-sign folklore. Breaking for anything that correlated raw `tau`
+  with the model (CHANGELOG entry).
+- **Damping λ: 1e-3 → 0.05.** The damped per-direction gain `σ/(σ²+λ²)` peaks
+  at `1/(2λ)`; at 1e-3 that is a 500× cap, which lets the 1–2.5 N·m residual
+  noise floor masquerade as hundreds-to-thousands of newtons near the candle
+  pose — "bounded" but useless. λ = 0.05 caps amplification at 10× (noise floor
+  ⇒ ≲25 N worst case) and biases working-pose estimates only a few percent.
+  DiffIk's 1e-3 is NOT a precedent: DiffIk clamps its input before the solve,
+  the estimator feeds raw noise in. `cartesian_test` pins the
+  `‖F‖ ≤ ‖τ‖/(2λ)` bound and the ≤10% working-pose bias.
+- **Fault ⇒ NaN.** Under `fb.fault` the pump publishes a NaN wrench instead of
+  a confident number computed from possibly stale torque: runtime-checkable,
+  matching the ROS "no measurement" convention downstream.
+- **Sim is no longer meaningless.** `SimTransport` echoes the commanded torque
+  in torque mode (its motor applies exactly what is commanded), so gravity
+  residuals and the wrench read ≈0 under grav comp / impedance in sim. An idle
+  (zero-torque) sim arm reads τ = 0 — a limp arm — which the estimator reports
+  as the support wrench, faithfully.
