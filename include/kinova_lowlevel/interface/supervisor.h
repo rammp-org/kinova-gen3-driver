@@ -246,7 +246,7 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // when both are held (sampler tick) -- keep that order.
   std::mutex dyn_mtx_;
 
-  kinova::Jacobian6 pump_J_;  // preallocated; pump thread only
+  kinova::Jacobian6 pump_J_;            // preallocated; pump thread only
   JointVec pump_g_ = JointVec::Zero();  // gravity scratch; pump thread only
 
   std::mutex q_mtx_;

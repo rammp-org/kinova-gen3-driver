@@ -13,8 +13,7 @@ Vector6 pose_error(const Pose& desired, const Pose& current);
 // it: it factors the UNDAMPED Gram matrix first to read manipulability off
 // the LDLT for free, then adds its adaptive λ² to the matrix it already
 // holds. Fixed-size, alloc-free.
-inline void damped_jjt(const Jacobian6& J, double damping,
-                       Eigen::Matrix<double, 6, 6>& A_out) {
+inline void damped_jjt(const Jacobian6& J, double damping, Eigen::Matrix<double, 6, 6>& A_out) {
   A_out.noalias() = J * J.transpose();
   A_out.diagonal().array() += damping * damping;
 }
