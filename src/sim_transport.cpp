@@ -80,8 +80,19 @@ static void report_wrapped(const JointFeedback& state, JointFeedback& fb) {
   for (int i = 0; i < kNumJoints; ++i) fb.q[i] = wrap_to_pi(fb.q[i]);
 }
 
+// The sim's "motor": in torque mode the actuator applies exactly what was
+// commanded, so feedback tau echoes it -- the command convention
+// JointFeedback::tau documents. This is what makes the gravity residual
+// (tau - g) and ArmState::ee_wrench read ~zero in sim under grav comp /
+// impedance instead of a phantom +g image. Other modes leave tau at its
+// seeded value: the sim has no motor model to derive a torque from.
+void SimTransport::step_torque(const JointCommand& cmd) {
+  if (cmd.mode == ActuatorMode::kTorque) state_.tau = cmd.torque;
+}
+
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   last_cmd_ = cmd;
+  step_torque(cmd);
   step_gripper(cmd.gripper);
   if (latency_us_ > 0) {
     const int64_t deadline = ns_now() + int64_t(latency_us_) * 1000LL;
@@ -95,6 +106,7 @@ void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
 
 void SimTransport::send(const JointCommand& cmd) {
   last_cmd_ = cmd;
+  step_torque(cmd);
   step_gripper(cmd.gripper);
   ++frame_;
   state_.frame_id = frame_;

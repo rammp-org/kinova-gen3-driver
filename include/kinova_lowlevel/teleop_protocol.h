@@ -13,7 +13,10 @@
 namespace kinova::teleop {
 
 inline constexpr uint32_t kMagic = 0x4B544C50;  // "KTLP"
-inline constexpr uint16_t kVersion = 1;
+// v2: FeedbackPacket.tau changed MEANING (not layout) -- it now carries the
+// normalized command convention (~ +g at free hold), see JointFeedback::tau.
+// A v1 client would silently ingest sign-flipped torque, hence the bump.
+inline constexpr uint16_t kVersion = 2;
 inline constexpr int kNumJointsProto = 7;
 
 enum class MsgType : uint16_t {

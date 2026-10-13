@@ -86,7 +86,12 @@ struct KortexTransport::Impl {
     for (int i = 0; i < n_; ++i) {
       fb.q[i] = wrap_to_pi(double(fb_.actuators(i).position()) * kDeg2Rad);
       fb.qd[i] = double(fb_.actuators(i).velocity()) * kDeg2Rad;
-      fb.tau[i] = double(fb_.actuators(i).torque());
+      // KORTEX reports feedback torque REACTION-signed (measured ~ -g(q) at free
+      // hold, verified on the lab arm) while it takes commands motor-signed.
+      // Normalize here, the same boundary that turns degrees into radians, so
+      // everything past Transport speaks ONE convention: the torque the actuator
+      // applies, ~ +g(q) at free hold. See JointFeedback::tau.
+      fb.tau[i] = -double(fb_.actuators(i).torque());
       fb.current[i] = double(fb_.actuators(i).current_motor());
     }
     fb.frame_id = fb_.frame_id();
