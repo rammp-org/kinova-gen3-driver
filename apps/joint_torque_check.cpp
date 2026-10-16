@@ -80,7 +80,8 @@ struct Sample {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string pacing_str = "sleepspin";
   bool use_sim = false, dry_run = false;
   int joint = kNumJoints - 1;  // wrist by default
@@ -104,6 +105,8 @@ int main(int argc, char** argv) {
       ip = val();
     else if (a == "--urdf")
       urdf = val();
+    else if (a == "--ee-frame")
+      ee_frame = val();
     else if (a == "--sim")
       use_sim = true;
     else if (a == "--dry-run")
@@ -130,6 +133,14 @@ int main(int argc, char** argv) {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
+  }
+
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
   }
 
   Pacing pacing = Pacing::kSleepSpin;
@@ -163,7 +174,7 @@ int main(int argc, char** argv) {
       "publisher stops, tau_ff should reach zero about %.2fs later.\n",
       p.cmd_timeout_s, p.cmd_decay_s, p.cmd_timeout_s + p.cmd_decay_s);
 
-  Dynamics dyn(urdf);
+  Dynamics dyn(urdf, ee_frame);
 
   std::unique_ptr<Transport> transport;
   if (use_sim) {

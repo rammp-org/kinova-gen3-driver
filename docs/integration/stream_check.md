@@ -50,21 +50,21 @@ The run is scripted, and **the second phase is the test, not a pause**:
 servoing:
 
 ```sh
-./build/stream_check --ip 192.168.1.10 --dry-run
+./build/stream_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run
 ```
 
 **2. Joint positions into impedance mode** — the compliant path, start here:
 
 ```sh
-./build/stream_check --ip 192.168.1.10 --kind joint-position --mode impedance
+./build/stream_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --kind joint-position --mode impedance
 ```
 
 **3. Then the other supported pairs**, once you trust the first:
 
 ```sh
-./build/stream_check --ip 192.168.1.10 --kind pose         --mode impedance
-./build/stream_check --ip 192.168.1.10 --kind joint-torque --mode torque --tau 1.0
-./build/stream_check --ip 192.168.1.10 --kind joint-position --mode position   # no compliance
+./build/stream_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --kind pose         --mode impedance
+./build/stream_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --kind joint-torque --mode torque --tau 1.0
+./build/stream_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --kind joint-position --mode position   # no compliance
 ```
 
 The velocity kinds are refused — they need `JointVelocityMode`, which does not

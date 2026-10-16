@@ -14,6 +14,9 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `Dynamics` builds from URDF XML (`UrdfXml`) and reduces any model to the root→EE chain,
+  locking other joints at zero, so the articulated description is accepted.
+  `Dynamics::joint_names()` returns the arm's joints in chain order.
 - `ArmState::ee_wrench`: a measured external EE wrench (the wrench the
   environment applies to the tool, `[force; torque]` in N / N·m,
   `LOCAL_WORLD_ALIGNED`), estimated in the Supervisor's pump from the
@@ -56,6 +59,10 @@ that heading to the new version and bumps `package.xml`.
   motion, zero once the leash pins against a blocked arm.
 
 ### Changed
+
+- **Breaking (apps):** every standalone app requires `--urdf`; there is no default model.
+  A level default silently applied the wrong gravity on a tilted mount. Apps take
+  `--ee-frame` (default `arm_end_effector_link`, the rendered model's name).
 
 - **BREAKING (behavioral + wire):** feedback torque is normalized at the
   Transport boundary (#73 review). `JointFeedback::tau` / `ArmState::tau` are

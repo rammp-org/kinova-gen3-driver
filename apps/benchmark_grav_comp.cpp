@@ -5,12 +5,13 @@
 // KortexTransport path is constructed only when --ip is given and --sim is not;
 // it is never exercised here while the robot is powered off.
 //
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --rate 1000
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --rate 1000
 //       --duration 5 --csv /tmp/bench.csv
 //
-// --ee-frame <name>: URDF link name Dynamics uses as the end effector (default
-// "end_effector_link", matching the bare-arm --urdf default above). The gripper
-// model names it differently, so pass it explicitly:
+// --urdf is required (no default model). --ee-frame <name>: URDF link name Dynamics
+// uses as the end effector (default "arm_end_effector_link", the rendered model's
+// name). The bundled models name it differently, so pass it explicitly:
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof_2f85.urdf
 //       --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 //
@@ -26,8 +27,10 @@
 // individually (same convention as teleop_socket_server's --jtau-limit). If
 // omitted, JointTorqueParams' own per-joint default applies: (39,39,39,39,9,9,9)
 // — the wrist (joints 5-7) is limited to its 9 N·m URDF effort rating.
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 20
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 39,39,39,39,9,9,9
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --torque-limit 20
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --torque-limit 39,39,39,39,9,9,9
 
 #include <atomic>
 #include <chrono>
@@ -96,11 +99,8 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof.urdf";
-  // Matches the DEFAULT --urdf below. models/gen3_7dof.urdf (bare arm) has
-  // "end_effector_link"; Dynamics defaults to "gen3_end_effector_link", which
-  // only exists in the gripper model. See issue #18.
-  std::string ee_frame = "end_effector_link";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -165,6 +165,14 @@ int main(int argc, char** argv) {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
+  }
+
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
   }
 
   Pacing pacing = Pacing::kSleepSpin;

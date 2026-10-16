@@ -10,7 +10,8 @@
 //   the only genuinely new per-cycle cost this mode introduces, and the delta
 //   between --kind joint and --kind twist IS that cost.
 //
-//   ./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf \
+//   ./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link \
 //       --rate 1000 --duration 5 --kind twist --csv /tmp/bench.csv
 
 #include <Eigen/Dense>
@@ -46,7 +47,8 @@ void on_sigint(int) { g_stop.store(true); }
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   std::string kind_str = "joint";
@@ -72,6 +74,8 @@ int main(int argc, char** argv) {
       use_sim = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--rate")
       rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu")
@@ -96,6 +100,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -110,11 +122,12 @@ int main(int argc, char** argv) {
     std::exit(2);
   }
 
-  std::cout << "[vel] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
+  std::cout << "[vel] urdf=" << urdf << " ee_frame=" << ee_frame
+            << " rate=" << rate_hz << "Hz pacing=" << pacing_str
             << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
             << "s sim=" << (use_sim ? "yes" : "no") << " kind=" << kind_str << "\n";
 
-  Dynamics dyn(urdf);
+  Dynamics dyn(urdf, ee_frame);
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;

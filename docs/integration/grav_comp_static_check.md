@@ -83,7 +83,7 @@ damping if needed.
    `--torque-limit`, short `--duration`), e-stop in reach:
 
    ```sh
-   ./benchmark_grav_comp --ip 192.168.1.10 --urdf ../models/gen3_7dof.urdf \
+   ./benchmark_grav_comp --ip 192.168.1.10 --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
      --rate 1000 --scale 0.5 --torque-limit 15 --duration 5 --csv /tmp/hold.csv
    ```
 

@@ -55,8 +55,8 @@ version.
 
 Sim benchmarks:
 ```sh
-./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --rate 1000 --duration 5
-./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf --rate 1000 --duration 5
+./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --ee-frame end_effector_link --rate 1000 --duration 5
+./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 ```
 
 ## Architecture — the boundaries that matter

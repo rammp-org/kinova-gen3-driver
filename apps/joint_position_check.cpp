@@ -33,6 +33,7 @@
 //
 //   # sim (no robot); protocol/plumbing only, the arm will not move
 //   ./joint_position_check --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link
 
 #include <Eigen/Dense>
 #include <atomic>
@@ -130,7 +131,8 @@ std::vector<Waypoint> build_sequence(const JointVec& home, int from_joint, doubl
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -164,6 +166,8 @@ int main(int argc, char** argv) {
       dry_run = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--rate")
       rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu")
@@ -195,6 +199,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -220,12 +232,13 @@ int main(int argc, char** argv) {
   }
   if (sequence && delta == 0.0) delta = 0.2;  // sequence needs some motion
 
-  std::cout << "[jpos] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
+  std::cout << "[jpos] urdf=" << urdf << " ee_frame=" << ee_frame
+            << " rate=" << rate_hz << "Hz pacing=" << pacing_str
             << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
             << "s sim=" << (use_sim ? "yes" : "no") << " dry_run=" << (dry_run ? "yes" : "no")
             << " speed=" << speed << "rad/s leash=" << leash << "rad\n";
 
-  Dynamics dyn(urdf);
+  Dynamics dyn(urdf, ee_frame);
   JointVec lo, hi;
   dyn.joint_limits(lo, hi);
 

@@ -118,7 +118,7 @@ watch the console the entire time:
 ```sh
 ./benchmark_grav_comp \
   --ip 192.168.1.10 \
-  --urdf ../models/gen3_7dof.urdf \
+  --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
   --rate 1000 \
   --scale 0.5 \
   --torque-limit 20,20,20,20,7,7,7 \

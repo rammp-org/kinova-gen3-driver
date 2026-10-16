@@ -210,7 +210,7 @@ baseline per the validation steps in the tuning guide.
 ## Run the sim benchmark
 
 ```sh
-cd build && ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf \
+cd build && ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
   --rate 1000 --duration 5 --csv /tmp/bench.csv
 ```
 
@@ -225,7 +225,7 @@ allocation in the RT loop — see the [deep dive](docs/deep-dive/impedance.md).
 
 ```sh
 cd build && ./benchmark_cartesian_impedance --sim \
-  --urdf ../models/gen3_7dof_2f85.urdf --rate 1000 --duration 5
+  --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 ```
 
 **Joint velocity** has `benchmark_joint_velocity`, which takes `--kind
@@ -235,7 +235,7 @@ the twist map's per-cycle cost.
 
 ```sh
 cd build && ./benchmark_joint_velocity --sim \
-  --urdf ../models/gen3_7dof_2f85.urdf --rate 1000 --duration 5 --kind twist
+  --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --rate 1000 --duration 5 --kind twist
 ```
 
 What the output means:
@@ -278,12 +278,12 @@ needs no supervisor change.
 ```sh
 # Cartesian impedance (default) — task-space spring, 7th DOF only null-space-biased
 cd build && ./teleop_socket_server --ip 192.168.1.10 \
-    --urdf ../models/gen3_7dof_2f85.urdf --port 9095
+    --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --port 9095
 
 # Joint-space impedance — solves IK, servos ALL 7 joints. Use this when teleop
 # keeps drifting into awkward elbow configurations.
 cd build && ./teleop_socket_server --ip 192.168.1.10 --joint-impedance \
-    --urdf ../models/gen3_7dof_2f85.urdf --port 9095
+    --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --port 9095
 ```
 
 Swap `--ip <addr>` for `--sim` to exercise the protocol without a robot

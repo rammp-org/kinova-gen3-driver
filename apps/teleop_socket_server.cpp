@@ -23,9 +23,12 @@
 // Robot feedback is captured without touching the driver core: FeedbackTap wraps
 // the Transport and snapshots `fb` at the exact point the RT loop reads it.
 //
-//   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf --port 9095
+//   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --port 9095
 //   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
-//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5
+//       --ee-frame gen3_end_effector_link
+//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5 \
+//       --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol
 // bring-up. Real motion requires the KORTEX build against the arm.
@@ -118,7 +121,8 @@ Pose pose_from_packet(const tp::PoseTargetPacket& p) {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   bool use_sim = false;
   int port = 9095;
   double rate_hz = 1000.0;
@@ -152,6 +156,8 @@ int main(int argc, char** argv) {
       use_sim = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--port")
       port = std::stoi(next("--port"));
     else if (a == "--rate")
@@ -202,7 +208,16 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::cout << "[teleop-srv] urdf=" << urdf << " rate=" << rate_hz << "Hz port=" << port
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
+  std::cout << "[teleop-srv] urdf=" << urdf << " ee_frame=" << ee_frame
+            << " rate=" << rate_hz << "Hz port=" << port
             << " sim=" << (use_sim ? "yes" : "no") << "\n";
 
   // Three Dynamics instances — Dynamics::fk mutates internal Pinocchio state and
@@ -211,9 +226,9 @@ int main(int argc, char** argv) {
   //   dyn    — CartesianImpedanceMode / RT thread
   //   dyn_fb — feedback thread (periodic ~150 Hz fk)
   //   dyn_rx — rx thread, FREEZE handler only
-  Dynamics dyn(urdf);
-  Dynamics dyn_fb(urdf);
-  Dynamics dyn_rx(urdf);  // rx-thread exclusive: prevents data race with dyn_fb
+  Dynamics dyn(urdf, ee_frame);
+  Dynamics dyn_fb(urdf, ee_frame);
+  Dynamics dyn_rx(urdf, ee_frame);  // rx-thread exclusive: prevents data race with dyn_fb
 
   std::unique_ptr<Transport> base_transport;
   if (use_sim) {

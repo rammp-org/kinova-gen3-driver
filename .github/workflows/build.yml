@@ -147,9 +147,9 @@ jobs:
       # above) and are deliberately not asserted on.
       - name: Sim smoke -- the loop runs end to end
         run: |
-          ./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf \
+          ./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --ee-frame end_effector_link \
             --rate 1000 --duration 2
-          ./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf \
+          ./build/benchmark_cartesian_impedance --sim --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link \
             --rate 1000 --duration 2
 
   # The real-arm path. src/kortex_transport.cpp compiles ONLY under
