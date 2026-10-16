@@ -199,3 +199,81 @@ TEST(DynamicsReduce, JointNamesAreTheArmChainInOrder) {
                                          "gen3_joint_7"};
   EXPECT_EQ(dyn.joint_names(), want);
 }
+
+#include <pinocchio/algorithm/joint-configuration.hpp>
+#include <pinocchio/algorithm/rnea.hpp>
+#include <pinocchio/parsers/urdf.hpp>
+
+namespace {
+constexpr double kTilt = M_PI / 6.0;  // 30 deg, new_adapter_plate_v3
+// The fixture with its root joint (world -> gen3_base_link) pitched +30 deg about Y:
+// the flatbot / gen_1_5 mount. Root "world" plays the role of arm_mount.
+std::string tilted_fixture() {
+  std::string xml = read_file(URDF_PATH);
+  replace_once(xml,
+               "<joint name=\"gen3_base_joint\" type=\"fixed\">\n"
+               "    <origin rpy=\"0 0 0\" xyz=\"0 0 0\"/>",
+               "<joint name=\"gen3_base_joint\" type=\"fixed\">\n"
+               "    <origin rpy=\"0 0.52359877559829887 0\" xyz=\"0 0 0\"/>");
+  return xml;
+}
+Eigen::Matrix3d Ry(double a) {
+  return Eigen::AngleAxisd(a, Eigen::Vector3d::UnitY()).toRotationMatrix();
+}
+}  // namespace
+
+TEST(DynamicsMount, TiltedRootRotatesFkAndJacobianIntoTheRootFrame) {
+  Dynamics flat(URDF_PATH), tilted(UrdfXml{tilted_fixture()});
+  const Eigen::Matrix3d R = Ry(kTilt);
+  for (const auto& q : kPoses) {
+    const Pose a = flat.fk(q), b = tilted.fk(q);
+    EXPECT_LT((R * a.p - b.p).norm(), 1e-12);
+    EXPECT_LT((R * a.R.toRotationMatrix() - b.R.toRotationMatrix()).cwiseAbs().maxCoeff(),
+              1e-12);
+    Jacobian6 Ja, Jb;
+    flat.jacobian(q, Ja);
+    tilted.jacobian(q, Jb);
+    EXPECT_LT((R * Ja.topRows<3>() - Jb.topRows<3>()).cwiseAbs().maxCoeff(), 1e-12);
+    EXPECT_LT((R * Ja.bottomRows<3>() - Jb.bottomRows<3>()).cwiseAbs().maxCoeff(), 1e-12);
+  }
+}
+
+TEST(DynamicsMount, TiltedRootGravityEqualsLevelModelWithGravityRotated) {
+  // Ground truth built independently: the LEVEL model, with Pinocchio's gravity
+  // vector expressed in the arm's base frame, R^T * (0, 0, -g).
+  pinocchio::Model level;
+  pinocchio::urdf::buildModel(URDF_PATH, level);
+  level.gravity.linear(Ry(kTilt).transpose() * Eigen::Vector3d(0, 0, -9.81));
+  pinocchio::Data data(level);
+  Dynamics tilted(UrdfXml{tilted_fixture()});
+  for (const auto& q : kPoses) {
+    Eigen::VectorXd cfg = pinocchio::neutral(level);
+    for (int i = 0; i < level.nv; ++i) {  // same (cos, sin) packing as Dynamics
+      const auto jid = level.getJointId(level.names[i + 1]);
+      const int k = level.idx_qs[jid];
+      if (level.nqs[jid] == 2) {
+        cfg[k] = std::cos(q[i]);
+        cfg[k + 1] = std::sin(q[i]);
+      } else {
+        cfg[k] = q[i];
+      }
+    }
+    const Eigen::VectorXd want = pinocchio::computeGeneralizedGravity(level, data, cfg);
+    JointVec got;
+    tilted.gravity(q, got);
+    EXPECT_LT((want - got).cwiseAbs().maxCoeff(), 1e-9);
+  }
+}
+
+TEST(DynamicsMount, TiltLoadsTheBaseYawJointThatLevelLeavesFree) {
+  // Physical sanity: on a level arm joint 1's axis is vertical, so gravity never
+  // loads it. Tilted 30 deg, it does whenever the arm's CoM is off that axis.
+  Dynamics flat(URDF_PATH), tilted(UrdfXml{tilted_fixture()});
+  JointVec q = JointVec::Zero(), tf, tt;
+  q[1] = M_PI / 2.0;  // arm horizontal
+  q[0] = M_PI / 2.0;  // pointing along +Y, sideways to the tilt
+  flat.gravity(q, tf);
+  tilted.gravity(q, tt);
+  EXPECT_NEAR(tf[0], 0.0, 1e-4);  // URDF rounding leaves ~9e-6 N*m; tilted is > 1
+  EXPECT_GT(std::abs(tt[0]), 1.0);
+}
