@@ -117,3 +117,85 @@ TEST(Dynamics, VelocityLimitsMatchUrdf) {
   for (int i : {0, 1, 2, 3}) EXPECT_NEAR(v[i], 1.3963, 1e-4) << "joint index " << i;
   for (int i : {4, 5, 6}) EXPECT_NEAR(v[i], 1.2218, 1e-4) << "joint index " << i;
 }
+#include <fstream>
+#include <sstream>
+#include <vector>
+
+namespace {
+std::string read_file(const std::string& path) {
+  std::ifstream f(path);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+void replace_once(std::string& s, const std::string& from, const std::string& to) {
+  const auto pos = s.find(from);
+  ASSERT_NE(pos, std::string::npos) << "fixture text not found: " << from;
+  s.replace(pos, from.size(), to);
+}
+// The fixture with the gripper's left knuckle articulated (revolute), the way the
+// rendered 13-DOF description has it. Same origin, so at q=0 it is the frozen model.
+std::string articulated_fixture() {
+  std::string xml = read_file(URDF_PATH);
+  replace_once(xml, "<joint name=\"gen3_robotiq_85_left_knuckle_joint\" type=\"fixed\">",
+               "<joint name=\"gen3_robotiq_85_left_knuckle_joint\" type=\"revolute\">"
+               "<axis xyz=\"0 -1 0\"/>"
+               "<limit lower=\"0\" upper=\"0.8\" effort=\"50\" velocity=\"2\"/>");
+  return xml;
+}
+const std::vector<JointVec> kPoses = [] {
+  std::vector<JointVec> v(3, JointVec::Zero());
+  v[1] << 0.3, 0.6, -1.0, 1.2, 0.4, -0.7, 1.1;
+  v[2] << -1.4, -0.9, 2.5, -2.0, 1.6, 0.9, -2.2;
+  return v;
+}();
+}  // namespace
+
+TEST(DynamicsXml, MatchesPathConstructor) {
+  Dynamics from_path(URDF_PATH);
+  Dynamics from_xml(UrdfXml{read_file(URDF_PATH)});
+  for (const auto& q : kPoses) {
+    JointVec a, b;
+    from_path.gravity(q, a);
+    from_xml.gravity(q, b);
+    EXPECT_LT((a - b).cwiseAbs().maxCoeff(), 1e-12);
+    EXPECT_LT((from_path.fk(q).p - from_xml.fk(q).p).norm(), 1e-12);
+  }
+  EXPECT_GT(from_xml.nq(), from_xml.nv());  // continuous packing survives the XML path
+}
+
+TEST(DynamicsXml, EmptyOrMalformedXmlThrows) {
+  EXPECT_ANY_THROW(Dynamics(UrdfXml{""}));
+  EXPECT_ANY_THROW(Dynamics(UrdfXml{"<robot name=\"x\"><link"}));
+}
+
+TEST(DynamicsReduce, ArticulatedGripperIsLockedToTheFrozenModel) {
+  Dynamics frozen(URDF_PATH);
+  Dynamics reduced(UrdfXml{articulated_fixture()});
+  EXPECT_EQ(reduced.nv(), kNumJoints);
+  for (const auto& q : kPoses) {
+    JointVec a, b;
+    frozen.gravity(q, a);
+    reduced.gravity(q, b);
+    EXPECT_LT((a - b).cwiseAbs().maxCoeff(), 1e-12);
+    Jacobian6 Ja, Jb;
+    frozen.jacobian(q, Ja);
+    reduced.jacobian(q, Jb);
+    EXPECT_LT((Ja - Jb).cwiseAbs().maxCoeff(), 1e-12);
+    EXPECT_LT((frozen.fk(q).p - reduced.fk(q).p).norm(), 1e-12);
+  }
+}
+
+TEST(DynamicsReduce, EeFrameBeyondAGripperJointKeepsItAndThrows) {
+  // A frame past the articulated knuckle keeps that joint on the chain: nv = 8.
+  EXPECT_THROW(Dynamics(UrdfXml{articulated_fixture()}, "gen3_robotiq_85_left_finger_link"),
+               std::runtime_error);
+}
+
+TEST(DynamicsReduce, JointNamesAreTheArmChainInOrder) {
+  Dynamics dyn(UrdfXml{articulated_fixture()});
+  const std::vector<std::string> want = {"gen3_joint_1", "gen3_joint_2", "gen3_joint_3",
+                                         "gen3_joint_4", "gen3_joint_5", "gen3_joint_6",
+                                         "gen3_joint_7"};
+  EXPECT_EQ(dyn.joint_names(), want);
+}

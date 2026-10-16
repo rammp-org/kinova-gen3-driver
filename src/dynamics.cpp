@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/dynamics.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <pinocchio/algorithm/crba.hpp>
@@ -7,20 +8,33 @@
 #include <pinocchio/algorithm/jacobian.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/algorithm/kinematics.hpp>
+#include <pinocchio/algorithm/model.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 #include <stdexcept>
 #include <string>
+#include <vector>
 namespace kinova {
 struct Dynamics::Impl {
   pinocchio::Model model;
   pinocchio::Data data;
   Eigen::VectorXd qcfg;
   pinocchio::FrameIndex frame_id = 0;
-  explicit Impl(const std::string& urdf) {
-    pinocchio::urdf::buildModel(urdf, model);
+  // `full` is the model as parsed; keep only the chain root -> ee_frame.
+  Impl(const pinocchio::Model& full, const std::string& ee_frame) {
+    // Footgun guard: a typo'd/missing EE frame must fail loudly at startup, never
+    // silently control the wrong point.
+    if (!full.existFrame(ee_frame))
+      throw std::runtime_error("Dynamics: EE frame '" + ee_frame + "' not in URDF");
+    const auto& chain = full.supports[full.frames[full.getFrameId(ee_frame)].parentJoint];
+    std::vector<pinocchio::JointIndex> lock;
+    for (pinocchio::JointIndex j = 1; j < pinocchio::JointIndex(full.njoints); ++j)
+      if (std::find(chain.begin(), chain.end(), j) == chain.end()) lock.push_back(j);
+    model = lock.empty() ? full
+                         : pinocchio::buildReducedModel(full, lock, pinocchio::neutral(full));
     data = pinocchio::Data(model);
     qcfg = pinocchio::neutral(model);
+    frame_id = model.getFrameId(ee_frame);
   }
   // Flat 7-vector of joint angles -> Pinocchio config vector, packing each
   // continuous joint as (cos, sin) (nqs==2). The single source of truth used by
@@ -38,21 +52,39 @@ struct Dynamics::Impl {
     }
   }
 };
-Dynamics::Dynamics(const std::string& urdf_path, const std::string& ee_frame)
-    : impl_(std::make_unique<Impl>(urdf_path)) {
-  // Guard against a wrong/mismatched URDF silently corrupting the fixed-size
-  // JointVec. Hard throw (not assert) so it fires in Release too. See no-silent-footgun.
-  if (impl_->model.nv != kNumJoints) {
-    throw std::runtime_error("Dynamics: URDF nv=" + std::to_string(impl_->model.nv) +
+namespace {
+pinocchio::Model parse_path(const std::string& path) {
+  pinocchio::Model m;
+  pinocchio::urdf::buildModel(path, m);
+  return m;
+}
+pinocchio::Model parse_xml(const std::string& xml) {
+  if (xml.empty()) throw std::runtime_error("Dynamics: URDF XML is empty");
+  pinocchio::Model m;
+  pinocchio::urdf::buildModelFromXML(xml, m);
+  return m;
+}
+// Guard against a wrong/mismatched URDF silently corrupting the fixed-size
+// JointVec. Hard throw (not assert) so it fires in Release too. See no-silent-footgun.
+void check_nv(const pinocchio::Model& m) {
+  if (m.nv != kNumJoints)
+    throw std::runtime_error("Dynamics: URDF nv=" + std::to_string(m.nv) +
                              " != kNumJoints=" + std::to_string(kNumJoints) +
-                             " (wrong URDF for this build)");
-  }
-  // Footgun guard: a typo'd/missing EE frame must fail loudly at startup, never
-  // silently control the wrong point.
-  if (!impl_->model.existFrame(ee_frame)) {
-    throw std::runtime_error("Dynamics: EE frame '" + ee_frame + "' not in URDF");
-  }
-  impl_->frame_id = impl_->model.getFrameId(ee_frame);
+                             " after reducing to the EE chain (wrong URDF or EE frame)");
+}
+}  // namespace
+
+Dynamics::Dynamics(const std::string& urdf_path, const std::string& ee_frame)
+    : impl_(std::make_unique<Impl>(parse_path(urdf_path), ee_frame)) {
+  check_nv(impl_->model);
+}
+Dynamics::Dynamics(const UrdfXml& urdf, const std::string& ee_frame)
+    : impl_(std::make_unique<Impl>(parse_xml(urdf.xml), ee_frame)) {
+  check_nv(impl_->model);
+}
+std::vector<std::string> Dynamics::joint_names() const {
+  // names[0] is "universe"; the reduced model holds exactly the arm chain.
+  return {impl_->model.names.begin() + 1, impl_->model.names.end()};
 }
 Dynamics::~Dynamics() = default;
 int Dynamics::nv() const { return impl_->model.nv; }
