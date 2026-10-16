@@ -216,8 +216,7 @@ TEST(DynamicsMount, TiltedRootRotatesFkAndJacobianIntoTheRootFrame) {
   for (const auto& q : kPoses) {
     const Pose a = flat.fk(q), b = tilted.fk(q);
     EXPECT_LT((R * a.p - b.p).norm(), 1e-12);
-    EXPECT_LT((R * a.R.toRotationMatrix() - b.R.toRotationMatrix()).cwiseAbs().maxCoeff(),
-              1e-12);
+    EXPECT_LT((R * a.R.toRotationMatrix() - b.R.toRotationMatrix()).cwiseAbs().maxCoeff(), 1e-12);
     Jacobian6 Ja, Jb;
     flat.jacobian(q, Ja);
     tilted.jacobian(q, Jb);

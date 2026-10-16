@@ -19,8 +19,7 @@ class Dynamics {
   // the chain from the root to ee_frame, locking every other joint at q = 0 -- the
   // same as type="fixed" at its URDF origin -- so an articulated gripper's mass
   // stays lumped at the wrist. nv must be 7 after reduction or construction throws.
-  explicit Dynamics(const UrdfXml& urdf,
-                    const std::string& ee_frame = "gen3_end_effector_link");
+  explicit Dynamics(const UrdfXml& urdf, const std::string& ee_frame = "gen3_end_effector_link");
   // The arm's joint names in chain order (root to tip), as named in the URDF.
   std::vector<std::string> joint_names() const;
   ~Dynamics();

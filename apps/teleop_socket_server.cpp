@@ -217,9 +217,8 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  std::cout << "[teleop-srv] urdf=" << urdf << " ee_frame=" << ee_frame
-            << " rate=" << rate_hz << "Hz port=" << port
-            << " sim=" << (use_sim ? "yes" : "no") << "\n";
+  std::cout << "[teleop-srv] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz port=" << port << " sim=" << (use_sim ? "yes" : "no") << "\n";
 
   // Three Dynamics instances — Dynamics::fk mutates internal Pinocchio state and
   // is NOT thread-safe. Each thread that calls fk owns its own instance so no

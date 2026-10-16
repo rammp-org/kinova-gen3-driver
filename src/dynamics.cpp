@@ -30,8 +30,8 @@ struct Dynamics::Impl {
     std::vector<pinocchio::JointIndex> lock;
     for (pinocchio::JointIndex j = 1; j < pinocchio::JointIndex(full.njoints); ++j)
       if (std::find(chain.begin(), chain.end(), j) == chain.end()) lock.push_back(j);
-    model = lock.empty() ? full
-                         : pinocchio::buildReducedModel(full, lock, pinocchio::neutral(full));
+    model =
+        lock.empty() ? full : pinocchio::buildReducedModel(full, lock, pinocchio::neutral(full));
     data = pinocchio::Data(model);
     qcfg = pinocchio::neutral(model);
     frame_id = model.getFrameId(ee_frame);

@@ -236,11 +236,11 @@ int main(int argc, char** argv) {
   }
   if (sequence && delta == 0.0) delta = 0.2;  // sequence needs some motion
 
-  std::cout << "[jpos] urdf=" << urdf << " ee_frame=" << ee_frame
-            << " rate=" << rate_hz << "Hz pacing=" << pacing_str
-            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
-            << "s sim=" << (use_sim ? "yes" : "no") << " dry_run=" << (dry_run ? "yes" : "no")
-            << " speed=" << speed << "rad/s leash=" << leash << "rad\n";
+  std::cout << "[jpos] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
+            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
+            << " dry_run=" << (dry_run ? "yes" : "no") << " speed=" << speed
+            << "rad/s leash=" << leash << "rad\n";
 
   // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
   std::unique_ptr<Dynamics> dyn_owner;

@@ -123,10 +123,10 @@ int main(int argc, char** argv) {
     std::exit(2);
   }
 
-  std::cout << "[vel] urdf=" << urdf << " ee_frame=" << ee_frame
-            << " rate=" << rate_hz << "Hz pacing=" << pacing_str
-            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
-            << "s sim=" << (use_sim ? "yes" : "no") << " kind=" << kind_str << "\n";
+  std::cout << "[vel] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
+            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
+            << " kind=" << kind_str << "\n";
 
   // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
   std::unique_ptr<Dynamics> dyn_owner;
