@@ -14,8 +14,9 @@ runs:
       shell: bash
       run: |
         python -m pip install --upgrade pip
-        python -m pip install "pin==2.7.0"
-        # The cmeel wheel bundles Boost, octomap, hpp-fcl, eigenpy and urdfdom,
+        # The exact cmeel set the robot runs (pin 3.9.0); see requirements.txt.
+        python -m pip install -r "$GITHUB_ACTION_PATH/requirements.txt"
+        # The cmeel wheel bundles Boost, octomap, coal, eigenpy and urdfdom,
         # but NOT Eigen3, urdfdom_headers or console_bridge -- pinocchioConfig
         # find_dependency()s those from the system, exactly as on the Jetson.
         # Do not add liburdfdom-dev: urdfdom itself comes from the prefix.

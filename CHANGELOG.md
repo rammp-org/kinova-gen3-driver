@@ -60,6 +60,9 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
+- CI builds against Pinocchio 3.9.0, the exact cmeel set the robot runs
+  (`.github/actions/setup-cpp-deps/requirements.txt`, mirroring kinova-gen3-ros2's
+  `docker/requirements.txt`), instead of 2.7.0.
 - **Breaking (apps):** every standalone app requires `--urdf`; there is no default model.
   A level default silently applied the wrong gravity on a tilted mount. Apps take
   `--ee-frame` (default `arm_end_effector_link`, the rendered model's name).
