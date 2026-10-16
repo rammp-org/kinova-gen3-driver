@@ -81,7 +81,8 @@ endif()
 
 # --- pinocchio ----------------------------------------------------------------
 # Requires -DCMAKE_PREFIX_PATH pointing at the cmeel.prefix (see header above).
-find_package(pinocchio REQUIRED)
+# 3.0: Dynamics uses Frame::parentJoint, which 2.x does not have.
+find_package(pinocchio 3.0 REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 # --- driver library -----------------------------------------------------------

@@ -20,6 +20,7 @@ struct Dynamics::Impl {
   pinocchio::Data data;
   Eigen::VectorXd qcfg;
   pinocchio::FrameIndex frame_id = 0;
+  double mount_tilt_deg = 0.0;
   // `full` is the model as parsed; keep only the chain root -> ee_frame.
   Impl(const pinocchio::Model& full, const std::string& ee_frame) {
     // Footgun guard: a typo'd/missing EE frame must fail loudly at startup, never
@@ -66,22 +67,44 @@ pinocchio::Model parse_xml(const std::string& xml) {
 }
 // Guard against a wrong/mismatched URDF silently corrupting the fixed-size
 // JointVec. Hard throw (not assert) so it fires in Release too. See no-silent-footgun.
-void check_nv(const pinocchio::Model& m) {
-  if (m.nv != kNumJoints)
-    throw std::runtime_error("Dynamics: URDF nv=" + std::to_string(m.nv) +
-                             " != kNumJoints=" + std::to_string(kNumJoints) +
+// nv == 7 alone is not enough: a multi-DOF joint (planar, spherical) can make the
+// count while leaving fewer than 7 names, which pack() and the limit readers index
+// past, and a prismatic joint would be packed as an angle. So: exactly seven joints,
+// each 1-DOF and revolute (Pinocchio's "R..." / "Revolute..." joint models).
+void check_arm_chain(const pinocchio::Model& m) {
+  if (m.nv != kNumJoints || m.njoints != kNumJoints + 1)
+    throw std::runtime_error("Dynamics: URDF nv=" + std::to_string(m.nv) + " in " +
+                             std::to_string(m.njoints - 1) + " joints, expected " +
+                             std::to_string(kNumJoints) +
                              " after reducing to the EE chain (wrong URDF or EE frame)");
+  for (pinocchio::JointIndex j = 1; j < pinocchio::JointIndex(m.njoints); ++j) {
+    const std::string kind = m.joints[j].shortname();
+    if (m.nvs[j] != 1 || kind.rfind("JointModelR", 0) != 0)
+      throw std::runtime_error("Dynamics: joint '" + m.names[j] + "' is " + kind +
+                               "; every arm joint must be a 1-DOF revolute joint");
+  }
+}
+// Joint 1's axis in the root frame is independent of q (nothing moves before it),
+// so the neutral configuration is as good as any. |cos| because the Gen3's joint 1
+// axis points DOWN (rpy pi on joint_1): level reads 0, not 180.
+double tilt_deg(const pinocchio::Model& m, pinocchio::Data& d, const Eigen::VectorXd& q) {
+  pinocchio::computeJointJacobians(m, d, q);
+  const Eigen::Vector3d axis = d.J.col(0).tail<3>().normalized();
+  return std::acos(std::min(1.0, std::abs(axis.z()))) * 180.0 / M_PI;
 }
 }  // namespace
 
 Dynamics::Dynamics(const std::string& urdf_path, const std::string& ee_frame)
     : impl_(std::make_unique<Impl>(parse_path(urdf_path), ee_frame)) {
-  check_nv(impl_->model);
+  check_arm_chain(impl_->model);
+  impl_->mount_tilt_deg = tilt_deg(impl_->model, impl_->data, impl_->qcfg);
 }
 Dynamics::Dynamics(const UrdfXml& urdf, const std::string& ee_frame)
     : impl_(std::make_unique<Impl>(parse_xml(urdf.xml), ee_frame)) {
-  check_nv(impl_->model);
+  check_arm_chain(impl_->model);
+  impl_->mount_tilt_deg = tilt_deg(impl_->model, impl_->data, impl_->qcfg);
 }
+double Dynamics::mount_tilt_deg() const { return impl_->mount_tilt_deg; }
 std::vector<std::string> Dynamics::joint_names() const {
   // names[0] is "universe"; the reduced model holds exactly the arm chain.
   return {impl_->model.names.begin() + 1, impl_->model.names.end()};

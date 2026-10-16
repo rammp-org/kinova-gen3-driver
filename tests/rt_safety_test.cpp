@@ -4,6 +4,7 @@
 #include <chrono>
 #include <thread>
 
+#include "fixtures.h"
 #include "interface/fake_backend.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
@@ -29,11 +30,11 @@ using namespace kinova;
 // settle sleep) faults in code+data first so the measured steady-state window
 // sees zero NEW major faults. The shared atomics carry the readings back to the
 // test thread for assertions.
-TEST(RtSafety, NoMajorFaultsSteadyState) {
+namespace {
+void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
   JointFeedback init;
   init.q.setZero();
   SimTransport t(init);
-  Dynamics dyn(URDF_PATH);
   JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
@@ -89,6 +90,19 @@ TEST(RtSafety, NoMajorFaultsSteadyState) {
 
   EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
+}
+}  // namespace
+
+TEST(RtSafety, NoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  expect_grav_comp_steady_state_rt_safe(dyn);
+}
+
+TEST(RtSafety, ReducedTiltedModelNoMajorFaultsSteadyState) {
+  // The production model's shape: articulated gripper reduced away, rotated root.
+  Dynamics dyn(UrdfXml{test_fixtures::articulate_gripper(test_fixtures::tilted_fixture())},
+               "gen3_end_effector_link");
+  expect_grav_comp_steady_state_rt_safe(dyn);
 }
 
 TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {

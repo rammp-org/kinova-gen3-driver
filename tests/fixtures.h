@@ -38,6 +38,21 @@ inline std::string tilted_fixture() {
   return xml;
 }
 
+// The six gripper joints articulated, mimic tags kept, as in the rendered 13-DOF
+// description: the knuckles revolute (they carry limits), the inner knuckles and
+// finger tips continuous. Same origins, so at q = 0 it is the frozen model.
+inline std::string articulate_gripper(std::string xml) {
+  const std::string pre = "<joint name=\"gen3_robotiq_85_";
+  for (const char* j : {"left_knuckle", "right_knuckle"})
+    replace_once(xml, pre + j + "_joint\" type=\"fixed\">",
+                 pre + j + "_joint\" type=\"revolute\">");
+  for (const char* j :
+       {"left_inner_knuckle", "right_inner_knuckle", "left_finger_tip", "right_finger_tip"})
+    replace_once(xml, pre + j + "_joint\" type=\"fixed\">",
+                 pre + j + "_joint\" type=\"continuous\">");
+  return xml;
+}
+
 inline Eigen::Matrix3d Ry(double a) {
   return Eigen::AngleAxisd(a, Eigen::Vector3d::UnitY()).toRotationMatrix();
 }
