@@ -117,22 +117,16 @@ TEST(Dynamics, VelocityLimitsMatchUrdf) {
   for (int i : {0, 1, 2, 3}) EXPECT_NEAR(v[i], 1.3963, 1e-4) << "joint index " << i;
   for (int i : {4, 5, 6}) EXPECT_NEAR(v[i], 1.2218, 1e-4) << "joint index " << i;
 }
-#include <fstream>
-#include <sstream>
 #include <vector>
 
+#include "fixtures.h"
+
 namespace {
-std::string read_file(const std::string& path) {
-  std::ifstream f(path);
-  std::stringstream ss;
-  ss << f.rdbuf();
-  return ss.str();
-}
-void replace_once(std::string& s, const std::string& from, const std::string& to) {
-  const auto pos = s.find(from);
-  ASSERT_NE(pos, std::string::npos) << "fixture text not found: " << from;
-  s.replace(pos, from.size(), to);
-}
+using kinova::test_fixtures::kTilt;
+using kinova::test_fixtures::read_file;
+using kinova::test_fixtures::replace_once;
+using kinova::test_fixtures::Ry;
+using kinova::test_fixtures::tilted_fixture;
 // The fixture with the gripper's left knuckle articulated (revolute), the way the
 // rendered 13-DOF description has it. Same origin, so at q=0 it is the frozen model.
 std::string articulated_fixture() {
@@ -183,7 +177,19 @@ TEST(DynamicsReduce, ArticulatedGripperIsLockedToTheFrozenModel) {
     reduced.jacobian(q, Jb);
     EXPECT_LT((Ja - Jb).cwiseAbs().maxCoeff(), 1e-12);
     EXPECT_LT((frozen.fk(q).p - reduced.fk(q).p).norm(), 1e-12);
+    JointMat Ma, Mb;
+    frozen.mass_matrix(q, Ma);
+    reduced.mass_matrix(q, Mb);
+    EXPECT_LT((Ma - Mb).cwiseAbs().maxCoeff(), 1e-12);
   }
+  JointVec lo_a, hi_a, lo_b, hi_b, v_a, v_b;
+  frozen.joint_limits(lo_a, hi_a);
+  reduced.joint_limits(lo_b, hi_b);
+  EXPECT_EQ(lo_a, lo_b);  // exact: infinities for the continuous joints compare equal
+  EXPECT_EQ(hi_a, hi_b);
+  frozen.velocity_limits(v_a);
+  reduced.velocity_limits(v_b);
+  EXPECT_EQ(v_a, v_b);
 }
 
 TEST(DynamicsReduce, EeFrameBeyondAGripperJointKeepsItAndThrows) {
@@ -203,24 +209,6 @@ TEST(DynamicsReduce, JointNamesAreTheArmChainInOrder) {
 #include <pinocchio/algorithm/joint-configuration.hpp>
 #include <pinocchio/algorithm/rnea.hpp>
 #include <pinocchio/parsers/urdf.hpp>
-
-namespace {
-constexpr double kTilt = M_PI / 6.0;  // 30 deg, new_adapter_plate_v3
-// The fixture with its root joint (world -> gen3_base_link) pitched +30 deg about Y:
-// the flatbot / gen_1_5 mount. Root "world" plays the role of arm_mount.
-std::string tilted_fixture() {
-  std::string xml = read_file(URDF_PATH);
-  replace_once(xml,
-               "<joint name=\"gen3_base_joint\" type=\"fixed\">\n"
-               "    <origin rpy=\"0 0 0\" xyz=\"0 0 0\"/>",
-               "<joint name=\"gen3_base_joint\" type=\"fixed\">\n"
-               "    <origin rpy=\"0 0.52359877559829887 0\" xyz=\"0 0 0\"/>");
-  return xml;
-}
-Eigen::Matrix3d Ry(double a) {
-  return Eigen::AngleAxisd(a, Eigen::Vector3d::UnitY()).toRotationMatrix();
-}
-}  // namespace
 
 TEST(DynamicsMount, TiltedRootRotatesFkAndJacobianIntoTheRootFrame) {
   Dynamics flat(URDF_PATH), tilted(UrdfXml{tilted_fixture()});

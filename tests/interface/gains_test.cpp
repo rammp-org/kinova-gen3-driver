@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <limits>
 
+#include "../fixtures.h"
 #include "kinova_lowlevel/dynamics.h"
 using namespace kinova;
 using namespace kinova::interface;
@@ -108,14 +109,18 @@ TEST(GainsResolve, CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault) {
 
 TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
   // The floor constants are hard-coded; THIS test keeps them honest against the
-  // URDF. Sample the joint space, record max |g_i|, require floor >= 1.05x that
-  // and floor <= ceil. (1.05, not more: joint 1's worst case is 35.7 N*m against
-  // a 39 N*m effort ceiling, so a fatter margin is physically unavailable.) On
-  // failure it prints the measured max so the constant can be re-pinned after a
-  // model change.
-  Dynamics dyn(URDF_PATH);  // 2F-85 model: worst-case payload
+  // URDF. Sample the joint space on BOTH supported mounts -- level and the 30 deg
+  // tilted plate (flatbot / gen_1_5) -- record max |g_i| over both, require
+  // floor >= 1.05x that and floor <= ceil. The tilt matters: on a level arm the
+  // base yaw (index 0) has a vertical axis and gravity never loads it; tilted,
+  // it does. (1.05, not more: index 1's worst case is 35.7 N*m against a 39 N*m
+  // effort ceiling, so a fatter margin is physically unavailable.) On failure it
+  // prints the measured max so the constant can be re-pinned after a model or
+  // mount change.
+  Dynamics level(URDF_PATH);  // 2F-85 model: worst-case payload
+  Dynamics tilted(UrdfXml{test_fixtures::tilted_fixture()});
   JointVec lo, hi;
-  dyn.joint_limits(lo, hi);
+  level.joint_limits(lo, hi);
   JointVec max_g = JointVec::Zero(), g = JointVec::Zero();
   std::srand(42);
   for (int n = 0; n < 20000; ++n) {
@@ -125,8 +130,10 @@ TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
       const double b = std::isfinite(hi[i]) ? hi[i] : M_PI;
       q[i] = a + (b - a) * (std::rand() / double(RAND_MAX));
     }
-    dyn.gravity(q, g);
-    max_g = max_g.cwiseMax(g.cwiseAbs());
+    for (Dynamics* dyn : {&level, &tilted}) {
+      dyn->gravity(q, g);
+      max_g = max_g.cwiseMax(g.cwiseAbs());
+    }
   }
   for (int i = 0; i < kNumJoints; ++i) {
     EXPECT_GE(kTorqueLimitFloor[i], 1.05 * max_g[i])

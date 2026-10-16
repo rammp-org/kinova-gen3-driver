@@ -64,6 +64,11 @@ that heading to the new version and bumps `package.xml`.
   A level default silently applied the wrong gravity on a tilted mount. Apps take
   `--ee-frame` (default `arm_end_effector_link`, the rendered model's name).
 
+- **Stricter (gains):** the custom-gains gravity floor for joint 1 (base yaw) rises
+  from 0.5 to 18.6 N·m. The floors now cover the 30° tilted mount as well as level;
+  tilted, gravity loads the base yaw (~17.6 N·m worst case). A custom
+  `torque_limit[0]` below 18.6 is now refused.
+
 - **BREAKING (behavioral + wire):** feedback torque is normalized at the
   Transport boundary (#73 review). `JointFeedback::tau` / `ArmState::tau` are
   in the command convention — the torque the actuator applies, ≈ `+g(q)` at

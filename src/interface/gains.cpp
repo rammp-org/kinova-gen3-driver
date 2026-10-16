@@ -5,12 +5,15 @@
 namespace kinova::interface {
 
 // Pinned from the GainsFloor test's measured worst-case gravity on the 2F-85
-// model: 1.05x margin rounded up to one decimal, with a 0.5 N*m nominal floor
-// for the joints whose gravity torque is ~0 (axis near vertical). The margin
-// is deliberately thin at joint 1 -- worst-case |g| there is 35.7 N*m against
-// a 39 N*m URDF effort ceiling, so there is no room for a fat one; the floor's
-// job is "the arm cannot fall", not "generous control authority".
-const JointVec kTorqueLimitFloor = (JointVec() << 0.5, 37.6, 14.5, 14.5, 3.7, 3.7, 0.5).finished();
+// model, taken over BOTH the level mount and the 30 deg tilted plate (flatbot /
+// gen_1_5): 1.05x margin rounded up to one decimal, with a 0.5 N*m nominal
+// floor for joints whose gravity torque is ~0 on every mount. Index 0 (base
+// yaw) is ~0 on a level arm but 17.6 N*m worst case when tilted, hence 18.6.
+// The margin is deliberately thin at index 1 -- worst-case |g| there is
+// 35.7 N*m against a 39 N*m URDF effort ceiling, so there is no room for a fat
+// one; the floor's job is "the arm cannot fall", not "generous control
+// authority".
+const JointVec kTorqueLimitFloor = (JointVec() << 18.6, 37.6, 14.5, 14.5, 3.7, 3.7, 0.5).finished();
 const JointVec kTorqueLimitCeil = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
 
 GainsCheck validate_custom(const JointImpedanceGainValues& g) {
