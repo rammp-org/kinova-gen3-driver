@@ -278,18 +278,20 @@ needs no supervisor change.
 ```sh
 # Cartesian impedance (default) — task-space spring, 7th DOF only null-space-biased
 cd build && ./teleop_socket_server --ip 192.168.1.10 \
-    --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --port 9095
+    --urdf robot.urdf --ee-frame arm_end_effector_link --port 9095
 
 # Joint-space impedance — solves IK, servos ALL 7 joints. Use this when teleop
 # keeps drifting into awkward elbow configurations.
 cd build && ./teleop_socket_server --ip 192.168.1.10 --joint-impedance \
-    --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --port 9095
+    --urdf robot.urdf --ee-frame arm_end_effector_link --port 9095
 ```
 
 Swap `--ip <addr>` for `--sim` to exercise the protocol without a robot
 (SimTransport is echo-only — the arm will not move).
 
-> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](docs/integration-runbook.md#mount-caveat)).
+> **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](docs/integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
 
 Joint-mode tuning flags. `--jkp` / `--jtau-limit` / `--ik-qrest` each
 take **either** one number (applied to all 7 joints) **or** 7 comma-separated

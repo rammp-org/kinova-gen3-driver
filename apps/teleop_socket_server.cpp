@@ -25,10 +25,12 @@
 //
 //   ./teleop_socket_server --sim  --urdf ../models/gen3_7dof_2f85.urdf
 //       --ee-frame gen3_end_effector_link --port 9095
-//   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
-//       --ee-frame gen3_end_effector_link
+//   ./teleop_socket_server --ip 192.168.1.10 --urdf robot.urdf
+//       --ee-frame arm_end_effector_link
 //   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5
-//       --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
+//       --urdf robot.urdf --ee-frame arm_end_effector_link
+// On the arm, robot.urdf is THIS robot's rendered model (root arm_mount, its mount
+// rotation): the models/ fixtures are level-only. See docs/integration-runbook.md#mount-caveat.
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol
 // bring-up. Real motion requires the KORTEX build against the arm.
@@ -40,6 +42,7 @@
 #include <Eigen/Dense>
 #include <atomic>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <iostream>
@@ -235,6 +238,10 @@ int main(int argc, char** argv) {
     return 2;
   }
   Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
   Dynamics dyn_fb(urdf, ee_frame);
   Dynamics dyn_rx(urdf, ee_frame);  // rx-thread exclusive: prevents data race with dyn_fb
 

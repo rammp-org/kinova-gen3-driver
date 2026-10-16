@@ -79,9 +79,20 @@ load-bearing. An **e-stop must be within reach** for the entire session.
 <a id="mount-caveat"></a>
 
 > **Mount caveat.** `models/gen3_7dof_2f85.urdf` is a **level-mount fixture**. On a
-> tilted robot (flatbot, gen_1_5) pass that robot's rendered arm URDF (from
-> kinova-gen3-ros2's render script, root `arm_mount`) with
-> `--ee-frame arm_end_effector_link`; the level model commands the wrong gravity there.
+> tilted robot (flatbot, gen_1_5) it commands the wrong gravity, so every real-arm
+> torque or impedance example passes `robot.urdf`: this robot's model, rendered from
+> its `mount.yaml` by kinova-gen3-ros2 (root `arm_mount`, the mount rotation in it):
+>
+> ```sh
+> docker run --rm -v <rammp-deployments>/december_2026/config/robots/current:/config/robot:ro \
+>   -v "$PWD":/out <kinova-gen3-ros2 image> bash -c "source /module_ws/install/setup.bash && \
+>   python3 -m kinova_gen3_render --mount /config/robot/mount.yaml --out /out/robot.urdf"
+> ```
+>
+> Pass it with `--ee-frame arm_end_effector_link`. Every app prints
+> `[model] mount tilt N deg` at startup, read from the model: **0.0** on a level
+> arm, **30.0** on flatbot / gen_1_5. If it does not match the arm in front of you,
+> stop there.
 
 ---
 
@@ -125,7 +136,7 @@ watch the console the entire time:
 ```sh
 ./benchmark_grav_comp \
   --ip 192.168.1.10 \
-  --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
+  --urdf robot.urdf --ee-frame arm_end_effector_link \
   --rate 1000 \
   --scale 0.5 \
   --torque-limit 20,20,20,20,7,7,7 \

@@ -46,17 +46,19 @@ one joint, **1.0 N·m** on the wrist — roughly a tenth of its rating.
 **1. Read-only.** Connects, reads, commands nothing, never enters low-level
 servoing. Confirms gravity torque and the clamp for every joint:
 
-> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+> **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](../integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
 
 ```sh
-./build/joint_torque_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run
+./build/joint_torque_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --dry-run
 ```
 
 **2. Gravity-comp hold.** No feedforward at all — this should behave exactly
 like the static check:
 
 ```sh
-./build/joint_torque_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --tau 0
+./build/joint_torque_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --tau 0
 ```
 
 The arm holds itself up and yields when pushed. Nothing should drift.
@@ -65,7 +67,7 @@ The arm holds itself up and yields when pushed. Nothing should drift.
 the watchdog takes over:
 
 ```sh
-./build/joint_torque_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 6 --tau 1.0
+./build/joint_torque_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --joint 6 --tau 1.0
 ```
 
 ## What to check

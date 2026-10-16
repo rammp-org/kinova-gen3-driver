@@ -251,6 +251,10 @@ int main(int argc, char** argv) {
     return 2;
   }
   Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
   JointVec lo, hi;
   dyn.joint_limits(lo, hi);
 

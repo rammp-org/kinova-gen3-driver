@@ -134,11 +134,13 @@ Torque control on a real arm is **attended-only**. The impedance app has a
 servoing and never commands torque. Use it to confirm the URDF/frame match the
 real arm (move it by pendant and watch the reported pose / Jacobian condition):
 
-> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](integration-runbook.md#mount-caveat)).
+> **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
 
 ```sh
 ./benchmark_cartesian_impedance --ip 192.168.1.10 --dry-run \
-  --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --duration 0
+  --urdf robot.urdf --ee-frame arm_end_effector_link --duration 0
 ```
 
 Then follow the [Integration Runbook](integration-runbook.md) for the full,

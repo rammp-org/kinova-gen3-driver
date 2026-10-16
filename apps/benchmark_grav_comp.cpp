@@ -19,8 +19,8 @@
 // never enters low-level servoing, never commands torque. Prints measured joint
 // torque vs gravity(q) per joint so the URDF/dynamics can be checked against the
 // real arm BEFORE any torque is commanded. Move the arm by pendant between reads.
-//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf
-//       --ee-frame gen3_end_effector_link --duration 0
+//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf robot.urdf
+//       --ee-frame arm_end_effector_link --duration 0
 //
 // --torque-limit <n|n1,...,n7>: per-joint output clamp (N·m). A bare scalar
 // broadcasts to all 7 joints; a 7-value comma-separated list sets each joint
@@ -197,6 +197,10 @@ int main(int argc, char** argv) {
     return 2;
   }
   Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;
