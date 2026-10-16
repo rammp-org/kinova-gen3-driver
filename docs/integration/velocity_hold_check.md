@@ -41,16 +41,18 @@ Defaults are the wrist joint at 0.05 rad/s.
 **1. Read-only.** Connects, reads, commands nothing, never enters low-level
 servoing:
 
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+
 ```sh
-./build/velocity_hold_check --ip 192.168.1.10 --dry-run
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run
 ```
 
 **2. The hold.** Streams zeros for 10 s, then for the shape of the original
 incident, 60 s:
 
 ```sh
-./build/velocity_hold_check --ip 192.168.1.10 --phase hold --hold-s 10
-./build/velocity_hold_check --ip 192.168.1.10 --phase hold --hold-s 60
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase hold --hold-s 10
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase hold --hold-s 60
 ```
 
 Verdict `HOLDS` if every joint stayed within 5 mrad. The per-joint drift and
@@ -60,8 +62,8 @@ joint 2's rate are printed either way.
 mid-motion with a 0.2 s watchdog:
 
 ```sh
-./build/velocity_hold_check --ip 192.168.1.10 --phase stale
-./build/velocity_hold_check --ip 192.168.1.10 --phase stale --qd 0.3
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase stale
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase stale --qd 0.3
 ```
 
 Verdict `FREEZES` if the joint travelled under 20 mrad after the last
@@ -70,9 +72,9 @@ setpoint.
 **4. Tracking at speed.** Jogs the wrist out and back at `--qd`, escalating:
 
 ```sh
-./build/velocity_hold_check --ip 192.168.1.10 --phase track --qd 0.1
-./build/velocity_hold_check --ip 192.168.1.10 --phase track --qd 0.3
-./build/velocity_hold_check --ip 192.168.1.10 --phase track --qd 0.6 --jog-s 3
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase track --qd 0.1
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase track --qd 0.3
+./build/velocity_hold_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --phase track --qd 0.6 --jog-s 3
 ```
 
 Verdict `TRACKS` if the mean measured velocity on the flat part is above 90% of

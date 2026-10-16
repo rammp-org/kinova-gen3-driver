@@ -118,7 +118,7 @@ Any change that plausibly affects per-cycle cost or jitter has to be measured on
 the Jetson, on real numbers:
 
 ```bash
-./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --rate 1000 --duration 5 --csv before.csv
+./build/benchmark_grav_comp --sim --urdf models/gen3_7dof.urdf --ee-frame end_effector_link --rate 1000 --duration 5 --csv before.csv
 ```
 
 Compare p50 / p99 / p99.9 / max, overruns and faults before and after. Note that

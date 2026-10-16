@@ -82,9 +82,13 @@ damping if needed.
 1. Start conservative per the runbook (low `--scale`, conservative
    `--torque-limit`, short `--duration`), e-stop in reach:
 
+   > **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](../integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
+
    ```sh
-   ./benchmark_grav_comp --ip 192.168.1.10 --urdf ../models/gen3_7dof.urdf \
-     --rate 1000 --scale 0.5 --torque-limit 15 --duration 5 --csv /tmp/hold.csv
+   ./benchmark_grav_comp --ip 192.168.1.10 --urdf robot.urdf --ee-frame arm_end_effector_link \
+     --rate 1000 --scale 0.5 --torque-limit 20,20,20,20,7,7,7 --duration 5 --csv /tmp/hold.csv
    ```
 
 2. Observe the arm:

@@ -14,6 +14,9 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `Dynamics` builds from URDF XML (`UrdfXml`) and reduces any model to the root→EE chain,
+  locking other joints at zero, so the articulated description is accepted.
+  `Dynamics::joint_names()` returns the arm's joints in chain order.
 - `ArmState::ee_wrench`: a measured external EE wrench (the wrench the
   environment applies to the tool, `[force; torque]` in N / N·m,
   `LOCAL_WORLD_ALIGNED`), estimated in the Supervisor's pump from the
@@ -56,6 +59,26 @@ that heading to the new version and bumps `package.xml`.
   motion, zero once the leash pins against a blocked arm.
 
 ### Changed
+
+- CI builds against Pinocchio 3.9.0, the exact cmeel set the robot runs
+  (`.github/actions/setup-cpp-deps/requirements.txt`, mirroring kinova-gen3-ros2's
+  `docker/requirements.txt`), instead of 2.7.0.
+- **Breaking (apps):** every standalone app requires `--urdf`; there is no default model.
+  A level default silently applied the wrong gravity on a tilted mount. Apps take
+  `--ee-frame` (default `arm_end_effector_link`, the rendered model's name).
+
+- **Stricter (gains):** the custom-gains gravity floor for joint 1 (base yaw) rises
+  from 0.5 to 18.8 N·m. The floors now cover the 30° tilted mount as well as level;
+  tilted, gravity loads the base yaw (17.90 N·m worst case). Joint 3's floor rises
+  from 14.5 to 14.6 N·m (worst case 13.81; 14.5 was 1.0498×). The floor test now
+  searches for each worst case instead of sampling, which had underestimated both.
+  A custom `torque_limit` below these is now refused.
+- `Dynamics(const UrdfXml&, ee_frame)` has no default `ee_frame`; the caller names it.
+  Both constructors require exactly seven 1-DOF revolute joints after reduction (a
+  prismatic or multi-DOF joint is refused, not just a wrong count).
+- Every app prints the model's mount tilt at startup (`Dynamics::mount_tilt_deg()`,
+  read from the model): `0.0` level, `30.0` on flatbot / gen_1_5.
+- CMake requires Pinocchio 3.0 or later (`Frame::parentJoint`).
 
 - **BREAKING (behavioral + wire):** feedback torque is normalized at the
   Transport boundary (#73 review). `JointFeedback::tau` / `ArmState::tau` are

@@ -48,11 +48,11 @@ cd build
   --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 
 # Cartesian impedance (holds the entry pose; push -> springs back)
-./benchmark_cartesian_impedance --sim --urdf ../models/gen3_7dof_2f85.urdf \
+./benchmark_cartesian_impedance --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link \
   --rate 1000 --duration 5
 
 # Joint velocity, EE-twist path (--kind joint drives the native pass-through)
-./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf \
+./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link \
   --rate 1000 --duration 5 --kind twist
 ```
 
@@ -134,9 +134,13 @@ Torque control on a real arm is **attended-only**. The impedance app has a
 servoing and never commands torque. Use it to confirm the URDF/frame match the
 real arm (move it by pendant and watch the reported pose / Jacobian condition):
 
+> **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
+
 ```sh
 ./benchmark_cartesian_impedance --ip 192.168.1.10 --dry-run \
-  --urdf ../models/gen3_7dof_2f85.urdf --duration 0
+  --urdf robot.urdf --ee-frame arm_end_effector_link --duration 0
 ```
 
 Then follow the [Integration Runbook](integration-runbook.md) for the full,

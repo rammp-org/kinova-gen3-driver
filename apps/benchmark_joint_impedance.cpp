@@ -7,6 +7,7 @@
 // the velocity/acceleration feedforward once the target carries a profile.
 //
 //   ./benchmark_joint_impedance --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link
 //       --rate 1000 --duration 5 --track --csv /tmp/bench.csv
 
 #include <atomic>
@@ -15,6 +16,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -41,7 +43,8 @@ void on_sigint(int) { g_stop.store(true); }
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -69,6 +72,8 @@ int main(int argc, char** argv) {
       track = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--rate")
       rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu")
@@ -97,6 +102,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -105,11 +118,24 @@ int main(int argc, char** argv) {
     std::exit(2);
   }
 
-  std::cout << "[jimp] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
-            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
-            << "s sim=" << (use_sim ? "yes" : "no") << " track=" << (track ? "yes" : "no") << "\n";
+  std::cout << "[jimp] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
+            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
+            << " track=" << (track ? "yes" : "no") << "\n";
 
-  Dynamics dyn(urdf);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
 
   std::unique_ptr<Transport> transport;
   if (use_sim) {

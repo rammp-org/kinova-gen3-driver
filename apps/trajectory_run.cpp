@@ -16,17 +16,19 @@
 // disables it. This backstops the mode's following-error leash + the slow speed cap.
 //
 //   # 1. READ-ONLY: prints the trajectory plan, commands nothing.
-//   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2 --dry-run
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --joint 5 --delta 0.2 --dry-run
 //
 //   # 2. hold the entry configuration (no --delta => zero-motion trajectory)
-//   ./trajectory_run --ip 192.168.1.10 --duration 4
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --duration 4
 //
 //   # 3. move ONE joint a small amount along a timed trajectory
-//   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --joint 5 --delta 0.2
 //
 //   # sim (no robot): plumbing only — SimTransport does not move. --no-guard
 //   # because a stationary q always trips the divergence guard here; see below.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --joint 5 --delta 0.2 --no-guard
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link --joint 5 --delta 0.2 --no-guard
 //
 // SPEED SCALE. The executor dilates its own clock (traj_t += dt * scale), so the
 // PATH is untouched and only the pace changes; velocity scales with s, and
@@ -34,14 +36,14 @@
 //
 //   # 4. the goal's own scale — what a planner client sets on submit.
 //   #    Half speed => the same move takes twice as long.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf \
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //       --joint 5 --delta 0.2 --speed-scale 0.5
 //
 //   # 5. the RUNTIME override, changed mid-flight at t=T — the operator's dial.
 //   #    This is the one that shows the slew limiter: the applied scale ramps at
 //   #    kScaleSlewPerSec rather than stepping, because a step in scale is a step
 //   #    in commanded velocity. Watch the "applied" column move.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf \
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //       --joint 5 --delta 0.4 --duration 8 --scale-at 3.0:0.2 --no-guard
 //
 // WHY --no-guard ON THE SIM EXAMPLES. SimTransport steps only the GRIPPER; the
@@ -72,6 +74,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -106,7 +109,8 @@ void report_state(const JointFeedback& fb) {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -144,6 +148,8 @@ int main(int argc, char** argv) {
       dry_run = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--rate")
       rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu")
@@ -189,6 +195,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -224,7 +238,19 @@ int main(int argc, char** argv) {
   check_scale(speed_scale, "--speed-scale");
   if (scale_at_t >= 0.0) check_scale(scale_at_s, "--scale-at S");
 
-  Dynamics dyn(urdf);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
 
   std::unique_ptr<Transport> transport;
   if (use_sim) {

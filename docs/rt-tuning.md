@@ -147,7 +147,7 @@ After the one-time grant (privilege-model section above), run pinned to the
 isolated core with a high RT priority — **as a normal user, no sudo**:
 
 ```sh
-./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf \
+./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
   --rate 1000 --cpu 11 --rt-priority 80 --pacing sleepspin --duration 60
 ```
 

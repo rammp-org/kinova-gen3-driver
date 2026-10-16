@@ -28,14 +28,14 @@
 // commanded, and never enters low-level servoing. Run it first.
 //
 //   # 1. READ-ONLY, nothing moves
-//   ./joint_torque_check --ip 192.168.1.10 --dry-run
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --dry-run
 //
 //   # 2. gravity-comp hold — no feedforward at all. The arm should just hold.
-//   ./joint_torque_check --ip 192.168.1.10 --tau 0
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --tau 0
 //
 //   # 3. the real check: 1 N*m on the wrist, then STOP commanding and watch the
 //   #    watchdog decay it to zero (the arm settles back to gravity-comp hold)
-//   ./joint_torque_check --ip 192.168.1.10 --joint 6 --tau 1.0
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --joint 6 --tau 1.0
 //
 // Under --sim this exercises plumbing only: SimTransport is a static echo, so
 // measured torque never responds and the arm never moves.
@@ -46,6 +46,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -80,7 +81,8 @@ struct Sample {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string pacing_str = "sleepspin";
   bool use_sim = false, dry_run = false;
   int joint = kNumJoints - 1;  // wrist by default
@@ -104,6 +106,8 @@ int main(int argc, char** argv) {
       ip = val();
     else if (a == "--urdf")
       urdf = val();
+    else if (a == "--ee-frame")
+      ee_frame = val();
     else if (a == "--sim")
       use_sim = true;
     else if (a == "--dry-run")
@@ -130,6 +134,14 @@ int main(int argc, char** argv) {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
+  }
+
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
   }
 
   Pacing pacing = Pacing::kSleepSpin;
@@ -163,7 +175,19 @@ int main(int argc, char** argv) {
       "publisher stops, tau_ff should reach zero about %.2fs later.\n",
       p.cmd_timeout_s, p.cmd_decay_s, p.cmd_timeout_s + p.cmd_decay_s);
 
-  Dynamics dyn(urdf);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
 
   std::unique_ptr<Transport> transport;
   if (use_sim) {

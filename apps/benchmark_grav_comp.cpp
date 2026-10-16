@@ -5,12 +5,13 @@
 // KortexTransport path is constructed only when --ip is given and --sim is not;
 // it is never exercised here while the robot is powered off.
 //
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --rate 1000
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --rate 1000
 //       --duration 5 --csv /tmp/bench.csv
 //
-// --ee-frame <name>: URDF link name Dynamics uses as the end effector (default
-// "end_effector_link", matching the bare-arm --urdf default above). The gripper
-// model names it differently, so pass it explicitly:
+// --urdf is required (no default model). --ee-frame <name>: URDF link name Dynamics
+// uses as the end effector (default "arm_end_effector_link", the rendered model's
+// name). The bundled models name it differently, so pass it explicitly:
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof_2f85.urdf
 //       --ee-frame gen3_end_effector_link --rate 1000 --duration 5
 //
@@ -18,16 +19,18 @@
 // never enters low-level servoing, never commands torque. Prints measured joint
 // torque vs gravity(q) per joint so the URDF/dynamics can be checked against the
 // real arm BEFORE any torque is commanded. Move the arm by pendant between reads.
-//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf ../models/gen3_7dof_2f85.urdf
-//       --ee-frame gen3_end_effector_link --duration 0
+//   ./benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf robot.urdf
+//       --ee-frame arm_end_effector_link --duration 0
 //
 // --torque-limit <n|n1,...,n7>: per-joint output clamp (N·m). A bare scalar
 // broadcasts to all 7 joints; a 7-value comma-separated list sets each joint
 // individually (same convention as teleop_socket_server's --jtau-limit). If
 // omitted, JointTorqueParams' own per-joint default applies: (39,39,39,39,9,9,9)
 // — the wrist (joints 5-7) is limited to its 9 N·m URDF effort rating.
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 20
-//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf --torque-limit 39,39,39,39,9,9,9
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --torque-limit 20
+//   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
+//       --ee-frame end_effector_link --torque-limit 39,39,39,39,9,9,9
 
 #include <atomic>
 #include <chrono>
@@ -35,6 +38,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -96,11 +100,8 @@ bool parse_joint_vec(const std::string& s, JointVec& out) {
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof.urdf";
-  // Matches the DEFAULT --urdf below. models/gen3_7dof.urdf (bare arm) has
-  // "end_effector_link"; Dynamics defaults to "gen3_end_effector_link", which
-  // only exists in the gripper model. See issue #18.
-  std::string ee_frame = "end_effector_link";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -167,6 +168,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -179,7 +188,19 @@ int main(int argc, char** argv) {
             << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
             << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no") << "\n";
 
-  Dynamics dyn(urdf, ee_frame);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;

@@ -49,22 +49,26 @@ The run is scripted, and **the second phase is the test, not a pause**:
 **1. Read-only.** Connects, reads, commands nothing, never enters low-level
 servoing:
 
+> **`robot.urdf` is this robot's rendered arm model**, not a `models/` fixture (those are
+> level-only): render it first ([how](../integration-runbook.md#mount-caveat)), and check the app's
+> `[model] mount tilt` line before enabling torque.
+
 ```sh
-./build/stream_check --ip 192.168.1.10 --dry-run
+./build/stream_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --dry-run
 ```
 
 **2. Joint positions into impedance mode** — the compliant path, start here:
 
 ```sh
-./build/stream_check --ip 192.168.1.10 --kind joint-position --mode impedance
+./build/stream_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --kind joint-position --mode impedance
 ```
 
 **3. Then the other supported pairs**, once you trust the first:
 
 ```sh
-./build/stream_check --ip 192.168.1.10 --kind pose         --mode impedance
-./build/stream_check --ip 192.168.1.10 --kind joint-torque --mode torque --tau 1.0
-./build/stream_check --ip 192.168.1.10 --kind joint-position --mode position   # no compliance
+./build/stream_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --kind pose         --mode impedance
+./build/stream_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --kind joint-torque --mode torque --tau 1.0
+./build/stream_check --urdf robot.urdf --ee-frame arm_end_effector_link --ip 192.168.1.10 --kind joint-position --mode position   # no compliance
 ```
 
 The velocity kinds are refused — they need `JointVelocityMode`, which does not

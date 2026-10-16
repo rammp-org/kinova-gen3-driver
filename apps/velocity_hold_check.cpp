@@ -21,10 +21,13 @@
 // streaming tier does; measurements come through FeedbackTap, never from the
 // mode's RT-owned state.
 //
-//   ./velocity_hold_check --ip 192.168.1.10 --dry-run              # READ-ONLY
-//   ./velocity_hold_check --ip 192.168.1.10 --phase hold --hold-s 10
-//   ./velocity_hold_check --ip 192.168.1.10 --phase stale
-//   ./velocity_hold_check --ip 192.168.1.10 --phase track --qd 0.3
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --dry-run              # READ-ONLY
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --phase hold --hold-s 10
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --phase stale
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --phase track --qd 0.3
 //
 // Defaults are deliberately small: the wrist joint, 0.05 rad/s, 2 s jogs, ramped.
 // --qd is refused above 1.0 rad/s and --hold-s above 120 s. Under --sim this
@@ -36,6 +39,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -92,7 +96,9 @@ void print_vec(const char* label, const JointVec& v) {
 
 int main(int argc, char** argv) {
   std::setvbuf(stdout, nullptr, _IOLBF, 0);  // keep the record if the process aborts
-  std::string ip, urdf = "../models/gen3_7dof_2f85.urdf", pacing_str = "sleepspin";
+  std::string ip, pacing_str = "sleepspin";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string phase;
   bool use_sim = false, dry_run = false;
   int joint = kNumJoints - 1;  // wrist: lightest, least able to hurt anything
@@ -114,6 +120,8 @@ int main(int argc, char** argv) {
       ip = val();
     else if (a == "--urdf")
       urdf = val();
+    else if (a == "--ee-frame")
+      ee_frame = val();
     else if (a == "--sim")
       use_sim = true;
     else if (a == "--dry-run")
@@ -146,6 +154,14 @@ int main(int argc, char** argv) {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
     }
+  }
+
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
   }
 
   Pacing pacing = Pacing::kSleepSpin;
@@ -196,7 +212,19 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  Dynamics dyn(urdf);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
   JointVec v_max;
   dyn.velocity_limits(v_max);
 

@@ -2,10 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
+#include <random>
+#include <utility>
+#include <vector>
 
+#include "../fixtures.h"
 #include "kinova_lowlevel/dynamics.h"
 using namespace kinova;
 using namespace kinova::interface;
@@ -106,28 +110,72 @@ TEST(GainsResolve, CustomOverridesOnlyItsThreeFieldsOnTheSessionDefault) {
   EXPECT_DOUBLE_EQ(r.gain_ramp_s, def.gain_ramp_s);
 }
 
+namespace {
+// max over q of |gravity(q)[i]| within the joint limits. A random sample only
+// bounds a maximum from below -- 20k uniform samples once found 17.77 N*m where the
+// true worst case is 17.90, enough to hide a floor below its stated margin -- so
+// this samples to find good basins and then climbs each of the best ones,
+// coordinate by coordinate, halving the step until it stalls. Fixed-seed
+// mt19937, so every platform searches the same points.
+double worst_gravity(Dynamics& dyn, int i, const JointVec& lo, const JointVec& hi) {
+  JointVec g;
+  auto f = [&](const JointVec& q) {
+    dyn.gravity(q, g);
+    return std::abs(g[i]);
+  };
+  std::mt19937 rng(42);
+  std::vector<std::pair<double, JointVec>> starts;
+  for (int n = 0; n < 2000; ++n) {
+    JointVec q;
+    for (int k = 0; k < kNumJoints; ++k)
+      q[k] = std::uniform_real_distribution<double>(lo[k], hi[k])(rng);
+    starts.emplace_back(f(q), q);
+  }
+  std::partial_sort(starts.begin(), starts.begin() + 8, starts.end(),
+                    [](const auto& a, const auto& b) { return a.first > b.first; });
+  double best = 0.0;
+  for (int s = 0; s < 8; ++s) {
+    auto [v, q] = starts[s];
+    for (double step = 0.5; step > 1e-4; step /= 2) {
+      for (bool improved = true; improved;) {
+        improved = false;
+        for (int k = 0; k < kNumJoints; ++k)
+          for (double d : {step, -step}) {
+            JointVec t = q;
+            t[k] = std::clamp(t[k] + d, lo[k], hi[k]);
+            if (const double w = f(t); w > v) v = w, q = t, improved = true;
+          }
+      }
+    }
+    best = std::max(best, v);
+  }
+  return best;
+}
+}  // namespace
+
 TEST(GainsFloor, FloorsCoverWorstCaseGravityWithMargin) {
   // The floor constants are hard-coded; THIS test keeps them honest against the
-  // URDF. Sample the joint space, record max |g_i|, require floor >= 1.05x that
-  // and floor <= ceil. (1.05, not more: joint 1's worst case is 35.7 N*m against
-  // a 39 N*m effort ceiling, so a fatter margin is physically unavailable.) On
-  // failure it prints the measured max so the constant can be re-pinned after a
-  // model change.
-  Dynamics dyn(URDF_PATH);  // 2F-85 model: worst-case payload
+  // URDF. Find the worst-case |g_i| on BOTH supported mounts -- level and the
+  // 30 deg tilted plate (flatbot / gen_1_5) -- and require floor >= 1.05x the
+  // larger and floor <= ceil. The tilt matters: on a level arm the base yaw
+  // (index 0) has a vertical axis and gravity never loads it; tilted, it does.
+  // (1.05, not more: index 1's worst case is 35.79 N*m against a 39 N*m effort
+  // ceiling, so a fatter margin is physically unavailable.) On failure it prints
+  // the worst case so the constant can be re-pinned after a model or mount change.
+  Dynamics level(URDF_PATH);  // 2F-85 model: worst-case payload
+  Dynamics tilted(UrdfXml{test_fixtures::tilted_fixture()}, "gen3_end_effector_link");
   JointVec lo, hi;
-  dyn.joint_limits(lo, hi);
-  JointVec max_g = JointVec::Zero(), g = JointVec::Zero();
-  std::srand(42);
-  for (int n = 0; n < 20000; ++n) {
-    JointVec q;
-    for (int i = 0; i < kNumJoints; ++i) {
-      const double a = std::isfinite(lo[i]) ? lo[i] : -M_PI;
-      const double b = std::isfinite(hi[i]) ? hi[i] : M_PI;
-      q[i] = a + (b - a) * (std::rand() / double(RAND_MAX));
-    }
-    dyn.gravity(q, g);
-    max_g = max_g.cwiseMax(g.cwiseAbs());
+  level.joint_limits(lo, hi);
+  for (int k = 0; k < kNumJoints; ++k) {  // continuous joints: one full turn
+    if (!std::isfinite(lo[k])) lo[k] = -M_PI;
+    if (!std::isfinite(hi[k])) hi[k] = M_PI;
   }
+  JointVec max_g;
+  for (int i = 0; i < kNumJoints; ++i)
+    max_g[i] = std::max(worst_gravity(level, i, lo, hi), worst_gravity(tilted, i, lo, hi));
+  // Pin the search itself: it must reach the independently found tilted worst
+  // case at index 0 (17.904 N*m, Pinocchio hill-climb, 2026-10-16).
+  EXPECT_GT(max_g[0], 17.9);
   for (int i = 0; i < kNumJoints; ++i) {
     EXPECT_GE(kTorqueLimitFloor[i], 1.05 * max_g[i])
         << "joint " << i << ": measured worst-case |gravity| = " << max_g[i];

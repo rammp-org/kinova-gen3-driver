@@ -4,13 +4,19 @@
 #include <stdexcept>
 namespace kinova::interface {
 
-// Pinned from the GainsFloor test's measured worst-case gravity on the 2F-85
-// model: 1.05x margin rounded up to one decimal, with a 0.5 N*m nominal floor
-// for the joints whose gravity torque is ~0 (axis near vertical). The margin
-// is deliberately thin at joint 1 -- worst-case |g| there is 35.7 N*m against
-// a 39 N*m URDF effort ceiling, so there is no room for a fat one; the floor's
-// job is "the arm cannot fall", not "generous control authority".
-const JointVec kTorqueLimitFloor = (JointVec() << 0.5, 37.6, 14.5, 14.5, 3.7, 3.7, 0.5).finished();
+// Pinned from the GainsFloor test's worst-case gravity on the 2F-85 model -- a
+// search for the maximum, not a sample -- taken over BOTH the level mount and the
+// 30 deg tilted plate (flatbot / gen_1_5): 1.05x margin rounded up to one decimal,
+// with a 0.5 N*m nominal floor for joints whose gravity torque is ~0 on every
+// mount. Index 0 (base yaw) is ~0 on a level arm but 17.90 N*m worst case when
+// tilted, hence 18.8. Index 2's worst case is 13.81 (x1.05 = 14.503), hence 14.6:
+// sampling had found 13.80 and pinned 14.5. The floor is one constant for every
+// mount, so a level arm can no longer set a low base-yaw limit; a per-mount floor
+// would need the model here. The margin is deliberately thin at index 1 -- worst-case |g| there is
+// 35.79 N*m against a 39 N*m URDF effort ceiling, so there is no room for a fat
+// one; the floor's job is "the arm cannot fall", not "generous control
+// authority".
+const JointVec kTorqueLimitFloor = (JointVec() << 18.8, 37.6, 14.6, 14.5, 3.7, 3.7, 0.5).finished();
 const JointVec kTorqueLimitCeil = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
 
 GainsCheck validate_custom(const JointImpedanceGainValues& g) {

@@ -17,22 +17,26 @@
 // before anything moves.
 //
 //   # 1. read-only, no servoing, nothing moves
-//   ./joint_position_check --ip 192.168.1.10 --dry-run --duration 10
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --dry-run --duration 10
 //
 //   # 2. hold the entry configuration (no target => commands where it already is)
-//   ./joint_position_check --ip 192.168.1.10 --duration 5
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --duration 5
 //
 //   # 3. move ONE joint a small amount
-//   ./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.2 --duration 8
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --joint 5 --delta 0.2 --duration 8
 //
 //   # 4. scripted VISUAL CHECK: one joint at a time, each returning to start,
 //   #    then home. Read the plan first with --dry-run; it commands nothing.
-//   ./joint_position_check --ip 192.168.1.10 --sequence --dry-run
-//   ./joint_position_check --ip 192.168.1.10 --sequence
-//   ./joint_position_check --ip 192.168.1.10 --sequence --from-joint 1   # whole arm
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --sequence --dry-run
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --sequence
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --sequence --from-joint 1   # whole arm
 //
 //   # sim (no robot); protocol/plumbing only, the arm will not move
 //   ./joint_position_check --sim --urdf ../models/gen3_7dof_2f85.urdf
+//       --ee-frame gen3_end_effector_link
 
 #include <Eigen/Dense>
 #include <atomic>
@@ -41,6 +45,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -130,7 +135,8 @@ std::vector<Waypoint> build_sequence(const JointVec& home, int from_joint, doubl
 
 int main(int argc, char** argv) {
   std::string ip;
-  std::string urdf = "../models/gen3_7dof_2f85.urdf";
+  std::string urdf;  // required: no default, a level model on a tilted arm is silent
+  std::string ee_frame = "arm_end_effector_link";
   std::string csv_path;
   std::string pacing_str = "sleepspin";
   bool use_sim = false;
@@ -164,6 +170,8 @@ int main(int argc, char** argv) {
       dry_run = true;
     else if (a == "--urdf")
       urdf = next("--urdf");
+    else if (a == "--ee-frame")
+      ee_frame = next("--ee-frame");
     else if (a == "--rate")
       rate_hz = std::stod(next("--rate"));
     else if (a == "--cpu")
@@ -195,6 +203,14 @@ int main(int argc, char** argv) {
     }
   }
 
+  if (urdf.empty()) {
+    std::cerr << "--urdf <file> is required: the arm model for THIS robot, including its "
+                 "mount (render one with kinova-gen3-ros2's render script, or use "
+                 "models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link for a "
+                 "level arm)\n";
+    return 2;
+  }
+
   Pacing pacing = Pacing::kSleepSpin;
   if (pacing_str == "nanosleep")
     pacing = Pacing::kClockNanosleep;
@@ -220,12 +236,25 @@ int main(int argc, char** argv) {
   }
   if (sequence && delta == 0.0) delta = 0.2;  // sequence needs some motion
 
-  std::cout << "[jpos] urdf=" << urdf << " rate=" << rate_hz << "Hz pacing=" << pacing_str
-            << " cpu=" << cpu << " prio=" << rt_priority << " duration=" << duration_s
-            << "s sim=" << (use_sim ? "yes" : "no") << " dry_run=" << (dry_run ? "yes" : "no")
-            << " speed=" << speed << "rad/s leash=" << leash << "rad\n";
+  std::cout << "[jpos] urdf=" << urdf << " ee_frame=" << ee_frame << " rate=" << rate_hz
+            << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
+            << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no")
+            << " dry_run=" << (dry_run ? "yes" : "no") << " speed=" << speed
+            << "rad/s leash=" << leash << "rad\n";
 
-  Dynamics dyn(urdf);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
+  // From the model itself, not the file name: the tilt its gravity assumes. Wrong
+  // here means wrong gravity on this arm, so it prints before any connection.
+  std::printf("[model] mount tilt %.1f deg from vertical (0 = level; 30 = flatbot, gen_1_5)\n",
+              dyn.mount_tilt_deg());
   JointVec lo, hi;
   dyn.joint_limits(lo, hi);
 

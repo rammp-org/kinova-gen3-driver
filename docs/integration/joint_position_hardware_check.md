@@ -97,8 +97,10 @@ Hit the e-stop and stop the run if **any** of these occur:
 
 Never enters low-level servoing, never commands anything.
 
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+
 ```sh
-./joint_position_check --ip 192.168.1.10 --dry-run --duration 20
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run --duration 20
 ```
 
 **Do this first:** with the arm still under its own control, use the pendant or
@@ -120,7 +122,7 @@ No target is given, so the mode commands exactly where the arm already is. A
 correct implementation produces **no motion at all**.
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --duration 5
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --duration 5
 ```
 
 This is the sharpest possible form of the format question: there is no commanded
@@ -151,7 +153,7 @@ hurt anything if a direction is wrong.
 computed from the arm's current configuration, and commands nothing:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --sequence --dry-run
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --sequence --dry-run
 ```
 
 ```
@@ -169,7 +171,7 @@ what is printed is what will actually happen — not what was asked for.
 Then run it:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --sequence
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --sequence
 ```
 
 **What to watch for** (the app prints this too):
@@ -186,7 +188,7 @@ Sim baseline on abra: all 7 residuals `+0.0000`, `majflt+=0`, `overruns=0`.
 Once the wrist passes, widen to the whole arm — **only with the workspace clear**:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --sequence --from-joint 1
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --sequence --from-joint 1
 ```
 
 `--from-joint 0` includes the base joint. There is no reason to need it for this
@@ -197,8 +199,8 @@ check, and it swings the most mass.
 For isolating one joint, or checking sign symmetry:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.2 --speed 0.2 --duration 8
-./joint_position_check --ip 192.168.1.10 --joint 5 --delta -0.2 --speed 0.2 --duration 8
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 5 --delta 0.2 --speed 0.2 --duration 8
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 5 --delta -0.2 --speed 0.2 --duration 8
 ```
 
 Expect a smooth ~1 s move of about 11° each way, then hold. Final residual ≈ 0.
@@ -213,14 +215,14 @@ Two claims to check.
 the time:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.5 --speed 0.1 --duration 12
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 5 --delta 0.5 --speed 0.1 --duration 12
 ```
 Should take ≈ 5 s of travel (the app prints its own estimate). Time it.
 
 **(b) A caller cannot exceed the URDF limit.** Ask for something absurd:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.5 --speed 5.0 --duration 8
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 5 --delta 0.5 --speed 5.0 --duration 8
 ```
 The `effective speed after URDF clamp:` line must report the **URDF** value
 (≈1.22 rad/s at the wrist), not 5.0. Travel time must not drop below what that
@@ -239,7 +241,7 @@ safest since it carries nothing) close to ±π using the pendant — say −175�
 Confirm with `--dry-run`. Then command a small step across the wrap:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --joint 6 --delta 0.2 --speed 0.2 --duration 10
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 6 --delta 0.2 --speed 0.2 --duration 10
 ```
 
 **Expected:** a few degrees of travel the short way round, crossing ±180°.
@@ -255,7 +257,7 @@ even though it does in the unit test.
 Ask for a target a full radian past the stop on a bounded joint:
 
 ```sh
-./joint_position_check --ip 192.168.1.10 --joint 5 --delta 3.0 --speed 0.2 --duration 20
+./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --joint 5 --delta 3.0 --speed 0.2 --duration 20
 ```
 
 **Expected:** the arm travels to the ±2.23 limit and **parks there**, no stall
