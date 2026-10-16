@@ -72,9 +72,12 @@ compensation. `benchmark_grav_comp` runs exactly this zero-feedforward path.
   the gravity term other torque laws build on.
 
 The single biggest correctness requirement is that the **URDF matches the mounted
-hardware**, including any tool. The bare-arm model with a gripper attached
-under-compensates by the tool's weight and the arm sags — use
-`models/gen3_7dof_2f85.urdf` for the Robotiq 2F-85.
+hardware**, including any tool **and the mount rotation**. The bare-arm model with a
+gripper attached under-compensates by the tool's weight and the arm sags — use
+`models/gen3_7dof_2f85.urdf` for the Robotiq 2F-85 on a level mount. A level model
+on a tilted plate applies gravity in the wrong direction.
+
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
 
 ## Cartesian Impedance — `CartesianImpedanceMode`
 

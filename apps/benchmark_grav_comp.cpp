@@ -38,6 +38,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -187,7 +188,15 @@ int main(int argc, char** argv) {
             << "Hz pacing=" << pacing_str << " cpu=" << cpu << " prio=" << rt_priority
             << " duration=" << duration_s << "s sim=" << (use_sim ? "yes" : "no") << "\n";
 
-  Dynamics dyn(urdf, ee_frame);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;

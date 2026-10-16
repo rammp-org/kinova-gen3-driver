@@ -289,6 +289,8 @@ cd build && ./teleop_socket_server --ip 192.168.1.10 --joint-impedance \
 Swap `--ip <addr>` for `--sim` to exercise the protocol without a robot
 (SimTransport is echo-only — the arm will not move).
 
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](docs/integration-runbook.md#mount-caveat)).
+
 Joint-mode tuning flags. `--jkp` / `--jtau-limit` / `--ik-qrest` each
 take **either** one number (applied to all 7 joints) **or** 7 comma-separated
 values:
@@ -349,6 +351,7 @@ src/                       dynamics.cpp cartesian.cpp telemetry.cpp
 apps/                      benchmark_grav_comp.cpp  benchmark_cartesian_impedance.cpp
                            teleop_socket_server.cpp
 models/                    gen3_7dof.urdf  gen3_7dof_2f85.urdf (2F-85 gripper payload)
+                           (level test fixtures — not a tilted mount)
 tests/                     *_test.cpp
 cmake/                     aarch64-toolchain.cmake (stub, unused by default)
 docs/                      index.md  getting-started.md          (hosted-docs site)

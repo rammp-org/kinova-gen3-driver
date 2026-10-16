@@ -41,6 +41,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -226,7 +227,15 @@ int main(int argc, char** argv) {
   //   dyn    — CartesianImpedanceMode / RT thread
   //   dyn_fb — feedback thread (periodic ~150 Hz fk)
   //   dyn_rx — rx thread, FREEZE handler only
-  Dynamics dyn(urdf, ee_frame);
+  // A bad --urdf / --ee-frame fails here, before any arm connection: exit 2, not abort.
+  std::unique_ptr<Dynamics> dyn_owner;
+  try {
+    dyn_owner = std::make_unique<Dynamics>(urdf, ee_frame);
+  } catch (const std::exception& e) {
+    std::cerr << "error: " << e.what() << "\n";
+    return 2;
+  }
+  Dynamics& dyn = *dyn_owner;
   Dynamics dyn_fb(urdf, ee_frame);
   Dynamics dyn_rx(urdf, ee_frame);  // rx-thread exclusive: prevents data race with dyn_fb
 
