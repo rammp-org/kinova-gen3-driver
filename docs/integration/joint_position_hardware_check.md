@@ -97,6 +97,8 @@ Hit the e-stop and stop the run if **any** of these occur:
 
 Never enters low-level servoing, never commands anything.
 
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+
 ```sh
 ./joint_position_check --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run --duration 20
 ```

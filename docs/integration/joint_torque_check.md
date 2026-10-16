@@ -46,6 +46,8 @@ one joint, **1.0 N·m** on the wrist — roughly a tenth of its rating.
 **1. Read-only.** Connects, reads, commands nothing, never enters low-level
 servoing. Confirms gravity torque and the clamp for every joint:
 
+> **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+
 ```sh
 ./build/joint_torque_check --urdf models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link --ip 192.168.1.10 --dry-run
 ```

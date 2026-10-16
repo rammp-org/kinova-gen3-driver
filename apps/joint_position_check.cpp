@@ -17,19 +17,22 @@
 // before anything moves.
 //
 //   # 1. read-only, no servoing, nothing moves
-//   ./joint_position_check --ip 192.168.1.10 --dry-run --duration 10
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --dry-run --duration 10
 //
 //   # 2. hold the entry configuration (no target => commands where it already is)
-//   ./joint_position_check --ip 192.168.1.10 --duration 5
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --duration 5
 //
 //   # 3. move ONE joint a small amount
-//   ./joint_position_check --ip 192.168.1.10 --joint 5 --delta 0.2 --duration 8
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --joint 5 --delta 0.2 --duration 8
 //
 //   # 4. scripted VISUAL CHECK: one joint at a time, each returning to start,
 //   #    then home. Read the plan first with --dry-run; it commands nothing.
-//   ./joint_position_check --ip 192.168.1.10 --sequence --dry-run
-//   ./joint_position_check --ip 192.168.1.10 --sequence
-//   ./joint_position_check --ip 192.168.1.10 --sequence --from-joint 1   # whole arm
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --sequence --dry-run
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --sequence
+//   ./joint_position_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --sequence --from-joint 1   # whole arm
 //
 //   # sim (no robot); protocol/plumbing only, the arm will not move
 //   ./joint_position_check --sim --urdf ../models/gen3_7dof_2f85.urdf

@@ -82,6 +82,8 @@ damping if needed.
 1. Start conservative per the runbook (low `--scale`, conservative
    `--torque-limit`, short `--duration`), e-stop in reach:
 
+   > **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
+
    ```sh
    ./benchmark_grav_comp --ip 192.168.1.10 --urdf ../models/gen3_7dof.urdf --ee-frame end_effector_link \
      --rate 1000 --scale 0.5 --torque-limit 15 --duration 5 --csv /tmp/hold.csv

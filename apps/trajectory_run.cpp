@@ -16,13 +16,14 @@
 // disables it. This backstops the mode's following-error leash + the slow speed cap.
 //
 //   # 1. READ-ONLY: prints the trajectory plan, commands nothing.
-//   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2 --dry-run
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --joint 5 --delta 0.2 --dry-run
 //
 //   # 2. hold the entry configuration (no --delta => zero-motion trajectory)
-//   ./trajectory_run --ip 192.168.1.10 --duration 4
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --duration 4
 //
 //   # 3. move ONE joint a small amount along a timed trajectory
-//   ./trajectory_run --ip 192.168.1.10 --joint 5 --delta 0.2
+//   ./trajectory_run --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --joint 5 --delta 0.2
 //
 //   # sim (no robot): plumbing only — SimTransport does not move. --no-guard
 //   # because a stationary q always trips the divergence guard here; see below.
@@ -35,14 +36,14 @@
 //
 //   # 4. the goal's own scale — what a planner client sets on submit.
 //   #    Half speed => the same move takes twice as long.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link \
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //       --joint 5 --delta 0.2 --speed-scale 0.5
 //
 //   # 5. the RUNTIME override, changed mid-flight at t=T — the operator's dial.
 //   #    This is the one that shows the slew limiter: the applied scale ramps at
 //   #    kScaleSlewPerSec rather than stepping, because a step in scale is a step
 //   #    in commanded velocity. Watch the "applied" column move.
-//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link \
+//   ./trajectory_run --sim --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //       --joint 5 --delta 0.4 --duration 8 --scale-at 3.0:0.2 --no-guard
 //
 // WHY --no-guard ON THE SIM EXAMPLES. SimTransport steps only the GRIPPER; the

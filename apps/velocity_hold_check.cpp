@@ -21,10 +21,13 @@
 // streaming tier does; measurements come through FeedbackTap, never from the
 // mode's RT-owned state.
 //
-//   ./velocity_hold_check --ip 192.168.1.10 --dry-run              # READ-ONLY
-//   ./velocity_hold_check --ip 192.168.1.10 --phase hold --hold-s 10
-//   ./velocity_hold_check --ip 192.168.1.10 --phase stale
-//   ./velocity_hold_check --ip 192.168.1.10 --phase track --qd 0.3
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --dry-run              # READ-ONLY
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --phase hold --hold-s 10
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --phase stale
+//   ./velocity_hold_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --phase track --qd 0.3
 //
 // Defaults are deliberately small: the wrist joint, 0.05 rad/s, 2 s jogs, ramped.
 // --qd is refused above 1.0 rad/s and --hold-s above 120 s. Under --sim this

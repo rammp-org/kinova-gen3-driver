@@ -28,14 +28,14 @@
 // commanded, and never enters low-level servoing. Run it first.
 //
 //   # 1. READ-ONLY, nothing moves
-//   ./joint_torque_check --ip 192.168.1.10 --dry-run
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --dry-run
 //
 //   # 2. gravity-comp hold — no feedforward at all. The arm should just hold.
-//   ./joint_torque_check --ip 192.168.1.10 --tau 0
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --tau 0
 //
 //   # 3. the real check: 1 N*m on the wrist, then STOP commanding and watch the
 //   #    watchdog decay it to zero (the arm settles back to gravity-comp hold)
-//   ./joint_torque_check --ip 192.168.1.10 --joint 6 --tau 1.0
+//   ./joint_torque_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --joint 6 --tau 1.0
 //
 // Under --sim this exercises plumbing only: SimTransport is a static echo, so
 // measured torque never responds and the arm never moves.

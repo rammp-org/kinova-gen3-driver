@@ -27,7 +27,7 @@
 //       --ee-frame gen3_end_effector_link --port 9095
 //   ./teleop_socket_server --ip 192.168.1.10 --urdf ../models/gen3_7dof_2f85.urdf
 //       --ee-frame gen3_end_effector_link
-//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5 \
+//   ./teleop_socket_server --ip 192.168.1.10 --joint-impedance --jkp 80 --zeta 0.5
 //       --urdf ../models/gen3_7dof_2f85.urdf --ee-frame gen3_end_effector_link
 //
 // SimTransport is echo-only (the arm will not move); use it for protocol

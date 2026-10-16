@@ -11,7 +11,7 @@
 //   between --kind joint and --kind twist IS that cost.
 //
 //   ./benchmark_joint_velocity --sim --urdf ../models/gen3_7dof_2f85.urdf
-//       --ee-frame gen3_end_effector_link \
+//       --ee-frame gen3_end_effector_link
 //       --rate 1000 --duration 5 --kind twist --csv /tmp/bench.csv
 
 #include <Eigen/Dense>

@@ -36,13 +36,15 @@
 // enters low-level servoing. Run it first.
 //
 //   # 1. READ-ONLY, nothing moves
-//   ./stream_check --ip 192.168.1.10 --dry-run
+//   ./stream_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame> --dry-run
 //
 //   # 2. stream joint positions into impedance mode (compliant — start here)
-//   ./stream_check --ip 192.168.1.10 --kind joint-position --mode impedance
+//   ./stream_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --kind joint-position --mode impedance
 //
 //   # 3. stream joint torque (feedforward on top of gravity comp)
-//   ./stream_check --ip 192.168.1.10 --kind joint-torque --mode torque --tau 1.0
+//   ./stream_check --ip 192.168.1.10 --urdf <model> --ee-frame <frame>
+//       --kind joint-torque --mode torque --tau 1.0
 //
 // Under --sim this exercises plumbing only: the arm never moves, so the trace is
 // flat and the STALE phase proves nothing about the hardware.

@@ -76,6 +76,13 @@ load-bearing. An **e-stop must be within reach** for the entire session.
      sagged on the first live torque run — always match the URDF to the mounted
      hardware, and verify read-only (Phase 2 / `--dry-run`) before torque.
 
+<a id="mount-caveat"></a>
+
+> **Mount caveat.** `models/gen3_7dof_2f85.urdf` is a **level-mount fixture**. On a
+> tilted robot (flatbot, gen_1_5) pass that robot's rendered arm URDF (from
+> kinova-gen3-ros2's render script, root `arm_mount`) with
+> `--ee-frame arm_end_effector_link`; the level model commands the wrong gravity there.
+
 ---
 
 ## 1. Power-on checklist (together, at the robot)
