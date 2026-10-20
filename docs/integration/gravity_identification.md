@@ -43,6 +43,32 @@ collision check. It checks neither the path the Web App takes between poses
 nor the gripper and camera beyond the EE frame. **Look at each pose before
 sending it, run the Web App at low speed, and watch every move.**
 
+## Automated session (Kinova high-level moves)
+
+D1 and D2 can run unattended at the keyboard, though not unattended at the arm.
+`tools/gravity_id/onarm/` holds the scripts used on dojo on 2026-10-20. They run
+on the Jetson with host `python3` and `kortex_api`, outside the uv project:
+
+- `dryrun.sh OUT [S]`: the read-only logger (the nightly image's
+  `benchmark_grav_comp --dry-run`).
+- `move.py`: Kinova's own `reach_joint_angles`, the same as the Web App. It
+  holds the arm in single-level servoing, refuses if anything has it in
+  low-level servoing, and calls `Base.Stop` on Ctrl-C, timeout or abort.
+  `--bidirectional 5` approaches every pose from +5° and from −5° (see D2);
+  `--plan` prints the moves and moves nothing.
+- `validate.py`: Kinova's `ValidateWaypointList` on a `move.py --plan`, with
+  no motion. It joins the whole list into one spline that does not stop at each
+  waypoint, so it can report limit overshoots that the stop-at-target moves never
+  make. Check any flagged segment's endpoints.
+- `run_grid.sh`: candle → first half of the grid → candle → second half →
+  candle, both sides at every pose, logging throughout.
+
+`move.py` uses a *duration* constraint (1.5× the time at `--speed`). On dojo, a
+*speed* constraint made Kinova reject a 104° move with `METHOD_FAILED`.
+Prefix every `move.py`/`validate.py` call with
+`PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python`: the Jetson's protobuf is too new
+for `kortex_api` 2.6.
+
 ## D1 — the pose grid (≈ 45 min)
 
 Start one dry-run for the whole session and keep its output:
@@ -56,9 +82,10 @@ Then, in the Kinova Web App (Arm → angular control):
 
 1. Move to **home** and hold 10 s.
 2. For each row of `poses.csv` in order: enter the seven angles, let the move
-   finish, then **hold ≥ 5 s with nothing touching the arm**. The dry-run prints
-   every 0.5 s. The parser keeps a hold once it sees ≥ 4 s at rest and drops the
-   first second as settling.
+   finish, then **hold ≥ 6 s with nothing touching the arm**. The dry-run prints
+   every 0.5 s. The parser keeps a hold once it sees ≥ 5 s at rest, and drops the
+   first 2 s as settling. On dojo, Kinova's hold torque takes about 2 s to settle
+   after arriving.
 3. After pose 25, go **home** and hold 10 s. After the last pose, go **home**
    again and hold 10 s.
 4. Ctrl-C the dry-run.
@@ -90,7 +117,9 @@ transcript:
 Run `parse` on each `d2_*.txt` alone. The `repeat x2` spread is twice the
 stiction the sensor sees. **If any spread exceeds 0.6 N·m (0.3 N·m of
 stiction), stop.** A single-direction grid would bias the fit. Re-run D1 with
-every pose approached from both sides, and average the two.
+every pose approached from both sides (`move.py --bidirectional 5`), and average
+the two. On dojo (2026-10-20), candle returns from +10° and from −10° differed
+by 1.0 N·m on j2 (0.5 N·m of friction), so dojo always needs both sides.
 
 ## D3 — weigh the tip (≈ 10 min)
 
@@ -116,7 +145,10 @@ to compare with D3), the URDF edits, and the static gate. Attach `report.md`,
 
 **Static gate.** `report.md`'s gate section judges `corrected.urdf` alone.
 Fitted offsets are not in the URDF, so they are left out, and the report warns
-when any offset exceeds 0.3 N·m. The stronger check is a fresh grid on another
+when any offset exceeds 0.3 N·m. Offsets go into the arm's `--torque-offset`
+instead ([calibration](torque_offset_calibration.md)). They are valid only if
+the session was logged with no offset set: with one set, the fit returns what
+is left over, not the full offset. The stronger check is a fresh grid on another
 day, with **`corrected.urdf` as the model throughout**: `posegrid --seed 1`,
 then D1's dry-run with `--urdf corrected.urdf` (`parse` refuses a mismatch),
 then `parse` and `fit` with it too. Read the **F0** rows: F0 is the corrected

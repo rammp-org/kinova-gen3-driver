@@ -14,6 +14,12 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `KortexTransport::set_torque_offset`: a per-joint torque-sensor offset calibration
+  for a specific arm. Torque commands go out as `tau + offset` and feedback torque
+  comes back as `measured − offset`. On dojo, compensating j3's +1.9 N·m offset cut
+  its gravity-comp drift 27× (11.4° → 0.4° in 3 s at damping 10).
+  `benchmark_grav_comp --torque-offset` passes it through. Default zero, so behavior
+  is unchanged.
 - `tools/gravity_id`: offline gravity-model identification (pose grid, dry-run
   transcript parser, nested-family fit with held-out selection, corrected-URDF
   writer). It is proven on synthetic data, and the on-arm runbook is

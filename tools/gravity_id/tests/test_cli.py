@@ -46,3 +46,21 @@ def test_gate_judges_the_urdf_not_the_offsets(tmp_path):
     report = (out / "report.md").read_text()
     assert "WARNING: offsets above 0.3" in report and "j3 (+2.5" in report
     assert "Per-joint limits: FAIL" in report
+
+
+def test_candle_offsets(arm, tmp_path):
+    # Two returns to candle, friction +-0.5 on j2 around a +1.0 offset: offset = mean.
+    q0 = np.zeros(7)
+    off = np.array([-0.2, 1.0, 1.9, 0.5, -0.1, 0.0, 0.2])
+    fric = np.array([0, 0.5, 0.15, 0.15, 0, 0, 0])
+    away = np.radians([10.0] * 7)
+    text = []
+    for sign in (+1, -1):
+        text.append(format_table(sign * away, arm.gravity(sign * away), arm.gravity(sign * away)))
+        text += [format_table(q0, arm.gravity(q0) + off + sign * fric, arm.gravity(q0))] * 10
+    (tmp_path / "c.txt").write_text("\n".join(text))
+    out = run("candle", str(tmp_path / "c.txt"))
+    assert "2 candle holds" in out
+    got = [float(x) for x in out.split("--torque-offset ")[1].split()[0].split(",")]
+    assert np.allclose(got, off, atol=0.01)  # the transcript carries 0.01 N*m
+    assert "j2 0.50" in out
