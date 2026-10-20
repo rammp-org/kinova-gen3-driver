@@ -246,23 +246,33 @@ corrected mass > 0, and every corrected COM within 0.5 m of its joint frame.
 If a fit violates them, that model family is wrong for the data. It is reported
 as rejected, not clipped into compliance.
 
-**Nested families localize the error.** Each family is fit on the 40 fit poses
-and scored on the 10 held-out poses:
+**Nested families: the smallest correction that reproduces the torques.** Each
+family is fit on the 40 fit poses and scored on the 10 held-out poses:
 
-| Family | Free parameters | Explains |
+| Family | Free parameters | What it can reproduce |
 |---|---|---|
 | F0 | none (URDF as-is) | baseline |
 | F1 | 7 offsets | sensor offsets only |
-| F2 | offsets + body 7 (4) | tip payload: fingertips, camera mount |
-| F3 | offsets + bodies 5–7 (12) | distal links + payload |
+| F2 | offsets + body 7 (4) | a wrong tip, *or anything a tip correction mimics* |
+| F3 | offsets + bodies 5–7 (12) | errors anywhere from the elbow out |
 | F4 | offsets + all 7 bodies (28) | everything static |
 
 The chosen family is the **smallest one whose held-out RMS residual is within
-10 % of the best family's**. The report prints the held-out per-joint residual
-for every family, so the localization is visible, not just the winner. If F2
-wins and its fitted mass is close to the D3 scale weight, hypothesis 1 is
-confirmed independently. If F1 wins, the model was fine and the sensors are
-offset. If only F4 explains the data, the link inertials themselves are off.
+10 % of the best family's**. The report prints every family's held-out residual
+per joint, so the reader sees the whole comparison, not just the winner.
+
+**What a family does not tell you: which physical body is wrong.** Static
+gravity data cannot attribute mass to a particular link. This was found while
+building the tooling and is pinned by its tests. A 15 % error in body 3 or
+body 4 is reproduced to the noise floor by F3, which only changes bodies 5–7.
+A 15 % error in body 5 is reproduced by F2 alone. The driver does not need the
+attribution: gravity compensation only needs `g(q)` right, and any correction
+that reproduces the torques on held-out poses gives that. Attribution matters
+for fixing the *model source* correctly (which part to re-measure, which repo
+to edit). For that the evidence is D3, the weighed parts, not the fit. If F2
+wins and its fitted mass agrees with D3's weights, the tip explanation stands.
+If they disagree, the correction still works for control, but the root cause
+is elsewhere, and the report says so instead of naming a part.
 
 **Sensor gain** (a measured/model ratio that differs from 1) is not a family in this first
 pass. If F4's held-out residual still scales with `|g|` per joint, a per-joint
