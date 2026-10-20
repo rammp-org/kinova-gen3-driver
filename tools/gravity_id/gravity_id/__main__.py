@@ -40,7 +40,7 @@ def _floats(s: str, n: int) -> list[float]:
 
 
 def cmd_posegrid(a, arm):
-    poses = make_grid(arm, a.n_fit, a.n_val, a.z_min, tuple(_floats(a.j1_range, 2)), seed=a.seed)
+    poses = make_grid(arm, a.n_fit, a.n_val, a.z_min, tuple(_floats(a.j1_range, 2)), a.margin, seed=a.seed)
     write_poses_csv(a.out, poses)
     print(f"wrote {len(poses)} poses to {a.out}")
 
@@ -126,6 +126,7 @@ def main(argv=None):
     p.add_argument("--n-val", type=int, default=10)
     p.add_argument("--z-min", type=float, default=0.10, help="min height of every joint and the EE [m]")
     p.add_argument("--j1-range", default="-180,180", help="allowed j1 sector, deg")
+    p.add_argument("--margin", type=float, default=10.0, help="stay this far inside revolute limits, deg")
     p.add_argument("--seed", type=int, default=0)
 
     p = add("parse", cmd_parse)
