@@ -35,8 +35,9 @@ tools return what is left over, not the full offset.
 At candle (every joint at 0°) gravity loads no joint, so each sensor's reading **is**
 its offset, with no model needed. The joint friction that the sensors see on the
 Gen3 (±0.5 N·m on dojo's j2) means the reading depends on the approach direction,
-so approach from +10° and from −10° and average the two. Start the logger, then
-make the small moves with Kinova's own controller:
+so approach from +10° and from −10° and average the two. In a session directory on the
+Jetson that holds the `onarm/` scripts and `robot.urdf`, start the logger, then make
+the small moves with Kinova's own controller:
 
 ```sh
 ./dryrun.sh candle.txt 0 &          # read-only logger; Ctrl-C / docker kill it at the end
@@ -50,12 +51,15 @@ docker kill --signal INT gid-dryrun
 ```
 
 **Check the moves before sending them.** These are small motions around candle
-and are safe on a clear bench. The first move to candle can come from anywhere,
-so make that one with the Web App if the arm starts somewhere unusual. Then:
+and are safe on a clear bench. The first command refuses if the arm starts more
+than 30° from candle: move it close with the Web App first. Then, from
+`tools/gravity_id`, with the transcript copied back:
 
 ```sh
-uv run python -m gravity_id candle --urdf robot.urdf --ee-frame arm_end_effector_link candle.txt
+uv run python -m gravity_id candle --urdf robot.urdf --ee-frame arm_end_effector_link <session>/candle.txt
 ```
+
+It refuses unless the transcript has returns from both the + and the − side.
 
 It prints the friction per joint (half the spread between the two approaches) and
 a ready-to-paste `--torque-offset o1,...,o7`.
@@ -88,8 +92,9 @@ benchmark_grav_comp --ip 192.168.1.10 --dry-run --urdf robot.urdf \
 ```
 
 Then the drift A/B, which commands torque: 3 s of gravity comp at damping 10, from
-Kinova's Home, with and without the calibration. Use `torque.sh` in `onarm/`, or
-`benchmark_grav_comp --duration 3 --damping 10 [--torque-offset ...]`. Take a
+Kinova's Home, with and without the calibration:
+`benchmark_grav_comp --ip 192.168.1.10 --urdf robot.urdf --ee-frame arm_end_effector_link --duration 3 --damping 10 [--torque-offset ...]`.
+Take a
 dry-run snapshot before and after each run, and compare them with
 `gravity_id drift`.
 

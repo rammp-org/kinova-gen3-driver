@@ -143,7 +143,7 @@ winner back into the URDF's `<inertial>` tags. The data source is the existing
     `apps/benchmark_grav_comp.cpp` dry-run: header `  j |   q[deg] | meas[Nm] | grav[Nm] |  resid[Nm]`
     then 7 rows `  %d | %8.2f | %8.2f | %8.2f | %+9.3f`. Ignores all other lines.
   - `format_table(q, tau, grav) -> str` — the inverse, used by tests and the synthetic generator.
-  - `segment(tables, tol_deg=0.05, min_tables=6, settle=2) -> list[Hold]`,
+  - `segment(tables, tol_deg=0.05, min_tables=6, settle=4) -> list[Hold]` (settle was 2 in the plan; dojo needed 4, see the Execution record),
     `Hold = dataclass(q, tau, tau_std, n, pose_id, set)`: consecutive tables whose joint angles differ by
     ≤ tol (wrapped difference) form a hold; drop the first `settle` tables; keep holds with
     ≥ `min_tables` remaining; q and τ are medians.

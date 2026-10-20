@@ -1,7 +1,7 @@
 import numpy as np
 
 from gravity_id.design import ALL_BODIES, design
-from gravity_id.posegrid import make_grid, read_poses_csv, sample_candidates, write_poses_csv
+from gravity_id.posegrid import joint_travel, make_grid, read_poses_csv, sample_candidates, write_poses_csv
 
 
 def _stack(arm, qs):
@@ -61,3 +61,10 @@ def test_csv_roundtrip(arm, tmp_path):
     for a, b in zip(poses, back):
         d = np.angle(np.exp(1j * (a.q - b.q)))  # wrapped difference
         assert np.abs(d).max() < np.radians(0.01)
+
+
+def test_joint_travel_wraps_only_continuous_joints(arm):
+    a = np.radians([-170.0, -100.0, -170.0, -130.0, 0.0, -110.0, 0.0])
+    b = np.radians([170.0, 100.0, 170.0, 130.0, 0.0, 110.0, 0.0])
+    t = np.degrees(joint_travel(arm, a, b))
+    assert np.allclose(t, [20.0, 200.0, 20.0, 260.0, 0.0, 220.0, 0.0])  # j1/j3 wrap, j2/j4/j6 sweep

@@ -16,6 +16,7 @@ uv run python -m gravity_id parse    $E --poses poses.csv --out holds.csv sessio
 uv run python -m gravity_id fit      $E --holds holds.csv --out-dir fit/
 uv run python -m gravity_id drift    $E --before pre.txt --after post.txt
 uv run python -m gravity_id synth    $E --poses poses.csv --out fake.txt --payload 0.25,0,0,0.1
+uv run python -m gravity_id candle   $E candle.txt     # two-sided candle -> --torque-offset
 ```
 
 `fit` writes `report.md` (every model family's held-out residual, the chosen

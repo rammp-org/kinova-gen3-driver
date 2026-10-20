@@ -95,9 +95,28 @@ def cmd_drift(a, arm):
 def cmd_candle(a, arm):
     tables = [t for path in a.transcripts for t in parse_tables(Path(path).read_text())]
     check_against_model(tables, arm)
-    holds = [h for h in segment(tables) if np.abs(wrap(h.q)).max() <= np.radians(0.5)]
-    if len(holds) < 2:
-        raise SystemExit(f"found {len(holds)} candle hold(s); need returns from both sides (>= 2)")
+    # Split into runs of tables AT candle; each run's approach side is the sign of the
+    # last table before it (the +/-10 deg excursion). Friction biases each side
+    # oppositely, so a one-sided set would report a biased offset and ~0 friction.
+    at = [np.abs(wrap(t.q)).max() <= np.radians(0.5) for t in tables]
+    holds, sides = [], []
+    k = 0
+    while k < len(tables):
+        if not at[k]:
+            k += 1
+            continue
+        j = k
+        while j < len(tables) and at[j]:
+            j += 1
+        if k > 0:  # a run with no table before it (logger started at candle) has no side
+            for h in segment(tables[k:j]):
+                holds.append(h)
+                sides.append(np.sign(np.mean(wrap(tables[k - 1].q))))
+        k = j
+    if not (+1.0 in sides and -1.0 in sides):
+        raise SystemExit(f"found {len(holds)} candle hold(s) approached from "
+                         f"{sorted({'+' if s > 0 else '-' for s in sides}) or 'no known side'}; "
+                         "need returns from both + and - sides")
     resid = np.array([h.tau - arm.gravity(h.q) for h in holds])  # g(candle) ~ 0: this is the offset
     offset, friction = resid.mean(axis=0), np.ptp(resid, axis=0) / 2
     print(f"{len(holds)} candle holds")

@@ -45,23 +45,43 @@ sending it, run the Web App at low speed, and watch every move.**
 
 ## Automated session (Kinova high-level moves)
 
-D1 and D2 can run unattended at the keyboard, though not unattended at the arm.
-`tools/gravity_id/onarm/` holds the scripts used on dojo on 2026-10-20. They run
-on the Jetson with host `python3` and `kortex_api`, outside the uv project:
+!!! danger "The automated grid is not collision-checked"
+    On 2026-10-20, `run_grid.sh` drove dojo's gripper into the table at an
+    approach waypoint, and self-collided several times. Nothing in these scripts
+    knows where the table is, or checks self-collision: not the pose grid's height
+    floor, not `move.py`, and not Kinova's planner or `ValidateWaypointList`.
+    **Do not run the grid automatically** until a real collision checker (table plus
+    self-collision, along every path) gates `move.py`. Until then, step through
+    the poses with the Web App, and review every target, including the ±5°
+    approach waypoints that `--plan` lists.
+
+`tools/gravity_id/onarm/` holds the scripts used on dojo on 2026-10-20. They run on
+the Jetson with host `python3` and `kortex_api`, outside the uv project. **Copy the
+scripts, `robot.urdf` and `poses.csv` into one session directory.** Each script
+reads its files from its own directory, and the logger writes there too.
 
 - `dryrun.sh OUT [S]`: the read-only logger (the nightly image's
   `benchmark_grav_comp --dry-run`).
-- `move.py`: Kinova's own `reach_joint_angles`, the same as the Web App. It
-  holds the arm in single-level servoing, refuses if anything has it in
-  low-level servoing, and calls `Base.Stop` on Ctrl-C, timeout or abort.
-  `--bidirectional 5` approaches every pose from +5° and from −5° (see D2);
-  `--plan` prints the moves and moves nothing.
+- `move.py`: Kinova's own `reach_joint_angles`, the same as the Web App.
+  - It holds the arm in single-level servoing, refuses if anything has it in
+    low-level servoing, and calls `Base.Stop` on Ctrl-C, timeout or abort,
+    including a move Kinova rejects while planning it.
+  - It sizes each move's duration from the joint's **real** travel. Limited
+    joints never wrap, so a −130° → +130° move counts as 260°.
+  - It refuses a first move of more than 30° from the current pose unless
+    `--from-anywhere` is given.
+  - `--bidirectional 5` approaches every pose from +5° and from −5° (see D2).
+  - `--plan` lists every move with its travel, duration and mean speed, and
+    moves nothing.
 - `validate.py`: Kinova's `ValidateWaypointList` on a `move.py --plan`, with
   no motion. It joins the whole list into one spline that does not stop at each
   waypoint, so it can report limit overshoots that the stop-at-target moves never
   make. Check any flagged segment's endpoints.
 - `run_grid.sh`: candle → first half of the grid → candle → second half →
-  candle, both sides at every pose, logging throughout.
+  candle, both sides at every pose, logging to a timestamped `d1_*.txt`. It
+  refuses to start if a logger is already running, stops the logger however it
+  exits, and ends the run if the logger dies. **Not collision-checked; see the
+  box above.**
 
 `move.py` uses a *duration* constraint (1.5× the time at `--speed`). On dojo, a
 *speed* constraint made Kinova reject a 104° move with `METHOD_FAILED`.
@@ -111,14 +131,18 @@ transcript:
     --ee-frame arm_end_effector_link --duration 0 | tee d2_P07.txt
 ```
 
-1. Go to the pose with j2 and j4 both **+5°**, then to the pose itself. Hold 5 s.
-2. Go to the pose with j2 and j4 both **−5°**, then to the pose itself. Hold 5 s.
+1. Go to the pose with j2 and j4 both **+5°**, then to the pose itself. Hold ≥ 6 s.
+2. Go to the pose with j2 and j4 both **−5°**, then to the pose itself. Hold ≥ 6 s.
+
+(The parser drops the first 2 s of a hold and keeps it only if at least 3 s remain,
+so a 5 s hold can be dropped without warning.)
 
 Run `parse` on each `d2_*.txt` alone. The `repeat x2` spread is twice the
 stiction the sensor sees. **If any spread exceeds 0.6 N·m (0.3 N·m of
 stiction), stop.** A single-direction grid would bias the fit. Re-run D1 with
-every pose approached from both sides (`move.py --bidirectional 5`), and average
-the two. On dojo (2026-10-20), candle returns from +10° and from −10° differed
+every pose approached from both sides, and average the two. Approach by hand in the
+Web App. `move.py --bidirectional 5` does the same automatically, but it also
+nudges **every** joint ±5°, and it is not collision-checked (see the box above). On dojo (2026-10-20), candle returns from +10° and from −10° differed
 by 1.0 N·m on j2 (0.5 N·m of friction), so dojo always needs both sides.
 
 ## D3 — weigh the tip (≈ 10 min)

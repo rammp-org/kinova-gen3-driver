@@ -30,6 +30,15 @@ def wrap(a: np.ndarray) -> np.ndarray:
     return np.pi - np.mod(np.pi - a, 2 * np.pi)
 
 
+def joint_travel(arm: ArmModel, a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Per-joint |b - a| the arm actually travels [rad]. Only CONTINUOUS joints may take
+    the short way round; a limited joint (j2, j4, j6) going -130 -> +130 deg sweeps 260
+    deg, not 100. Getting this wrong made the grid tour pick huge sweeps as "nearest"
+    and let a mover size a 260 deg move's duration for 100 deg (2.6x its speed cap)."""
+    d = b - a
+    return np.abs(np.where(arm.continuous, wrap(d), d))
+
+
 def sample_candidates(arm, n, z_min, j1_range_deg, margin_deg, rng) -> list[np.ndarray]:
     margin = np.radians(margin_deg)
     lo = np.where(arm.continuous, -np.pi, arm.lower + margin)
@@ -76,7 +85,7 @@ def make_grid(
     # Nearest-neighbour tour from q = 0 to cut travel between poses.
     order, here, left = [], np.zeros(NUM_JOINTS), list(range(len(labelled)))
     while left:
-        k = min(left, key=lambda k: np.linalg.norm(wrap(labelled[k][0] - here)))
+        k = min(left, key=lambda k: np.linalg.norm(joint_travel(arm, here, labelled[k][0])))
         order.append(k)
         left.remove(k)
         here = labelled[k][0]

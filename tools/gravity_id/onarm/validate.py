@@ -9,11 +9,12 @@ from kortex_api.autogen.messages import Session_pb2, Base_pb2 as B
 
 def validate(base, targets, speed):
     wl = B.WaypointList(use_optimal_blending=False)
-    prev = [j.value for j in base.GetMeasuredJointAngles().joint_angles]
+    prev = [v - 360.0 if v > 180.0 else v for v in (j.value for j in base.GetMeasuredJointAngles().joint_angles)]
     for name, t in targets:
         w = wl.waypoints.add(name=name)
         w.angular_waypoint.angles.extend([a % 360.0 for a in t])
-        travel = max(abs((x - y + 180) % 360 - 180) for x, y in zip(t, prev))
+        travel = max(abs((x - y + 180) % 360 - 180) if lim is None else abs(x - y)  # see move.travel
+                     for x, y, lim in zip(t, prev, [None, 1, None, 1, None, 1, None]))
         w.angular_waypoint.duration = max(travel / speed * 1.5, 1.0)
         prev = t
     rep = base.ValidateWaypointList(wl)

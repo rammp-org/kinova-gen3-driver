@@ -27,6 +27,21 @@ from kortex_api.autogen.messages import Base_pb2, Session_pb2
 MAX_SPEED = 20.0  # deg/s, hard cap
 # URDF limits of the revolute joints (deg); continuous joints are None.
 LIMITS = [None, 128.9, None, 147.8, None, 120.3, None]
+FIRST_MOVE_MAX = 30.0  # deg: a longer first move (from wherever the arm is) needs --from-anywhere
+
+
+def travel(target, here):
+    """Max per-joint travel [deg]. Only continuous joints take the short way round
+    (verified on dojo: Kinova's reach_joint_angles does); a limited joint going
+    -130 -> +130 sweeps 260 deg. Undercounting it sized durations for the short way,
+    letting the move run up to 2.6x over --speed."""
+    return max(abs((x - y + 180) % 360 - 180) if lim is None else abs(x - y)
+               for x, y, lim in zip(target, here, LIMITS))
+
+
+def duration(dist, speed):
+    """The DURATION constraint sent to Kinova: 1.5x the time at `speed`, >= 2 s."""
+    return max(1.5 * dist / speed, 2.0)
 
 
 def check(angles):
@@ -57,13 +72,15 @@ class Arm:
         a = [j.value for j in self.base.GetMeasuredJointAngles().joint_angles]
         return [x - 360.0 if x > 180.0 else x for x in a]
 
-    def move(self, target, speed, timeout_s, travel=None):
+    def move(self, target, speed, timeout_s, dist):
         done, result = threading.Event(), {}
 
         def on_event(n):
-            if n.action_event in (Base_pb2.ACTION_END, Base_pb2.ACTION_ABORT):
+            # A move Kinova rejects while planning it ends in PREPROCESS_ABORT, not ABORT.
+            if n.action_event in (Base_pb2.ACTION_END, Base_pb2.ACTION_ABORT,
+                                  Base_pb2.ACTION_PREPROCESS_ABORT):
                 result["event"] = n.action_event
-                if n.action_event == Base_pb2.ACTION_ABORT:
+                if n.action_event != Base_pb2.ACTION_END:
                     from kortex_api.autogen.messages import Errors_pb2
                     try:
                         why = Errors_pb2.SubErrorCodes.Name(n.abort_details)
@@ -82,7 +99,7 @@ class Arm:
         # on dojo a SPEED constraint was rejected (METHOD_FAILED) for a 104 deg move that
         # Kinova's own validator accepts.
         rja.constraint.type = Base_pb2.JOINT_CONSTRAINT_DURATION
-        rja.constraint.value = max(1.5 * travel / speed, 2.0)
+        rja.constraint.value = duration(dist, speed)
         try:
             self.base.ExecuteAction(action)
             if not done.wait(timeout_s):
@@ -94,7 +111,8 @@ class Arm:
         finally:
             self.base.Unsubscribe(handle)
         if result["event"] != Base_pb2.ACTION_END:
-            sys.exit("move ABORTED by the arm (limit, collision or fault); stopping the sequence")
+            self.base.Stop()
+            sys.exit("move ABORTED by the arm (limit, collision or fault); arm stopped, sequence ended")
 
     def close(self):
         self.session.CloseSession()
@@ -112,7 +130,11 @@ def main():
     ap.add_argument("--stop", help="last pose id of the sequence (inclusive)")
     ap.add_argument("--speed", type=float, default=15.0, help=f"max joint speed deg/s (cap {MAX_SPEED})")
     ap.add_argument("--hold", type=float, default=6.0, help="seconds to hold still after each move")
-    ap.add_argument("--plan", action="store_true", help="print the moves, move nothing")
+    ap.add_argument("--plan", action="store_true",
+                    help="print every move with its real travel, duration and mean speed; move nothing")
+    ap.add_argument("--from-anywhere", action="store_true",
+                    help=f"allow a first move longer than {FIRST_MOVE_MAX:.0f} deg from the arm's "
+                         "current pose (that path is not checked against anything: watch it)")
     ap.add_argument("--bidirectional", type=float, default=0.0, metavar="DEG",
                     help="approach every pose twice, from +DEG and from -DEG on every joint, and "
                          "hold after each arrival (the sensors see joint friction, so one-sided "
@@ -135,6 +157,8 @@ def main():
         ids = [r["id"] for r in rows]
         lo = ids.index(a.start) if a.start else 0
         hi = ids.index(a.stop) + 1 if a.stop else len(rows)
+        if hi <= lo:
+            sys.exit(f"--start {a.start} comes after --stop {a.stop}; nothing to run")
         targets = [(r["id"], [float(r[f"j{i}_deg"]) for i in range(1, 8)]) for r in rows[lo:hi]]
     for name, t in targets:
         if len(t) != 7:
@@ -150,21 +174,37 @@ def main():
         targets = [step for name, t in targets for step in (
             (f"{name}+", nudged(t, +1)), (name, t), (f"{name}-", nudged(t, -1)), (name, t))]
     if a.plan:
+        # Columns 1-8 are name + angles (validate.py reads those); then the move INTO it.
+        prev = None
         for name, t in targets:
-            print(name, " ".join(f"{x:8.2f}" for x in t))
+            if prev is None:
+                print(name, " ".join(f"{x:8.2f}" for x in t), "  (first move: from the current pose)")
+            else:
+                d = travel(t, prev)
+                s = duration(d, a.speed)
+                print(name, " ".join(f"{x:8.2f}" for x in t),
+                      f"  travel {d:6.1f} deg  duration {s:5.1f} s  mean {d / s:5.1f} deg/s")
+            prev = t
         return
 
     arm = Arm(a.ip)
     try:
-        for name, t in targets:
+        for k, (name, t) in enumerate(targets):
             here = arm.angles()
-            delta = max(abs((x - y + 180) % 360 - 180) for x, y in zip(t, here))
-            print(f"[{time.strftime('%H:%M:%S')}] {name}: max joint travel {delta:.1f} deg", flush=True)
-            arm.move(t, a.speed, timeout_s=2.5 * delta / a.speed + 15.0, travel=delta)
+            dist = travel(t, here)
+            if k == 0 and dist > FIRST_MOVE_MAX and not a.from_anywhere:
+                sys.exit(f"first move is {dist:.0f} deg from the current pose (> {FIRST_MOVE_MAX:.0f}); "
+                         "move the arm close first (Web App) or pass --from-anywhere and watch it")
+            print(f"[{time.strftime('%H:%M:%S')}] {name}: max joint travel {dist:.1f} deg, "
+                  f"{duration(dist, a.speed):.1f} s", flush=True)
+            arm.move(t, a.speed, timeout_s=2.5 * dist / a.speed + 15.0, dist=dist)
             if name[-1] in "+-" and a.bidirectional:
                 continue  # an approach waypoint, not a pose: no hold
             time.sleep(a.hold)
             print(f"           reached {[round(x, 2) for x in arm.angles()]}", flush=True)
+    except KeyboardInterrupt:  # e.g. during a hold, outside move()'s own handler
+        arm.base.Stop()
+        sys.exit("interrupted; arm stopped")
     finally:
         arm.close()
 

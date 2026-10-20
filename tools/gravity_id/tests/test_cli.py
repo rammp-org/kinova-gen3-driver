@@ -64,3 +64,15 @@ def test_candle_offsets(arm, tmp_path):
     got = [float(x) for x in out.split("--torque-offset ")[1].split()[0].split(",")]
     assert np.allclose(got, off, atol=0.01)  # the transcript carries 0.01 N*m
     assert "j2 0.50" in out
+
+
+def test_candle_refuses_one_sided(arm, tmp_path):
+    q0, away = np.zeros(7), np.radians([10.0] * 7)
+    text = []
+    for _ in range(2):  # two returns, both from +10 deg
+        text.append(format_table(away, arm.gravity(away), arm.gravity(away)))
+        text += [format_table(q0, arm.gravity(q0), arm.gravity(q0))] * 10
+    (tmp_path / "c.txt").write_text("\n".join(text))
+    r = subprocess.run([sys.executable, "-m", "gravity_id", "candle", "--urdf", FIXTURE_URDF,
+                        "--ee-frame", FIXTURE_EE, str(tmp_path / "c.txt")], capture_output=True, text=True)
+    assert r.returncode != 0 and "both + and - sides" in r.stderr
