@@ -326,7 +326,7 @@ and neither is runnable today:
 
 Also unresolved by design: mode-switch cost. `RtExecutor` calls
 `set_actuator_modes` inline on the RT thread at a mode change
-(`src/rt_executor.cpp:103`), which on KORTEX is 7 × `SetControlMode` plus 17
+(`src/rt_executor.cpp:110`), which on KORTEX is 7 × `SetControlMode` plus 17
 `pump()` round-trips. Nothing today switches modes mid-run, so the cost only
 shows up as a one-off at startup. It becomes measurable — and worth measuring —
 once the transport layer switches between torque and position live.

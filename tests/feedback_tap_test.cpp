@@ -15,7 +15,7 @@ struct FakeTransport : Transport {
   bool connected = false;
   void connect() override { connected = true; }
   void set_servoing_low_level() override {}
-  void set_actuator_modes(const ActuatorModes&) override {}
+  void set_actuator_modes(const ActuatorModes&, const JointCommand&) override {}
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     last_cmd = c;
     fb = to_return;

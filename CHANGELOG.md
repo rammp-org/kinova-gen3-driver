@@ -127,6 +127,17 @@ that heading to the new version and bumps `package.xml`.
   impedance reference a full turn (home's `j3 = π` sits exactly on the
   boundary).
 
+### Fixed
+
+- **Torque-mode startup droop** (#92). While the actuators switched mode one at a
+  time (~160 ms on the arm), `KortexTransport` sent zero torque, so the arm fell
+  for the whole switch on every gravity-comp or impedance start. On a mode change
+  the executor now runs the incoming mode's `on_enter` and first `compute` before
+  switching, and the transport sends that command throughout the switch and on
+  the first cycle after it.
+- **Breaking (`Transport`):** `set_actuator_modes(modes, hold)` takes the command
+  to send during the switch. Custom transports and decorators must forward it.
+
 ## [1.2.0] — 2026-10-02
 
 ### Added

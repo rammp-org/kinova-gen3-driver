@@ -31,7 +31,7 @@ SimTransport::SimTransport(const JointFeedback& initial, int latency_us)
 
 void SimTransport::connect() {}
 void SimTransport::set_servoing_low_level() {}
-void SimTransport::set_actuator_modes(const ActuatorModes&) {}
+void SimTransport::set_actuator_modes(const ActuatorModes&, const JointCommand&) {}
 void SimTransport::safe_shutdown() {}
 
 // Advance the simulated gripper one cycle toward its target. Extracted because

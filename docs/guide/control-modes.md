@@ -24,7 +24,10 @@ Every mode implements the same small interface (`ControlMode`):
 
 You hand a mode to the executor with `request_mode(&mode)`; it's adopted at the
 next cycle boundary (an atomic-pointer swap). You keep ownership — the mode must
-outlive its time as the active mode.
+outlive its time as the active mode. At adoption the executor runs `on_enter` and
+one `compute` before the actuators switch mode, and that first command holds the
+arm during the switch. `compute` must therefore produce a sensible command
+straight after `on_enter`, which every shipped mode already does.
 
 Every shipped mode also echoes the measured joint position back in the command
 (*position passthrough*), so the robot's own low-level safety can fall back to a

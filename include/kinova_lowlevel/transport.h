@@ -9,7 +9,10 @@ class Transport {
   virtual ~Transport() = default;
   virtual void connect() = 0;
   virtual void set_servoing_low_level() = 0;
-  virtual void set_actuator_modes(const ActuatorModes&) = 0;
+  // Switches the actuators' control modes. `hold` is what the arm receives while the
+  // switch is in progress -- the incoming mode's first command, so actuators that
+  // have already switched keep holding the arm instead of going limp (#92).
+  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand& hold) = 0;
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;

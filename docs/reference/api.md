@@ -307,6 +307,11 @@ class RtExecutor {
 
 - `request_mode` stores a raw pointer adopted at a cycle boundary; the caller
   **retains ownership** and must keep the mode alive while active.
+- **Bumpless switch:** on adoption the executor calls the new mode's `on_enter`
+  and one `compute` *before* `Transport::set_actuator_modes`, and passes that
+  command as `hold`. The transport sends it while the actuators switch one by one
+  (~160 ms on KORTEX), so the arm stays held instead of getting zero torque (#92).
+  That extra `compute` advances the mode's dt-driven state by one cycle.
 - `run` blocks until `stop` is set; it calls `enable_rt()` on its own thread.
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
@@ -347,7 +352,7 @@ class Transport {
  public:
   virtual void connect() = 0;
   virtual void set_servoing_low_level() = 0;
-  virtual void set_actuator_modes(const ActuatorModes&) = 0;
+  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand& hold) = 0;
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;

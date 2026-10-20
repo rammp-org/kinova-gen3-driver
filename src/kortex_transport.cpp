@@ -74,14 +74,14 @@ struct KortexTransport::Impl {
   explicit Impl(std::string ip_in, std::string user_in, std::string password_in)
       : ip(std::move(ip_in)), user(std::move(user_in)), password(std::move(password_in)) {}
 
-  // Refresh that re-sends current measured positions + zero torque, keeping the
-  // cyclic channel alive (used between per-actuator control-mode switches). "Zero"
-  // means zero DELIVERED: the calibrated offset is sent, like every torque command.
-  void pump() {
-    for (int i = 0; i < n_; ++i) {
-      cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
-      cmd_.mutable_actuators(i)->set_torque_joint(float(torque_offset_[i]));
-    }
+  // Refresh that sends `hold` through the normal command path, keeping the cyclic
+  // channel alive between per-actuator control-mode switches. Each actuator follows
+  // the field for its CURRENT mode: switched ones the incoming command, not-yet-
+  // switched position-mode ones the measured-position passthrough. Never zero
+  // torque: that drops the arm for the whole switch (#92). write_command applies the
+  // calibrated torque offset, like every torque command.
+  void pump(const JointCommand& hold) {
+    write_command(hold);
     fb_ = base_cyclic->Refresh(cmd_, 0);
   }
 
@@ -270,7 +270,7 @@ void KortexTransport::set_servoing_low_level() {
   I.low_level_ = true;
 }
 
-void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
+void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const JointCommand& hold) {
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
   // channel between each call so it does not time out during the switch.
@@ -278,9 +278,9 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
     I.act_cfg->SetControlMode(cm_msg, idx);
-    I.pump();
+    I.pump(hold);
   }
-  for (int k = 0; k < 10; ++k) I.pump();
+  for (int k = 0; k < 10; ++k) I.pump(hold);
 }
 
 void KortexTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {

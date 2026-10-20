@@ -99,10 +99,15 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     ControlMode* req = requested_.exchange(nullptr, std::memory_order_acq_rel);
     if (req && req != active) {
       if (active) active->on_exit();
-      // set_actuator_modes performs the pumping handshake; acceptable at a
-      // boundary on a mode change only.
-      t_.set_actuator_modes(req->required_modes());
+      // Bumpless switch (#92): the incoming mode computes its first command
+      // BEFORE the actuators change mode, and the transport holds the arm with
+      // it through the switch (~160 ms on the arm) and this cycle's exchange.
+      // That command is not zero torque, which drops the arm. Its compute ticks
+      // the mode's dt-driven state one extra cycle. set_actuator_modes performs
+      // the pumping handshake; acceptable at a boundary on a mode change only.
       req->on_enter(fb);
+      req->compute(fb, dt_s, cmd);
+      t_.set_actuator_modes(req->required_modes(), cmd);
       active = req;
     }
 
