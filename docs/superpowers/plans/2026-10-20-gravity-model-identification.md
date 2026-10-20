@@ -289,3 +289,20 @@ under `Operations`), `docs/integration-runbook.md` (one link), `CHANGELOG.md` (U
 | E | only if V leaves speed-dependent error | — | new spec |
 
 The open decisions (offset landing, which arms) are revisited when the Phase I report exists.
+
+## Execution record (2026-10-20)
+
+Tasks 1–7 were implemented as planned. Beyond the plan, driven by the on-arm session:
+
+- `parse` drops the first 2 s of each hold as settling. Kinova's hold torque takes
+  about 2 s to settle after arrival.
+- `posegrid --margin`. `gravity_id candle` turns a two-sided candle transcript into
+  offsets.
+- `tools/gravity_id/onarm/`: a read-only logger, a mover using Kinova high-level
+  moves (`--bidirectional`), Kinova's `ValidateWaypointList`, and `run_grid.sh`.
+  The grid run hit the table and self-collided; see the spec's Results. A
+  collision checker is a prerequisite for using it again.
+- The landing (Phase L) became `KortexTransport::set_torque_offset` (#91) rather
+  than a URDF edit, because the offsets, not the masses, were wrong.
+  `benchmark_grav_comp --torque-offset`, plus the procedure
+  `docs/integration/torque_offset_calibration.md`.

@@ -1,11 +1,50 @@
 # Gravity Model Identification — Design Spec
 
 **Date:** 2026-10-20
-**Status:** Draft for review (PR against `dev`)
+**Status:** Phases D, I, L and V run on dojo, 2026-10-20 (see **Results**). Phase E not
+started. Landed as: `KortexTransport::set_torque_offset` (#91, folded into this PR).
 **Scope:** A multi-phase campaign to find out what is wrong with the arm's
 gravity model and correct it: diagnose, identify, land, validate. This spec
 covers the whole campaign. Its first implementation pass is offline tooling
 only (pose grid, fitting, URDF writer), proven on synthetic data.
+
+## Results (2026-10-20, dojo)
+
+This section supersedes the hypothesis ranking and the initial gate numbers further down,
+which are kept as the record of what was expected before the data.
+
+- **The cause was torque-sensor offsets, not masses.** From a 49-pose grid, each pose
+  approached from both sides (98 holds), the best fit (family F1) gives
+  `-0.225, 1.065, 1.906, 0.475, -0.079, 0.007, 0.221` N·m. A read-only candle measurement
+  agrees within 0.15 N·m on every joint except j6. The production URDF's tip needs
+  only −34 ± 3 g. The in-repo fixture's camera and 0.5 kg mount are wrong for dojo.
+  Hypothesis 1 (tip mass) is refuted for production; hypothesis 2 (offsets) is confirmed.
+- **The actuators' torque loop tracks the biased sensor**, so the correction belongs
+  in the command: send `tau + offset`. This settles open decision 1, by way of
+  option (ii).
+
+  | 3 s gravity comp at damping 10, from Home | j3 drift | EE drift |
+  |---|---|---|
+  | no calibration | −11.35° | 81 mm |
+  | `--torque-offset`, through #91's Transport | +0.01° | 28 mm |
+  | j3 and j7 offsets only | −0.32° | 21 mm |
+
+  At damping 0 (2 s) only j2 drifted (+6.8°). Every other joint was held by friction.
+  j2's static offset overcorrects in short runs. Whether to keep j2 and j4 is a
+  per-robot choice.
+- **The sensors see joint friction:** returns to candle from ±10° differ by 1.0 N·m on
+  j2. Static readings have a floor of about 0.4–0.6 N·m on j1–j3 that no gravity
+  model explains: held-out RMS after offsets is 0.60 on j2 and 0.62 on j3. The
+  static-gate limits below (0.5 N·m) are tighter than this floor and are replaced
+  by it. Approaching every pose from both sides is mandatory.
+- **The startup droop is not model error.** `set_actuator_modes` sends zero torque
+  for about 160 ms while it switches the actuators one at a time (#92).
+- **Collection incident:** the automated grid (`onarm/run_grid.sh`) drove the gripper
+  into the table at its last approach waypoint and self-collided several times. Its
+  height check covered only joint origins and the EE frame, and not the approach
+  waypoints. No more automated grids until a real collision checker gates every
+  target and path.
+- **The new-arm procedure** is `docs/integration/torque_offset_calibration.md`.
 
 ## Why
 
@@ -403,7 +442,10 @@ is physically on the wrist.
 
 ## Open decisions (Swapnil's)
 
-1. **Where per-joint offsets land, if they matter (> 0.3 N·m).** Options:
+1. **DECIDED (2026-10-20):** option (ii), at the Transport boundary
+   (`KortexTransport::set_torque_offset`). The arm showed the inner torque loop does
+   close on the biased sensor. Kept below as the record. **Where per-joint offsets
+   land, if they matter (> 0.3 N·m).** Options:
    (i) Kinova's own per-actuator torque offset (ActuatorConfig, firmware-side,
    no driver change, but it changes the robot's stored state);
    (ii) a startup-loaded calibration at the Transport boundary, the same place
@@ -413,6 +455,10 @@ is physically on the wrist.
 2. **Which arms.** This spec assumes the dojo arm (abra). The flatbot arm needs
    its own D session with its own rendered URDF, because the payload differs
    per arm.
+3. **Getting it into ROS 2:** a node parameter, with a per-robot value stored next to
+   `mount.yaml`. This needs a driver release that includes #91.
+4. **Whether to fix the in-repo fixture's tip** (camera and 0.5 kg mount), or label
+   it as a different payload.
 
 ## Calls I made (please check)
 
