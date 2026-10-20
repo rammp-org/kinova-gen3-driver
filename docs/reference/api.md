@@ -362,6 +362,14 @@ class Transport {
 - **`KortexTransport(const std::string& ip)`** (`kortex_transport.h`, KORTEX build
   only) — the real Gen3 low-level handshake. Compiled in only with
   `-DKINOVA_ENABLE_KORTEX=ON`.
+  - **`set_torque_offset(const JointVec& offset)`**: this arm's per-joint
+    torque-sensor offsets [N·m], a robot-specific calibration measured with
+    `tools/gravity_id` ([runbook](../integration/gravity_identification.md)). The
+    actuators' torque loop tracks their own sensor, so a sensor reading
+    `true + offset` makes the joint deliver `command − offset`. The transport
+    sends torque commands as `tau + offset` and returns feedback torque as
+    `measured − offset`. It applies in `kTorque` only. Call it before `connect()`;
+    it throws after `connect()`, or for any entry that is non-finite or larger than 5 N·m.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:

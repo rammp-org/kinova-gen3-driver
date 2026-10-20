@@ -64,6 +64,8 @@ struct KortexTransport::Impl {
   k_api::BaseCyclic::Command cmd_;
   k_api::BaseCyclic::Feedback fb_;  // latest feedback (kept to seed passthrough positions)
 
+  JointVec torque_offset_ = JointVec::Zero();  // see set_torque_offset
+
   int n_ = 0;
   uint16_t frame_id_ = 0;
   bool connected_ = false;
@@ -91,7 +93,7 @@ struct KortexTransport::Impl {
       // Normalize here, the same boundary that turns degrees into radians, so
       // everything past Transport speaks ONE convention: the torque the actuator
       // applies, ~ +g(q) at free hold. See JointFeedback::tau.
-      fb.tau[i] = -double(fb_.actuators(i).torque());
+      fb.tau[i] = -double(fb_.actuators(i).torque()) - torque_offset_[i];
       fb.current[i] = double(fb_.actuators(i).current_motor());
     }
     fb.frame_id = fb_.frame_id();
@@ -141,7 +143,7 @@ struct KortexTransport::Impl {
           break;
         case ActuatorMode::kTorque:
           a->set_position(fb_.actuators(i).position());
-          a->set_torque_joint(float(cmd.torque[i]));
+          a->set_torque_joint(float(cmd.torque[i] + torque_offset_[i]));
           break;
         case ActuatorMode::kCurrent:
           // NOTE: JointCommand has no dedicated current field yet, so kCurrent
@@ -188,6 +190,17 @@ struct KortexTransport::Impl {
 
 KortexTransport::KortexTransport(std::string ip, std::string user, std::string password)
     : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password))) {}
+
+void KortexTransport::set_torque_offset(const JointVec& offset) {
+  if (impl_->connected_)
+    throw std::runtime_error("KortexTransport: set_torque_offset must be called before connect()");
+  for (int i = 0; i < kNumJoints; ++i)
+    if (!std::isfinite(offset[i]) || std::abs(offset[i]) > 5.0)
+      throw std::runtime_error("KortexTransport: torque offset j" + std::to_string(i + 1) + " = " +
+                               std::to_string(offset[i]) +
+                               " N*m is not a plausible sensor offset (|offset| <= 5)");
+  impl_->torque_offset_ = offset;
+}
 
 KortexTransport::~KortexTransport() {
   // Defensive: revert + tear down if still connected. Never throw from dtor.
