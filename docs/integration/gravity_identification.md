@@ -145,7 +145,10 @@ to compare with D3), the URDF edits, and the static gate. Attach `report.md`,
 
 **Static gate.** `report.md`'s gate section judges `corrected.urdf` alone.
 Fitted offsets are not in the URDF, so they are left out, and the report warns
-when any offset exceeds 0.3 N·m. The stronger check is a fresh grid on another
+when any offset exceeds 0.3 N·m. Offsets go into the arm's `--torque-offset`
+instead ([calibration](torque_offset_calibration.md)). They are valid only if
+the session was logged with no offset set: with one set, the fit returns what
+is left over, not the full offset. The stronger check is a fresh grid on another
 day, with **`corrected.urdf` as the model throughout**: `posegrid --seed 1`,
 then D1's dry-run with `--urdf corrected.urdf` (`parse` refuses a mismatch),
 then `parse` and `fit` with it too. Read the **F0** rows: F0 is the corrected

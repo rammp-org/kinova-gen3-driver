@@ -367,9 +367,13 @@ class Transport {
     `tools/gravity_id` ([runbook](../integration/gravity_identification.md)). The
     actuators' torque loop tracks their own sensor, so a sensor reading
     `true + offset` makes the joint deliver `command − offset`. The transport
-    sends torque commands as `tau + offset` and returns feedback torque as
-    `measured − offset`. It applies in `kTorque` only. Call it before `connect()`;
-    it throws after `connect()`, or for any entry that is non-finite or larger than 5 N·m.
+    sends torque commands as `tau + offset` (in `kTorque` only, not `kCurrent`;
+    the mode-switch handshake sends the offset too, so "zero" means zero
+    delivered). It returns feedback torque as `measured − offset` in **every**
+    mode, read-only use included. The sign is as `gravity_id` fits it, in
+    `JointFeedback::tau`'s applied-torque convention (not KORTEX's reaction sign).
+    Identify the offsets with no offset set. Call it before `connect()`; it throws
+    after `connect()`, or for any entry that is non-finite or larger than 5 N·m.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:

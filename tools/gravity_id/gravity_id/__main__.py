@@ -4,6 +4,7 @@
   parse     dry-run transcript(s) + poses.csv -> holds.csv
   fit       holds.csv -> report.md, params.json, corrected.urdf
   drift     two dry-run transcripts (before/after a torque run) -> joint and EE drift
+  candle    dry-run transcript(s) of two-sided returns to candle -> torque-sensor offsets
   synth     poses.csv -> a fake dry-run transcript with injected errors (rehearsal)
 """
 
@@ -91,6 +92,19 @@ def cmd_drift(a, arm):
     print(f"EE displacement: {np.linalg.norm(arm.ee_position(after) - arm.ee_position(before)) * 1e3:.1f} mm")
 
 
+def cmd_candle(a, arm):
+    tables = [t for path in a.transcripts for t in parse_tables(Path(path).read_text())]
+    check_against_model(tables, arm)
+    holds = [h for h in segment(tables) if np.abs(wrap(h.q)).max() <= np.radians(0.5)]
+    if len(holds) < 2:
+        raise SystemExit(f"found {len(holds)} candle hold(s); need returns from both sides (>= 2)")
+    resid = np.array([h.tau - arm.gravity(h.q) for h in holds])  # g(candle) ~ 0: this is the offset
+    offset, friction = resid.mean(axis=0), np.ptp(resid, axis=0) / 2
+    print(f"{len(holds)} candle holds")
+    print("friction (half-spread) [N*m]: " + " ".join(f"j{i + 1} {f:.2f}" for i, f in enumerate(friction)))
+    print("--torque-offset " + ",".join(f"{o:.3f}" for o in offset))
+
+
 def cmd_synth(a, arm):
     rng = np.random.default_rng(a.seed)
     dpi = point_mass(7, a.payload[0], np.array(a.payload[1:])) if a.payload else None
@@ -142,6 +156,9 @@ def main(argv=None):
     p = add("drift", cmd_drift)
     p.add_argument("--before", required=True)
     p.add_argument("--after", required=True)
+
+    p = add("candle", cmd_candle)
+    p.add_argument("transcripts", nargs="+")
 
     p = add("synth", cmd_synth)
     p.add_argument("--poses", required=True)

@@ -75,11 +75,12 @@ struct KortexTransport::Impl {
       : ip(std::move(ip_in)), user(std::move(user_in)), password(std::move(password_in)) {}
 
   // Refresh that re-sends current measured positions + zero torque, keeping the
-  // cyclic channel alive (used between per-actuator control-mode switches).
+  // cyclic channel alive (used between per-actuator control-mode switches). "Zero"
+  // means zero DELIVERED: the calibrated offset is sent, like every torque command.
   void pump() {
     for (int i = 0; i < n_; ++i) {
       cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
-      cmd_.mutable_actuators(i)->set_torque_joint(0.0f);
+      cmd_.mutable_actuators(i)->set_torque_joint(float(torque_offset_[i]));
     }
     fb_ = base_cyclic->Refresh(cmd_, 0);
   }

@@ -12,7 +12,7 @@ from gravity_id.urdf_write import LinkChange
 GATE_RMS = np.array([0.5, 0.5, 0.5, 0.5, 0.2, 0.2, 0.2])
 GATE_MAX = np.array([1.0, 1.0, 1.0, 1.0, 0.4, 0.4, 0.4])
 GATE_J2_REDUCTION = 0.5
-OFFSET_WARN = 0.3  # N*m: above this an offset matters, and it lands nowhere yet
+OFFSET_WARN = 0.3  # N*m: above this an offset matters; it lands in KortexTransport::set_torque_offset
 
 
 def _row(label: str, v: np.ndarray, fmt: str = "{:.3f}") -> str:
@@ -72,7 +72,7 @@ def render(arm: ArmModel, sel: Selection, family: str, changes: list[LinkChange]
         f"- `{c.link}`: mass {c.mass_old:.4f} -> {c.mass_new:.4f} kg, COM "
         f"{np.round(c.com_old, 5).tolist()} -> {np.round(c.com_new, 5).tolist()} m (link frame)"
         for c in changes
-    ] or ["- none (offsets are not a URDF quantity; see the spec's open decisions)"]
+    ] or ["- none (offsets are not a URDF quantity; they land in `--torque-offset`, below)"]
 
     rms, mx = sel.urdf_rms[family], sel.urdf_max[family]
     j2_drop = 1.0 - rms[1] / sel.urdf_rms["F0"][1] if sel.urdf_rms["F0"][1] > 0 else 0.0
@@ -97,8 +97,9 @@ def render(arm: ArmModel, sel: Selection, family: str, changes: list[LinkChange]
             [
                 f"**WARNING: offsets above {OFFSET_WARN} N*m on "
                 + ", ".join(f"j{i + 1} ({fit.offsets[i]:+.2f})" for i in big)
-                + ". They are real torque error the URDF cannot fix; where they land is an open "
-                "decision (spec). The gate below shows what remains without them.**",
+                + ". They are real torque error the URDF cannot fix: pass them as this arm's "
+                "`--torque-offset` (KortexTransport::set_torque_offset). Valid only if this data "
+                "was logged with NO offset set. The gate below shows what remains without them.**",
                 "",
             ]
             if len(big)
