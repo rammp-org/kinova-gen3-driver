@@ -1,0 +1,28 @@
+[project]
+name = "gravity-id"
+version = "0.1.0"
+description = "Offline gravity-model identification for the Kinova Gen3 driver"
+requires-python = ">=3.10,<3.13"
+# The Pinocchio stack is pinned exactly as .github/actions/setup-cpp-deps/requirements.txt
+# (what the robot runs). cmeel-urdfdom must be pinned too: libpinocchio 3.9.0 links
+# liburdfdom_sensor.so.4.0, and a free resolve picks urdfdom 6 and dies at import.
+dependencies = [
+    "pin==3.9.0",
+    "libpinocchio==3.9.0",
+    "cmeel-urdfdom==4.0.1",
+    "numpy",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gravity_id"]
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]
+filterwarnings = ["ignore:Please update your .hppfcl. imports:DeprecationWarning"]
