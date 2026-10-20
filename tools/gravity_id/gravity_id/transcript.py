@@ -91,7 +91,7 @@ def check_against_model(tables: list[Table], arm: ArmModel, tol: float = 0.02) -
         )
 
 
-def segment(tables: list[Table], tol_deg: float = 0.05, min_tables: int = 6, settle: int = 2) -> list[Hold]:
+def segment(tables: list[Table], tol_deg: float = 0.05, min_tables: int = 6, settle: int = 4) -> list[Hold]:
     """Group consecutive tables whose angles stay within tol of the run's first table."""
     tol = np.radians(tol_deg)
     runs: list[list[Table]] = []

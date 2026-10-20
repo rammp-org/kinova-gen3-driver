@@ -56,9 +56,10 @@ Then, in the Kinova Web App (Arm → angular control):
 
 1. Move to **home** and hold 10 s.
 2. For each row of `poses.csv` in order: enter the seven angles, let the move
-   finish, then **hold ≥ 5 s with nothing touching the arm**. The dry-run prints
-   every 0.5 s. The parser keeps a hold once it sees ≥ 4 s at rest and drops the
-   first second as settling.
+   finish, then **hold ≥ 6 s with nothing touching the arm**. The dry-run prints
+   every 0.5 s. The parser keeps a hold once it sees ≥ 5 s at rest, and drops the
+   first 2 s as settling. On dojo, Kinova's hold torque takes about 2 s to settle
+   after arriving.
 3. After pose 25, go **home** and hold 10 s. After the last pose, go **home**
    again and hold 10 s.
 4. Ctrl-C the dry-run.

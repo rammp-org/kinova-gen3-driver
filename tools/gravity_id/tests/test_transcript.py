@@ -61,7 +61,7 @@ def test_parse_skips_truncated_table(arm):
 def test_segment_finds_holds(arm):
     holds = segment(parse_tables(_transcript(arm, _three_holds(arm))))
     assert len(holds) == 3
-    assert [h.n for h in holds] == [8, 8, 8]  # 10 tables minus settle=2
+    assert [h.n for h in holds] == [6, 6, 6]  # 10 tables minus settle=4
     assert np.abs(np.degrees(holds[1].q - Q_B)).max() < 0.01
 
 
