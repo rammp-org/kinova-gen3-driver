@@ -43,6 +43,10 @@ class Selection:
     fits: dict[str, FamilyFit]
     val_rms: dict[str, np.ndarray] = field(default_factory=dict)  # per joint
     val_max: dict[str, np.ndarray] = field(default_factory=dict)
+    # What corrected.urdf alone delivers: the same residuals WITHOUT the fitted offsets,
+    # which the URDF cannot carry. The static gate is judged on these.
+    urdf_rms: dict[str, np.ndarray] = field(default_factory=dict)
+    urdf_max: dict[str, np.ndarray] = field(default_factory=dict)
     chosen: str = ""
 
 
@@ -106,6 +110,9 @@ def select(arm: ArmModel, holds: list[Hold]) -> Selection:
         err = np.array([predict(arm, fit, h.q) - h.tau for h in val_h])
         sel.val_rms[f] = np.sqrt(np.mean(err**2, axis=0))
         sel.val_max[f] = np.abs(err).max(axis=0)
+        err_urdf = err - fit.offsets
+        sel.urdf_rms[f] = np.sqrt(np.mean(err_urdf**2, axis=0))
+        sel.urdf_max[f] = np.abs(err_urdf).max(axis=0)
     ok = [f for f in FAMILIES if sel.fits[f].rejected is None]  # F0 is never rejected
     total = {f: float(np.sqrt(np.mean(sel.val_rms[f] ** 2))) for f in ok}
     best = min(total.values())

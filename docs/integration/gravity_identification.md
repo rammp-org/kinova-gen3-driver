@@ -38,8 +38,10 @@ uv run python -m gravity_id posegrid --urdf robot.urdf --ee-frame arm_end_effect
 
 `poses.csv` holds 50 poses (`fit` and `val`), ordered to cut travel, with
 angles in degrees. Every joint origin and the EE sit at least `z_min` above
-the base. That is a geometric floor, not a collision check: **look at each
-pose before sending it**.
+the base, at the poses themselves. That is a geometric floor, not a
+collision check. It checks neither the path the Web App takes between poses
+nor the gripper and camera beyond the EE frame. **Look at each pose before
+sending it, run the Web App at low speed, and watch every move.**
 
 ## D1 — the pose grid (≈ 45 min)
 
@@ -112,8 +114,14 @@ to compare with D3), the URDF edits, and the static gate. Attach `report.md`,
 
 ## V — validation
 
-**Static gate.** Read it from `report.md`, or better, from a fresh grid on another
-day (`posegrid --seed 1`, D1 again, `fit` against the corrected URDF):
+**Static gate.** `report.md`'s gate section judges `corrected.urdf` alone.
+Fitted offsets are not in the URDF, so they are left out, and the report warns
+when any offset exceeds 0.3 N·m. The stronger check is a fresh grid on another
+day, with **`corrected.urdf` as the model throughout**: `posegrid --seed 1`,
+then D1's dry-run with `--urdf corrected.urdf` (`parse` refuses a mismatch),
+then `parse` and `fit` with it too. Read the **F0** rows: F0 is the corrected
+URDF as-is. On that day the "j2 drops ≥ 50 %" rule does not apply, because it
+compares against the original model, which is not in play. The limits are:
 
 | Joints | Held-out RMS | Held-out max |
 |---|---|---|

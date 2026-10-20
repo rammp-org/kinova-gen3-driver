@@ -51,3 +51,25 @@ def test_untouched_bodies_unchanged(arm, tmp_path):
     write_corrected_urdf(FIXTURE_URDF, FIXTURE_EE, point_mass(7, 0.1, np.zeros(3)), str(out))
     for name in ("gen3_shoulder_link", "gen3_forearm_link", "wrist_camera_mount_link"):
         assert ET.tostring(_link(out, name)) == ET.tostring(_link(FIXTURE_URDF, name))
+
+
+def test_never_writes_behind_a_locked_joint(tmp_path):
+    # A heavy finger behind a REVOLUTE joint (locked at q = 0 by the reduction) is in body
+    # 7's merged inertia, but a correction written there would move with the finger.
+    tree = ET.parse(FIXTURE_URDF)
+    root = tree.getroot()
+    root.append(ET.fromstring(
+        '<link name="finger"><inertial><mass value="3.0"/>'
+        '<inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/></inertial></link>'))
+    root.append(ET.fromstring(
+        '<joint name="fj" type="revolute"><parent link="gen3_robotiq_85_base_link"/><child link="finger"/>'
+        '<origin xyz="0.03 0.01 0.06" rpy="0.4 -0.2 1.0"/><axis xyz="0 0 1"/>'
+        '<limit lower="-0.5" upper="0.8" effort="1" velocity="1"/></joint>'))
+    src = tmp_path / "finger.urdf"
+    tree.write(src)
+    arm = ArmModel.load(str(src), FIXTURE_EE)
+    dpi = point_mass(7, 0.3, np.array([0.02, 0.01, 0.05]))
+    changes = write_corrected_urdf(str(src), FIXTURE_EE, dpi, str(tmp_path / "out.urdf"))
+    assert [c.link for c in changes] == ["gen3_robotiq_85_base_link"]
+    new = ArmModel.load(str(tmp_path / "out.urdf"), FIXTURE_EE)
+    assert np.abs(new.params() - arm.params() - dpi).max() < 1e-9

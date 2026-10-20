@@ -12,6 +12,7 @@ from gravity_id.urdf_write import LinkChange
 GATE_RMS = np.array([0.5, 0.5, 0.5, 0.5, 0.2, 0.2, 0.2])
 GATE_MAX = np.array([1.0, 1.0, 1.0, 1.0, 0.4, 0.4, 0.4])
 GATE_J2_REDUCTION = 0.5
+OFFSET_WARN = 0.3  # N*m: above this an offset matters, and it lands nowhere yet
 
 
 def _row(label: str, v: np.ndarray, fmt: str = "{:.3f}") -> str:
@@ -73,12 +74,17 @@ def render(arm: ArmModel, sel: Selection, family: str, changes: list[LinkChange]
         for c in changes
     ] or ["- none (offsets are not a URDF quantity; see the spec's open decisions)"]
 
-    rms, mx = sel.val_rms[family], sel.val_max[family]
-    j2_drop = 1.0 - rms[1] / sel.val_rms["F0"][1] if sel.val_rms["F0"][1] > 0 else 0.0
+    rms, mx = sel.urdf_rms[family], sel.urdf_max[family]
+    j2_drop = 1.0 - rms[1] / sel.urdf_rms["F0"][1] if sel.urdf_rms["F0"][1] > 0 else 0.0
+    big = np.flatnonzero(np.abs(fit.offsets) > OFFSET_WARN)
     ok = bool(np.all(rms <= GATE_RMS) and np.all(mx <= GATE_MAX))
     out += [
         "",
-        "## Static gate (held-out poses)",
+        "## Static gate (held-out poses, corrected.urdf alone)",
+        "",
+        "Judged on what `corrected.urdf` delivers: the fitted offsets are NOT in it (a URDF "
+        "cannot carry them), so they are left out of these residuals. The family tables above "
+        "include them, because that is the fair way to compare families.",
         "",
         f"| | {joints} |",
         sep,
@@ -87,6 +93,17 @@ def render(arm: ArmModel, sel: Selection, family: str, changes: list[LinkChange]
         _row("max", mx),
         _row("max limit", GATE_MAX, "{:.1f}"),
         "",
+        *(
+            [
+                f"**WARNING: offsets above {OFFSET_WARN} N*m on "
+                + ", ".join(f"j{i + 1} ({fit.offsets[i]:+.2f})" for i in big)
+                + ". They are real torque error the URDF cannot fix; where they land is an open "
+                "decision (spec). The gate below shows what remains without them.**",
+                "",
+            ]
+            if len(big)
+            else []
+        ),
         f"Per-joint limits: {'PASS' if ok else 'FAIL'}. j2 RMS reduction vs F0: {j2_drop:.0%} "
         f"(needs >= {GATE_J2_REDUCTION:.0%}; if F0 already passes the limits, the model was fine "
         "and drift is the damping = 0 cause). Limits are loosened to 2x the measured repeatability "

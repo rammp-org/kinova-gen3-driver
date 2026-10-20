@@ -35,6 +35,22 @@ def _inertial(link: ET.Element) -> tuple[float, np.ndarray]:
     return float(inertial.find("mass").get("value")), xyz
 
 
+def _rigid_links(root: ET.Element, arm_joint: str) -> set[str]:
+    """Links joined to `arm_joint`'s child by fixed joints only. Links behind a joint the
+    driver merely LOCKS (gripper fingers at q = 0) are excluded: a correction written there
+    would be right for the driver and wrong for anyone who moves the fingers."""
+    joints = root.findall("joint")
+    child = next(j.find("child").get("link") for j in joints if j.get("name") == arm_joint)
+    out, frontier = {child}, [child]
+    while frontier:
+        parent = frontier.pop()
+        for j in joints:
+            if j.get("type") == "fixed" and j.find("parent").get("link") == parent:
+                out.add(j.find("child").get("link"))
+                frontier.append(j.find("child").get("link"))
+    return out
+
+
 def write_corrected_urdf(urdf_in: str, ee_frame: str, dpi: np.ndarray, urdf_out: str) -> list[LinkChange]:
     arm = ArmModel.load(urdf_in, ee_frame)
     tree = ET.parse(urdf_in, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)))
@@ -45,7 +61,8 @@ def write_corrected_urdf(urdf_in: str, ee_frame: str, dpi: np.ndarray, urdf_out:
         dm, dh = dpi[k], dpi[k + 1 : k + 4]
         if dm == 0.0 and not dh.any():
             continue
-        group = [f for f in arm.model.frames if f.type == pin.FrameType.BODY and f.parentJoint == j and f.name in links]
+        rigid = _rigid_links(tree.getroot(), arm.joint_names[j - 1])
+        group = [f for f in arm.model.frames if f.type == pin.FrameType.BODY and f.parentJoint == j and f.name in rigid]
         frame = max(group, key=lambda f: _inertial(links[f.name])[0])
         m, c = _inertial(links[frame.name])
         if m <= 0.0:
