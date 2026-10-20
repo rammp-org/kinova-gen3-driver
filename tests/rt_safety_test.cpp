@@ -31,7 +31,9 @@ using namespace kinova;
 // sees zero NEW major faults. The shared atomics carry the readings back to the
 // test thread for assertions.
 namespace {
-void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
+// live_damping: a non-RT thread retunes the damping every ~1 ms throughout the
+// measured window (the ROS node's live parameter path), which must stay RT-safe.
+void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn, bool live_damping = false) {
   JointFeedback init;
   init.q.setZero();
   SimTransport t(init);
@@ -74,8 +76,15 @@ void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
       std::this_thread::sleep_for(std::chrono::milliseconds(500));
       measure_stop.store(true);
     });
+    std::thread tuner([&] {
+      for (int k = 0; live_damping && !measure_stop.load(); ++k) {
+        mode.set_damping(k % 2 ? 5.0 : 0.5);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
     ex.run(measure_stop);
     measure_watch.join();
+    tuner.join();
 
     // Final reading on the same loop thread.
     ResourceUsage u1 = read_usage();
@@ -96,6 +105,11 @@ void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
 TEST(RtSafety, NoMajorFaultsSteadyState) {
   Dynamics dyn(URDF_PATH);
   expect_grav_comp_steady_state_rt_safe(dyn);
+}
+
+TEST(RtSafety, LiveDampingChangesNoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  expect_grav_comp_steady_state_rt_safe(dyn, /*live_damping=*/true);
 }
 
 TEST(RtSafety, ReducedTiltedModelNoMajorFaultsSteadyState) {

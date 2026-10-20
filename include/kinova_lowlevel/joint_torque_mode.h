@@ -8,8 +8,11 @@
 namespace kinova {
 
 struct JointTorqueParams {
+  // Ceiling on damping (here and in set_damping): far above any useful value,
+  // low enough to catch a typo before it brakes the arm solid.
+  static constexpr double kMaxDamping = 50.0;
   double scale = 1.0;    // gravity scale
-  double damping = 0.0;  // joint velocity damping (N·m·s/rad)
+  double damping = 0.0;  // joint velocity damping (N·m·s/rad), 0..kMaxDamping; live via set_damping
   // Per-joint ceiling on the TOTAL output. The URDF gives joints 5-7 an effort
   // limit of 9 N·m; a single scalar sized for the proximal joints would overrun
   // the wrist by 4x. Mirrors JointImpedanceParams::torque_limit.
@@ -36,6 +39,13 @@ class JointTorqueMode : public ControlMode {
   // Non-RT: call from a single supervisor thread.
   void set_torque(const JointVec& tau_ff) noexcept;
 
+  // Non-RT, any time (also while the mode is active): the damping the next
+  // compute() uses. Throws std::invalid_argument -- and keeps the old value --
+  // unless finite and in [0, JointTorqueParams::kMaxDamping]. Damping only ever
+  // opposes motion, so a step either way never injects torque.
+  void set_damping(double d);
+  double damping() const noexcept { return damping_.load(std::memory_order_relaxed); }
+
   // Non-RT: re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores
   // this mode's own configured default (cmd_timeout_s), which is how a closing
   // streaming session hands the mode back to its own supervision.
@@ -48,6 +58,10 @@ class JointTorqueMode : public ControlMode {
   // tau_ff publication: single writer (set_torque) -> single reader (compute).
   JointVec tau_ff_buf_[2];
   std::atomic<int> tau_ff_active_{0};
+
+  // Live damping: one writer (set_damping), read once per compute(). A lone
+  // double needs no two-buffer scheme; lock-free is asserted in the .cpp.
+  std::atomic<double> damping_;
 
   // Staleness detection; the RESPONSE (the decay ramp below) stays here because
   // it is this mode's contract, not shared behaviour.

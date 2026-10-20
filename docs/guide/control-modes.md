@@ -62,7 +62,12 @@ compensation. `benchmark_grav_comp` runs exactly this zero-feedforward path.
 - **`scale`** — fraction of gravity to apply. `1.0` floats the arm; `0.5` makes it
   sag gently. Start at `0.5` on new hardware: a gentle, predictable sag confirms
   the torque sign and magnitude before you trust full compensation.
-- **`damping`** — adds a little joint-velocity damping to take the edge off.
+- **`damping`** — joint-velocity damping, on every joint (`−damping·q̇`). It is
+  **live**: `set_damping()` changes it while the mode runs, and the next cycle uses
+  it. At `0`, any leftover torque error (model or sensor offset) turns into drift
+  instead of settling. On dojo, with the sensor offsets calibrated, damping 10 felt
+  smooth hand-guided, and at 0 only j2 drifted (6.8° in 2 s). Damping only ever
+  opposes motion, so changing it mid-motion never injects torque.
 - **`tau_ff`** — an optional feedforward torque published via `set_torque()` from
   a single non-RT supervisor thread. If no fresh command arrives within
   `cmd_timeout_s`, a watchdog ramps it to zero over `cmd_decay_s`, reverting to

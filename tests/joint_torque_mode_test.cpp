@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
 using namespace kinova;
 
 // With no feedforward ever set, JointTorqueMode must reproduce gravity-comp:
@@ -42,6 +44,48 @@ TEST(JointTorque, DampingSubtractsVelocityTerm) {
   JointVec g;
   dyn.gravity(fb.q, g);
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i] - 2.0 * 1.0, 1e-6);
+}
+
+// Damping is live-tunable from a non-RT thread: the next compute uses the new value.
+TEST(JointTorque, SetDampingTakesEffectNextCompute) {
+  Dynamics dyn(URDF_PATH);
+  JointTorqueMode m(dyn, {1.0, 2.0, JointVec::Constant(1e9)});
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setConstant(1.0);
+  JointCommand c;
+  m.on_enter(fb);
+  JointVec g;
+  dyn.gravity(fb.q, g);
+  m.compute(fb, 0.001, c);
+  EXPECT_NEAR(c.torque[1], g[1] - 2.0, 1e-6);
+  m.set_damping(5.0);
+  EXPECT_DOUBLE_EQ(m.damping(), 5.0);
+  m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i] - 5.0, 1e-6);
+  m.set_damping(0.0);
+  m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i], 1e-6);
+}
+
+// A bad value is refused loudly and the old value keeps running.
+TEST(JointTorque, SetDampingRejectsInvalidAndKeepsOldValue) {
+  Dynamics dyn(URDF_PATH);
+  JointTorqueMode m(dyn, {1.0, 3.0, JointVec::Constant(1e9)});
+  for (double bad : {-0.1, std::nan(""), std::numeric_limits<double>::infinity(),
+                     JointTorqueParams::kMaxDamping + 1.0}) {
+    EXPECT_THROW(m.set_damping(bad), std::invalid_argument) << bad;
+    EXPECT_DOUBLE_EQ(m.damping(), 3.0);
+  }
+  EXPECT_NO_THROW(m.set_damping(JointTorqueParams::kMaxDamping));
+}
+
+// Same posture at construction: a nonsense damping fails at startup, not at 1 kHz.
+TEST(JointTorque, ConstructorRejectsInvalidDamping) {
+  Dynamics dyn(URDF_PATH);
+  EXPECT_THROW(JointTorqueMode(dyn, {1.0, -1.0, JointVec::Constant(39.0)}), std::invalid_argument);
+  EXPECT_THROW(JointTorqueMode(dyn, {1.0, std::nan(""), JointVec::Constant(39.0)}),
+               std::invalid_argument);
 }
 
 TEST(JointTorque, FeedforwardAddsToGravity) {
