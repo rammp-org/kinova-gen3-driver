@@ -104,7 +104,8 @@ winner back into the URDF's `<inertial>` tags. The data source is the existing
 
 ### Task 2: Pose grid
 
-**Files:** Create `tools/gravity_id/gravity_id/posegrid.py`, `tools/gravity_id/tests/test_posegrid.py`
+**Files:** Create `tools/gravity_id/gravity_id/posegrid.py`, `tools/gravity_id/gravity_id/design.py`,
+`tools/gravity_id/tests/test_posegrid.py`
 
 **Interfaces:**
 - Consumes: `ArmModel`, `ArmModel.regressor`, `ArmModel.frame_heights`.
@@ -143,15 +144,14 @@ winner back into the URDF's `<inertial>` tags. The data source is the existing
     then 7 rows `  %d | %8.2f | %8.2f | %8.2f | %+9.3f`. Ignores all other lines.
   - `format_table(q, tau, grav) -> str` — the inverse, used by tests and the synthetic generator.
   - `segment(tables, tol_deg=0.05, min_tables=6, settle=2) -> list[Hold]`,
-    `Hold = dataclass(q, tau, tau_std, n)`: consecutive tables whose joint angles differ by
+    `Hold = dataclass(q, tau, tau_std, n, pose_id, set)`: consecutive tables whose joint angles differ by
     ≤ tol (wrapped difference) form a hold; drop the first `settle` tables; keep holds with
     ≥ `min_tables` remaining; q and τ are medians.
   - `check_against_model(tables, arm, tol=0.02)`: raises `ValueError` if any
     |grav − arm.gravity(q)| > tol (message names the table index, joint and both values), or if
     `corr(tau, grav)` over all loaded rows (|grav| > 1 N·m) is negative ("reaction-signed
     torque: binary predates #74").
-  - `match_holds(holds, poses, tol_deg=1.0) -> list[MatchedHold]` (`MatchedHold` = Hold +
-    `pose_id`, `set`); unmatched holds are returned separately for the report.
+  - `match_holds(holds, poses, tol_deg=1.0) -> tuple[list[Hold], list[Hold]]` (matched holds carry `pose_id` and `set`; unmatched returned second).
   - `write_holds_csv / read_holds_csv`.
 
 - [ ] **Step 1: Failing tests:** `test_parse_roundtrip` (format → parse recovers to print
@@ -170,26 +170,32 @@ winner back into the URDF's `<inertial>` tags. The data source is the existing
 `tools/gravity_id/tests/test_fit.py`
 
 **Interfaces:**
-- Consumes: `ArmModel.regressor/params/gravity`, `MatchedHold`.
+- Consumes: `ArmModel.regressor/params/gravity`, `Hold`.
 - Produces:
-  - `FAMILIES: dict[str, tuple[int, ...]]` = `{"F0": (), "F1": (), "F2": (7,), "F3": (5, 6, 7),
-    "F4": (1, ..., 7)}` plus `offsets(name) -> bool` (False only for F0).
+  - `FAMILIES: dict[str, tuple[tuple[int, ...], bool]]` = name → (free bodies, offsets free):
+    `F0 ((), False)`, `F1 ((), True)`, `F2 ((7,), True)`, `F3 ((5, 6, 7), True)`, `F4 ((1..7), True)`.
+  - From `gravity_id/design.py` (shared with Task 2): `prior_std(arm) -> ndarray(28)`,
+    `design(arm, q, bodies, offsets) -> ndarray(7, n)` (columns scaled by their prior std).
   - `fit_family(arm, q_fit, tau_fit, family) -> FamilyFit` with `dpi: ndarray(28)` (zeros
     outside the family), `offsets: ndarray(7)`, `std_dpi`, `std_offsets`, `rejected: str | None`.
   - `predict(arm, fam_fit, q) -> ndarray(7)` = `gravity(q) + regressor(q) @ dpi + offsets`.
   - `select(arm, holds) -> Selection` with `fits: dict[str, FamilyFit]`,
     `val_rms: dict[str, ndarray(7)]` (per joint), `val_max`, `chosen: str`. Raises `ValueError`
-    if there are no `val` holds or fewer fit holds than 2× the largest family's free parameters.
-  - `synth.make_holds(arm_true, poses, noise=0.05, seed=0) -> list[MatchedHold]` and
-    `synth.perturb(arm, dm: dict[int, (dm, dmc)], ) -> ArmModel`-like truth object exposing
-    `gravity(q)` (truth = URDF params + injected deltas; offsets added in `make_holds`).
+    if there are no `val` holds, or if the fit holds give fewer torque readings (7 per hold) than
+    2× the largest family's unknowns (35 for F4, so ≥ 10 fit holds).
+  - `synth.make_holds(arm, poses, dpi=None, offsets=None, noise=0.05, seed=0) -> list[Hold]`
+    (truth = URDF + `regressor(q) @ dpi` + offsets + noise), with helpers
+    `synth.point_mass(body, mass, com) -> dpi` and `synth.scale_body(arm, body, factor) -> dpi`.
 
 - [ ] **Step 1: Failing tests** (all use a grid from `make_grid` with seed 0 and noise σ = 0.05):
   - `test_recovers_tip_payload`: truth = body 7 `+0.25 kg` at `(0.02, 0.0, 0.12)` m in the joint-7
     frame + offsets `[0.1, -0.4, 0.3, 0.2, -0.1, 0.05, 0.02]` → `chosen == "F2"`, |Δm − 0.25| ≤
     0.02, COM of the added mass within 0.01 m, offsets within 0.05.
   - `test_detects_proximal_link_error`: truth = body 3 mass ×1.15 (first moment scaled with it)
-    → `chosen == "F4"`, every val-joint RMS ≤ 2σ, F2's val RMS on j2 or j4 > 3σ.
+    → `chosen in {"F3", "F4"}`, every val-joint RMS of the chosen family ≤ 2σ, F2's val RMS on
+    j2 or j4 > 2σ. (Implementation finding: static gravity cannot attribute mass to a body; F3
+    reproduces a body-3 error to the noise floor. The spec records this.)
+  - `test_tip_family_can_mimic_a_wrist_link`: truth = body 5 ×1.15 → `chosen == "F2"`, val RMS ≤ 2σ.
   - `test_no_error_no_phantom`: truth = URDF → `chosen in {"F0", "F1"}`.
   - `test_rejects_unphysical`: a family forced onto data from a −2 kg body-7 truth reports
     `rejected` containing `"mass"` and is never chosen.

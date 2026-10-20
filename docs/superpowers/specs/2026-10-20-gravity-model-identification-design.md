@@ -375,8 +375,10 @@ injected errors, with Gaussian noise σ = 0.05 N·m:
 
 - tip payload +0.25 kg off-axis, plus offsets → F2 chosen; mass within
   0.02 kg, COM within 1 cm, offsets within 0.05 N·m;
-- a proximal link 15 % heavy → F2 rejected on held-out residual, F4 chosen,
-  held-out RMS ≤ 2σ;
+- a proximal link (body 3) 15 % heavy → F2 cannot reach the noise floor,
+  F3 or F4 is chosen, held-out RMS ≤ 2σ;
+- a wrist link (body 5) 15 % heavy → F2 is chosen and reaches the noise floor.
+  This is pinned so nobody reads "F2 chosen" as proof of a tip payload;
 - no error → F0 or F1 chosen (no phantom payload);
 - the corrected URDF round-trips to the fitted `g(q)`.
 
