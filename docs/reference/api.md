@@ -168,7 +168,7 @@ struct CartesianImpedanceParams {
   bool    nullspace_on = true;
   double  pinv_damping = 1e-3;            // λ for the damped pseudo-inverse
   double  torque_limit = 39.0;            // per-joint clamp (N·m)
-  double  gain_ramp_s  = 0.5;             // active-wrench fade-in window (s)
+  double  gain_ramp_s  = 0.1;             // active-wrench fade-in window (s)
 };
 
 CartesianImpedanceMode(Dynamics& dyn, CartesianImpedanceParams p = {});

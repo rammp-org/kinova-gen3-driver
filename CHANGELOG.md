@@ -134,7 +134,14 @@ that heading to the new version and bumps `package.xml`.
   for the whole switch on every gravity-comp or impedance start. On a mode change
   the executor now runs the incoming mode's `on_enter` and first `compute` before
   switching, and the transport sends that command throughout the switch and on
-  the first cycle after it.
+  the first cycle after it. It also switches the least-loaded actuators first, so
+  the joints carrying the arm stay stiff in position mode until the end. Measured
+  on dojo (with the ramp change below), peak EE sag at startup fell from 46–61 mm
+  to 0.2–3.2 mm across gravity comp, Cartesian impedance and joint impedance.
+- **Impedance entry ramp default 0.5 s → 0.1 s** (`gain_ramp_s`, both impedance
+  modes). With the bumpless switch the entry error is a fraction of a millimetre,
+  and the long ramp left the spring too weak to stop small creep. Joint
+  impedance startup creep on dojo: 3.6 mm → 0.2 mm.
 - **Breaking (`Transport`):** `set_actuator_modes(modes, hold)` takes the command
   to send during the switch. Custom transports and decorators must forward it.
 
