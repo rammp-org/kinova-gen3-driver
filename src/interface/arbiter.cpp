@@ -29,7 +29,8 @@ bool Arbiter::admit(const Token& t) const {
 
 GrantResult Arbiter::grant(const std::string& owner_id, const std::optional<Token>& token) {
   // All-zero is the no-owner sentinel and what an untokened command carries.
-  // Refused before anything changes, so a bad request never halts the current owner.
+  // Refused before anything changes, so a bad request never halts the current owner
+  // (and before the e-stop check: the request is invalid in any state).
   if (token && *token == Token{}) return {false, Token{}, status().generation, "all-zero token"};
   bool need_halt = false;
   {
