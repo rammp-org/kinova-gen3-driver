@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Batch 2: read-only logger + Kinova high-level moves through the grid, both-sided approaches.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 M="python3 move.py --speed 15 --hold 6 --bidirectional 5"
 (nohup ./dryrun.sh d1.txt 0 > /dev/null 2>&1 &)

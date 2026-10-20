@@ -333,7 +333,6 @@ int main(int argc, char** argv) {
   RtExecutor ex(t, ring, {rate_hz, pacing, {rt_priority, cpu, true}});
   ex.request_mode(&mode);
 
-
   std::thread watchdog;
   if (duration_s > 0.0) {
     watchdog = std::thread([&] {
