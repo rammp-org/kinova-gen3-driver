@@ -61,11 +61,12 @@ that heading to the new version and bumps `package.xml`.
   `grant(owner_id, token)` adopts the caller's key, so an orchestrator can share
   one key across several capabilities. Omitted, the driver mints one as
   before. An all-zero token is refused without disturbing the current owner.
-  Existing `grant(owner_id)` calls compile unchanged; `ArbitrationSink`
-  implementers (e.g. test fakes) must update their override signature.
 
 ### Changed
 
+- **Breaking for `ArbitrationSink` implementers:** the override is now
+  `grant(const std::string&, const std::optional<Token>& = std::nullopt)` (#89).
+  Callers are unaffected.
 - CI builds against Pinocchio 3.9.0, the exact cmeel set the robot runs
   (`.github/actions/setup-cpp-deps/requirements.txt`, mirroring kinova-gen3-ros2's
   `docker/requirements.txt`), instead of 2.7.0.
