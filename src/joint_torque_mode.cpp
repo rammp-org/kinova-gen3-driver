@@ -2,10 +2,26 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace kinova {
 
-JointTorqueMode::JointTorqueMode(Dynamics& dyn, JointTorqueParams p) : dyn_(dyn), p_(p) {
+static_assert(std::atomic<double>::is_always_lock_free,
+              "JointTorqueMode::damping_ is read in compute(); it must be lock-free");
+
+namespace {
+void check_damping(double d) {
+  if (!std::isfinite(d) || d < 0.0 || d > JointTorqueParams::kMaxDamping)
+    throw std::invalid_argument("JointTorqueMode: damping " + std::to_string(d) +
+                                " N*m*s/rad is not finite and in [0, " +
+                                std::to_string(JointTorqueParams::kMaxDamping) + "]");
+}
+}  // namespace
+
+JointTorqueMode::JointTorqueMode(Dynamics& dyn, JointTorqueParams p)
+    : dyn_(dyn), p_(p), damping_(p.damping) {
+  check_damping(p_.damping);
   tau_ff_buf_[0].setZero();
   tau_ff_buf_[1].setZero();
   g_.setZero();
@@ -33,6 +49,11 @@ void JointTorqueMode::set_torque(const JointVec& tau_ff) noexcept {
 }
 
 // s >= 0 arms with s; s < 0 restores this mode's own configured default.
+void JointTorqueMode::set_damping(double d) {
+  check_damping(d);
+  damping_.store(d, std::memory_order_relaxed);
+}
+
 void JointTorqueMode::set_command_timeout(double s) noexcept {
   wd_.arm(s >= 0.0 ? s : p_.cmd_timeout_s);
 }
@@ -92,7 +113,7 @@ void JointTorqueMode::compute(const JointFeedback& fb, double dt_s, JointCommand
 
   // --- compose and clamp ----------------------------------------------------
   dyn_.gravity(fb.q, g_);  // RT-safe: no alloc
-  tau_ = p_.scale * g_ - p_.damping * fb.qd + tau_ff_applied_;
+  tau_ = p_.scale * g_ - damping_.load(std::memory_order_relaxed) * fb.qd + tau_ff_applied_;
   for (int i = 0; i < kNumJoints; ++i) {
     tau_[i] = std::clamp(tau_[i], -p_.torque_limit[i], p_.torque_limit[i]);
   }

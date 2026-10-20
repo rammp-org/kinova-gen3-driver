@@ -14,6 +14,10 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- `JointTorqueMode::set_damping` / `damping()`: joint-torque damping is live-tunable
+  from a non-RT thread (a lock-free atomic that `compute()` reads once per cycle).
+  `JointTorqueParams::kMaxDamping` (50 N·m·s/rad) caps it. The constructor now rejects
+  a non-finite, negative or over-cap `damping` with `std::invalid_argument`.
 - `Dynamics` builds from URDF XML (`UrdfXml`) and reduces any model to the root→EE chain,
   locking other joints at zero, so the articulated description is accepted.
   `Dynamics::joint_names()` returns the arm's joints in chain order.
