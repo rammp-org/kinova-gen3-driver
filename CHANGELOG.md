@@ -63,6 +63,12 @@ that heading to the new version and bumps `package.xml`.
   keepalive threads are left alone. Without this it was a normal thread on any
   core, preempted ~10k times in 30 min under perception load (#97). The apps
   pass `--rt-priority - 1` and `--cpu`. New `raise_thread()` in `rt_system`.
+- `ArbitrationSink::grant` takes an optional pre-generated token (#89):
+  `grant(owner_id, token)` adopts the caller's key, so an orchestrator can share
+  one key across several capabilities. Omitted, the driver mints one as
+  before. An all-zero token is refused without disturbing the current owner.
+  Existing `grant(owner_id)` calls compile unchanged; `ArbitrationSink`
+  implementers (e.g. test fakes) must update their override signature.
 
 ### Changed
 

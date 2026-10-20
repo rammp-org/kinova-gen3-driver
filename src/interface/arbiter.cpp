@@ -27,7 +27,10 @@ bool Arbiter::admit(const Token& t) const {
   return owned_ && t == token_;
 }
 
-GrantResult Arbiter::grant(const std::string& owner_id) {
+GrantResult Arbiter::grant(const std::string& owner_id, const std::optional<Token>& token) {
+  // All-zero is the no-owner sentinel and what an untokened command carries.
+  // Refused before anything changes, so a bad request never halts the current owner.
+  if (token && *token == Token{}) return {false, Token{}, status().generation, "all-zero token"};
   bool need_halt = false;
   {
     std::lock_guard<std::mutex> l(m_);
@@ -44,7 +47,7 @@ GrantResult Arbiter::grant(const std::string& owner_id) {
   std::lock_guard<std::mutex> l(m_);
   if (estopped_.load(std::memory_order_acquire))
     return {false, Token{}, generation_, "e-stopped"};  // raced an estop in the halt window
-  token_ = mint();
+  token_ = token ? *token : mint();
   owned_ = true;
   owner_id_ = owner_id;
   ++generation_;

@@ -15,7 +15,7 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 
 ## The token lifecycle
 
-- **The driver mints tokens**, not the orchestrator. `grant(owner_id)` returns a
+- **By default the driver mints tokens**, not the orchestrator. `grant(owner_id)` returns a
   fresh random 128-bit token. This makes the handover ordering race impossible:
   the orchestrator has nothing to hand a module until the driver has already
   issued it, so a module can never start commanding before the driver knows
@@ -25,6 +25,14 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 - **A driver restart voids every token.** After a restart the arm's state is
   unknown and nothing should hold ownership across it — the orchestrator must
   re-grant.
+- **The orchestrator may bring its own key.** `grant(owner_id, token)` adopts
+  the given token instead of minting one, so an orchestrator can share one key
+  across several capabilities. Doing so gives up the two guarantees above.
+  First, a module handed the key before the grant lands is refused until it
+  does. Second, re-granting the same key does not lock out a zombie that still
+  holds it. Re-granting is still revoke-then-grant, so the arm halts either
+  way. An all-zero token is refused, and the current owner keeps the arm,
+  because all-zero is what an untokened command carries.
 - **`generation`** increments per grant. It is not used for the check (a stale
   token already fails to match); it exists so a rejection is diagnosable.
 
