@@ -442,7 +442,7 @@ implements them.
 
 | Method | Effect |
 |---|---|
-| `GrantResult grant(const std::string& owner_id)` | mints and returns a fresh token; halts first if the arm was already owned; refused while e-stopped |
+| `GrantResult grant(const std::string& owner_id, const std::optional<Token>& token = std::nullopt)` | mints and returns a fresh token, or adopts `token` if given (an all-zero one is refused); halts first if the arm was already owned; refused while e-stopped |
 | `void revoke()` | drops the grant and halts (`kOwnershipRevoked`) |
 | `void estop()` | drops all grants, halts (`kEmergencyStop`), and **latches** |
 | `void estop_clear()` | leaves the latch, to *no owner*; works in any mode |

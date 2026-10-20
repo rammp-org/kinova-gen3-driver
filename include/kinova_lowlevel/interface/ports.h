@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include <string>
 
 #include "kinova_lowlevel/interface/value_types.h"
@@ -44,7 +45,10 @@ class CommandSink {
 class ArbitrationSink {
  public:
   virtual ~ArbitrationSink() = default;
-  virtual GrantResult grant(const std::string& owner_id) = 0;
+  // token unset -> the driver mints a fresh one. Set -> the caller's key is adopted
+  // (e.g. one key shared across several capabilities); all-zero is refused.
+  virtual GrantResult grant(const std::string& owner_id,
+                            const std::optional<Token>& token = std::nullopt) = 0;
   virtual void revoke() = 0;
   virtual void estop() = 0;
   virtual void estop_clear() = 0;

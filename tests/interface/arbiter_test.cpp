@@ -161,6 +161,44 @@ TEST(Arbiter, StaleTokenRejectedAfterRegrant) {  // the zombie-node case
   EXPECT_EQ(sink.goals, 0);
 }
 
+// An orchestrator that shares one key across several capabilities supplies it
+// instead of taking a minted one (#89).
+TEST(Arbiter, GrantAdoptsAPresuppliedToken) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
+  Token key{};
+  key[3] = 0x5A;
+  const GrantResult g = arb.grant("orchestrator", key);
+  ASSERT_TRUE(g.accepted);
+  EXPECT_EQ(g.token, key);
+  EXPECT_EQ(g.generation, 1u);
+  EXPECT_EQ(arb.on_trajectory_goal(goal_with(key)), GoalResponse::kAccept);
+  EXPECT_EQ(sink.goals, 1);
+
+  // Re-granting the SAME key is still revoke-then-grant: the arm halts.
+  const GrantResult again = arb.grant("orchestrator", key);
+  ASSERT_TRUE(again.accepted);
+  EXPECT_EQ(again.generation, 2u);
+  ASSERT_EQ(sink.halts.size(), 1u);
+  EXPECT_EQ(sink.halts[0], HaltReason::kOwnershipRevoked);
+}
+
+// All-zero is the "no owner" sentinel and what an untokened command carries;
+// adopting it would admit every such command. Refused BEFORE anything changes:
+// the current owner keeps the arm and nothing halts.
+TEST(Arbiter, GrantRefusesAnAllZeroPresuppliedToken) {
+  RecordingSink sink;
+  Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};
+  const Token owner = arb.grant("planner").token;
+  const GrantResult g = arb.grant("orchestrator", Token{});
+  EXPECT_FALSE(g.accepted);
+  EXPECT_EQ(g.token, (Token{}));
+  EXPECT_TRUE(sink.halts.empty());
+  EXPECT_EQ(arb.status().owner_id, "planner");
+  EXPECT_EQ(arb.status().generation, 1u);
+  EXPECT_EQ(arb.on_trajectory_goal(goal_with(owner)), GoalResponse::kAccept);
+}
+
 TEST(Arbiter, QueryStateIsNeverGated) {
   RecordingSink sink;
   Arbiter arb{sink, sink, sink, ArbitrationMode::kEnforced, 1234};

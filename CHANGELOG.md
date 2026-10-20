@@ -57,6 +57,12 @@ that heading to the new version and bumps `package.xml`.
   latches the newest target each cycle), feeding forward the rate the
   reference actually advanced at — equal to the commanded rate in free
   motion, zero once the leash pins against a blocked arm.
+- `ArbitrationSink::grant` takes an optional pre-generated token (#89):
+  `grant(owner_id, token)` adopts the caller's key, so an orchestrator can share
+  one key across several capabilities. Omitted, the driver mints one as
+  before. An all-zero token is refused without disturbing the current owner.
+  Existing `grant(owner_id)` calls compile unchanged; `ArbitrationSink`
+  implementers (e.g. test fakes) must update their override signature.
 
 ### Changed
 
