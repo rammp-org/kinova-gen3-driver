@@ -92,15 +92,19 @@ def cmd_drift(a, arm):
     print(f"EE displacement: {np.linalg.norm(arm.ee_position(after) - arm.ee_position(before)) * 1e3:.1f} mm")
 
 
-def cmd_candle(a, arm):
-    tables = [t for path in a.transcripts for t in parse_tables(Path(path).read_text())]
-    check_against_model(tables, arm)
-    # Split into runs of tables AT candle; each run's approach side is the sign of the
-    # last table before it (the +/-10 deg excursion). Friction biases each side
-    # oppositely, so a one-sided set would report a biased offset and ~0 friction.
+def candle_holds(tables) -> tuple[list, list]:
+    """Holds AT candle in one transcript, each with the side it was approached from.
+
+    The side comes from the excursion since the previous candle stay: its furthest
+    table (the +/-10 deg turnaround; the table just before arrival is often caught
+    mid-return). It counts only if every joint is >= 3 deg out, all on one side. A run
+    with no such excursion (the logger started at candle, or the arm arrived from
+    somewhere arbitrary) has no known side and is skipped: friction biases each side
+    oppositely.
+    """
     at = [np.abs(wrap(t.q)).max() <= np.radians(0.5) for t in tables]
     holds, sides = [], []
-    k = 0
+    k, prev_end = 0, 0
     while k < len(tables):
         if not at[k]:
             k += 1
@@ -108,18 +112,35 @@ def cmd_candle(a, arm):
         j = k
         while j < len(tables) and at[j]:
             j += 1
-        if k > 0:  # a run with no table before it (logger started at candle) has no side
-            for h in segment(tables[k:j]):
-                holds.append(h)
-                sides.append(np.sign(np.mean(wrap(tables[k - 1].q))))
-        k = j
+        excursion = [wrap(t.q) for t in tables[prev_end:k]]
+        if excursion:
+            far = max(excursion, key=lambda q: np.abs(q).mean())
+            if np.abs(far).min() >= np.radians(3.0) and abs(np.sign(far).sum()) == len(far):
+                for h in segment(tables[k:j]):
+                    holds.append(h)
+                    sides.append(np.sign(far[0]))
+        k = prev_end = j
+    return holds, sides
+
+
+def cmd_candle(a, arm):
+    holds, sides = [], []
+    for path in a.transcripts:  # per transcript: a file must not borrow another's side
+        tables = parse_tables(Path(path).read_text())
+        check_against_model(tables, arm)
+        h, s = candle_holds(tables)
+        holds += h
+        sides += s
     if not (+1.0 in sides and -1.0 in sides):
         raise SystemExit(f"found {len(holds)} candle hold(s) approached from "
                          f"{sorted({'+' if s > 0 else '-' for s in sides}) or 'no known side'}; "
                          "need returns from both + and - sides")
     resid = np.array([h.tau - arm.gravity(h.q) for h in holds])  # g(candle) ~ 0: this is the offset
-    offset, friction = resid.mean(axis=0), np.ptp(resid, axis=0) / 2
-    print(f"{len(holds)} candle holds")
+    sides = np.array(sides)
+    plus, minus = resid[sides > 0].mean(axis=0), resid[sides < 0].mean(axis=0)
+    # Balanced per side, so uneven counts (two + returns, one -) cannot tilt the offset.
+    offset, friction = (plus + minus) / 2, np.abs(plus - minus) / 2
+    print(f"{len(holds)} candle holds ({int((sides > 0).sum())} from +, {int((sides < 0).sum())} from -)")
     print("friction (half-spread) [N*m]: " + " ".join(f"j{i + 1} {f:.2f}" for i, f in enumerate(friction)))
     print("--torque-offset " + ",".join(f"{o:.3f}" for o in offset))
 

@@ -30,6 +30,6 @@ $M --angles=0,0,0,0,0,0,0 && echo CANDLE_START_OK && logger_alive \
   && $K --poses poses.csv --start P00 --stop P24 && logger_alive \
   && $K --angles=0,0,0,0,0,0,0 && echo CANDLE_MID_OK \
   && $K --poses poses.csv --start P25 --stop P49 && logger_alive \
-  && $K --angles=0,0,0,0,0,0,0 && echo CANDLE_END_OK || rc=$?
+  && $K --angles=0,0,0,0,0,0,0 && logger_alive && echo CANDLE_END_OK || rc=$?
 echo DONE $rc
 exit $rc

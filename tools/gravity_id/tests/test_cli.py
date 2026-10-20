@@ -60,7 +60,7 @@ def test_candle_offsets(arm, tmp_path):
         text += [format_table(q0, arm.gravity(q0) + off + sign * fric, arm.gravity(q0))] * 10
     (tmp_path / "c.txt").write_text("\n".join(text))
     out = run("candle", str(tmp_path / "c.txt"))
-    assert "2 candle holds" in out
+    assert "2 candle holds (1 from +, 1 from -)" in out
     got = [float(x) for x in out.split("--torque-offset ")[1].split()[0].split(",")]
     assert np.allclose(got, off, atol=0.01)  # the transcript carries 0.01 N*m
     assert "j2 0.50" in out
@@ -76,3 +76,47 @@ def test_candle_refuses_one_sided(arm, tmp_path):
     r = subprocess.run([sys.executable, "-m", "gravity_id", "candle", "--urdf", FIXTURE_URDF,
                         "--ee-frame", FIXTURE_EE, str(tmp_path / "c.txt")], capture_output=True, text=True)
     assert r.returncode != 0 and "both + and - sides" in r.stderr
+
+
+def _candle_text(arm, sides, off, fric, lead_at_candle=False):
+    q0, away = np.zeros(7), np.radians([10.0] * 7)
+    text = [format_table(q0, arm.gravity(q0) + off, arm.gravity(q0))] * 10 if lead_at_candle else []
+    for sign in sides:
+        text.append(format_table(sign * away, arm.gravity(sign * away), arm.gravity(sign * away)))
+        text += [format_table(q0, arm.gravity(q0) + off + sign * fric, arm.gravity(q0))] * 10
+    return "\n".join(text)
+
+
+def test_candle_balances_uneven_sides(arm, tmp_path):
+    # Two returns from +, one from -: a plain mean would tilt toward +.
+    off = np.array([-0.2, 1.0, 1.9, 0.5, -0.1, 0.0, 0.2])
+    fric = np.array([0, 0.5, 0.15, 0.15, 0, 0, 0])
+    (tmp_path / "c.txt").write_text(_candle_text(arm, [+1, +1, -1], off, fric, lead_at_candle=True))
+    out = run("candle", str(tmp_path / "c.txt"))
+    assert "3 candle holds (2 from +, 1 from -)" in out  # the leading candle stay has no side
+    got = [float(x) for x in out.split("--torque-offset ")[1].split()[0].split(",")]
+    assert np.allclose(got, off, atol=0.01)
+
+
+def test_candle_sides_are_per_transcript(arm, tmp_path):
+    # File b starts AT candle: its first stay must not inherit file a's last excursion.
+    off = np.array([0.0, 1.0, 0, 0, 0, 0, 0])
+    fric = np.array([0, 0.5, 0, 0, 0, 0, 0])
+    (tmp_path / "a.txt").write_text(_candle_text(arm, [+1], off, fric))
+    (tmp_path / "b.txt").write_text(_candle_text(arm, [-1], off, fric, lead_at_candle=True))
+    out = run("candle", str(tmp_path / "a.txt"), str(tmp_path / "b.txt"))
+    assert "2 candle holds (1 from +, 1 from -)" in out
+
+
+def test_candle_side_from_the_turnaround_not_the_last_table(arm, tmp_path):
+    # As on dojo: the table just before arrival is caught mid-return (1.5 deg), below the
+    # 3 deg excursion threshold; the side must come from the +/-10 deg turnaround.
+    q0 = np.zeros(7)
+    text = []
+    for sign in (+1, -1):
+        for deg in (10.0, 1.5):
+            q = np.radians([sign * deg] * 7)
+            text.append(format_table(q, arm.gravity(q), arm.gravity(q)))
+        text += [format_table(q0, arm.gravity(q0), arm.gravity(q0))] * 10
+    (tmp_path / "c.txt").write_text("\n".join(text))
+    assert "2 candle holds (1 from +, 1 from -)" in run("candle", str(tmp_path / "c.txt"))
