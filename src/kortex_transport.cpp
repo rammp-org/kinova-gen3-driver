@@ -8,9 +8,12 @@
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -274,10 +277,19 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const Joint
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
   // channel between each call so it does not time out during the switch.
-  for (int idx = 1; idx <= I.n_; ++idx) {
+  // Least-loaded joints first: a switched actuator holds with a fixed torque and
+  // no feedback until the switch ends, while one still in position mode holds
+  // stiffly. Ascending |hold torque| keeps the joints carrying the arm stiff the
+  // longest -- j2 last on a level mount (#92).
+  std::array<int, kNumJoints> order;
+  std::iota(order.begin(), order.end(), 0);
+  std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+    return std::abs(hold.torque[a]) < std::abs(hold.torque[b]);
+  });
+  for (int j : order) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
-    cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
-    I.act_cfg->SetControlMode(cm_msg, idx);
+    cm_msg.set_control_mode(to_kortex_mode(modes[j]));
+    I.act_cfg->SetControlMode(cm_msg, j + 1);
     I.pump(hold);
   }
   for (int k = 0; k < 10; ++k) I.pump(hold);
