@@ -34,3 +34,4 @@ nav:
   - Operations:
       - Real-Time Tuning: rt-tuning.md
       - Integration Runbook: integration-runbook.md
+      - Gravity Identification: integration/gravity_identification.md
