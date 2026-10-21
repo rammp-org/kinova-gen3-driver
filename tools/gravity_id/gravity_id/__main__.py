@@ -32,7 +32,7 @@ from gravity_id.transcript import (
     write_holds_csv,
 )
 from gravity_id.urdf_write import write_corrected_urdf
-from gravity_id.wrist import WRIST, HARMONICS, fit_wrist
+from gravity_id.wrist import HARMONICS, WRIST, fit_wrist, plan_std, sweep_poses
 
 
 def _floats(s: str, n: int) -> list[float]:
@@ -166,6 +166,17 @@ def cmd_synth(a, arm):
 
 
 def cmd_wrist(a, arm):
+    if a.plan:
+        poses = sweep_poses(_floats(a.plan, 5), [float(x) for x in a.j6.split(",")])
+        try:
+            std = plan_std(arm, poses, a.mass)
+        except ValueError as e:
+            raise SystemExit(str(e))
+        print(f"plan OK: {len(poses)} holds; expected COM std at 0.02 N*m [mm]: "
+              + " ".join(f"{ax} {s * 1e3:.1f}" for ax, s in zip("xyz", std)))
+        return
+    if not a.transcripts:
+        raise SystemExit("give dry-run transcript(s), or --plan J1,..,J5 --j6 A,B to check a sweep first")
     tables = [t for path in a.transcripts for t in parse_tables(Path(path).read_text())]
     if not tables:
         raise SystemExit("no dry-run tables found")
@@ -232,7 +243,9 @@ def main(argv=None):
     p = add("wrist", cmd_wrist)
     p.add_argument("--mass", type=float, required=True, help="the added payload's mass from a scale, kg")
     p.add_argument("--out-urdf", help="write the URDF with the payload added to body 7")
-    p.add_argument("transcripts", nargs="+")
+    p.add_argument("--plan", metavar="J1,..,J5", help="check a wrist_sweep.sh plan at this pose (deg); moves nothing")
+    p.add_argument("--j6", default="", metavar="A,B,...", help="with --plan: the sweep's j6 angles (deg)")
+    p.add_argument("transcripts", nargs="*")
 
     a = ap.parse_args(argv)
     a.fn(a, ArmModel.load(a.urdf, a.ee_frame))

@@ -57,8 +57,9 @@ which are kept as the record of what was expected before the data.
   joint-7 frame, together with the j5–j7 offsets and j7 ripple harmonics 1–3. At one j6
   angle a 1-per-turn ripple is indistinguishable from an off-axis mass. Across j6 angles
   the mass's torque scales with the tilt of j7's axis and the ripple's does not. A
-  single j6 angle, or angles closer than about 20°, is refused (column-scaled condition
-  number > 100). Every pose is approached from both sides on j6 and j7: j6 friction
+  design with column-scaled condition number > 100 is refused: one j6 angle, angles too
+  close together, or angles mirrored about where the tool axis is horizontal, which are
+  singular at any spacing. `gravity_id wrist --plan` runs that check before the arm moves. Every pose is approached from both sides on j6 and j7: j6 friction
   that differs between sweeps reads as m·c_z (±0.05 N·m moved a 150 g COM by about 140 mm).
   The result lands as a corrected URDF (body 7 via the Phase L writer).
 

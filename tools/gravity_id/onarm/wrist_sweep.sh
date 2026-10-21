@@ -5,15 +5,21 @@
 # cancel. j7 stays inside +-175 deg and alternate sweeps run backwards, so a wrist
 # cable never winds more than half a turn. NOT COLLISION-CHECKED: moving j6 swings the
 # gripper. Check before running, and watch every move.
-# Usage: ./wrist_sweep.sh J1,J2,J3,J4,J5 J6 J6 [J6 ...]   (deg; J6 whole degrees, distinct,
-# >= 20 apart). Holds are 8 s: the logger prints ~2 tables/s and the fit needs 6 after settling.
+# Usage: ./wrist_sweep.sh J1,J2,J3,J4,J5 J6 J6 [J6 ...]   (deg; J6 whole degrees, distinct).
+# Check the plan offline first: gravity_id wrist --plan J1,..,J5 --j6 A,B (it refuses j6
+# angles that cannot fix the COM). Holds are 8 s: the logger prints ~2 tables/s and the
+# fit needs 6 after settling. About 7 min per j6 angle.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
 [ $# -ge 3 ] || { echo "usage: $0 J1,J2,J3,J4,J5 J6 J6 [J6 ...]"; exit 2; }
 P="$1"
 shift
-[ "$(printf '%s\n' "$@" | sort -u | wc -l)" -eq $# ] || { echo "j6 angles must be distinct"; exit 2; }
+for a in "$@"; do
+  # whole degrees, no leading zero (bash reads 030 as octal 24)
+  [[ $a =~ ^-?(0|[1-9][0-9]*)$ ]] || { echo "j6 angle '$a': whole degrees only"; exit 2; }
+done
+[ "$(printf '%d\n' "$@" | sort -nu | wc -l)" -eq $# ] || { echo "j6 angles must be distinct"; exit 2; }
 M="python3 move.py --speed 10"
 OUT="wrist_$(date -u +%Y%m%dT%H%M%SZ).txt"
 
@@ -48,8 +54,14 @@ $M --hold 0 --angles="$P,$1,90" || { echo DONE 1; exit 1; }
 rc=0 j7=90 dir=1
 for j6 in "$@"; do
   if [ $dir = 1 ]; then ths=$(seq -165 30 165); else ths=$(seq 165 -30 -165); fi
+  first=1
   for th in $ths; do
-    j7_to "$j6" "$j7" "$th" || { rc=$?; break 2; }
+    # Only into a sweep's first step; after that the next approach waypoint is <= 40 deg
+    # away and an extra stop at the step itself would be an unheld one-sided pause.
+    if [ $first = 1 ]; then
+      j7_to "$j6" "$j7" "$th" || { rc=$?; break 2; }
+      first=0
+    fi
     j7=$th
     for s in 1 -1; do
       { $M --hold 0 --from-anywhere --angles="$P,$((j6 + 5 * s)),$((th + 10 * s))" \

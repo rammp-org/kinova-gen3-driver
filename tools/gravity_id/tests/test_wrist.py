@@ -3,7 +3,7 @@ import pytest
 
 from gravity_id.posegrid import Pose
 from gravity_id.synth import make_holds, point_mass
-from gravity_id.wrist import fit_wrist
+from gravity_id.wrist import fit_wrist, plan_std, sweep_poses
 
 BASE = np.radians([0.0, 30.0, 180.0, -90.0, 0.0, 30.0, 0.0])
 MASS, COM = 0.15, np.array([0.03, -0.02, 0.05])  # a wrist camera, joint-7 frame
@@ -59,19 +59,26 @@ def test_too_few_or_too_close_j6_angles_are_refused(arm, j6s):
         fit_wrist(arm, wrist_holds(arm, j6s), MASS)
 
 
-def test_two_sided_j6_cancels_its_friction(arm):
-    # j6 friction of +-0.1 N*m by approach side (the sweep visits every pose from both).
-    # One-sided per sweep, this same bias moves COM z by ~200 mm.
-    holds = []
-    for side in (+1, -1):
-        hs = wrist_holds(arm, (30, 90))
-        for h in hs:
-            h.tau[5] += 0.1 * side
-        holds += hs
-    fit = fit_wrist(arm, holds, MASS)
-    assert np.abs(fit.com - COM).max() <= 0.005
+def test_j6_friction_two_sided_cancels_one_sided_does_not(arm):
+    # j6 friction of 0.1 N*m, signed by approach side.
+    def with_bias(sign_of_sweep):
+        holds = []
+        for j6, sweep_sign in ((30, +1), (90, -1)):
+            for side in (+1, -1):
+                hs = wrist_holds(arm, (j6,))
+                for h in hs:
+                    h.tau[5] += 0.1 * sign_of_sweep(sweep_sign, side)
+                holds += hs
+        return fit_wrist(arm, holds, MASS)
+
+    two_sided = with_bias(lambda sweep, side: side)  # what wrist_sweep.sh does
+    one_sided = with_bias(lambda sweep, side: sweep)  # each j6 angle reached one way
+    assert np.abs(two_sided.com - COM).max() <= 0.005
+    assert abs(one_sided.com[2] - COM[2]) >= 0.05
 
 
-def test_mass_must_be_positive(arm):
-    with pytest.raises(ValueError, match="mass"):
-        fit_wrist(arm, wrist_holds(arm, (30, 90)), 0.0)
+def test_plan_refuses_mirrored_j6_angles_however_far_apart(arm):
+    base = [0.0, 30.0, 180.0, -90.0, 0.0]
+    assert np.all(plan_std(arm, sweep_poses(base, [30, 90]), MASS) < 0.02)
+    with pytest.raises(ValueError, match="mirror images"):
+        plan_std(arm, sweep_poses(base, [0, 60]), MASS)  # 60 deg apart, still singular here

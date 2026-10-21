@@ -153,7 +153,7 @@ fingertips, cable clips, anything else. Weigh every part that comes off
 flange. The fit cannot tell which body is wrong. These weights are what decide
 whether its tip correction is really the tip.
 
-## D4 — wrist payload (≈ 5 min per j6 angle)
+## D4 — wrist payload (≈ 7 min per j6 angle)
 
 For something added past joint 7 (a wrist camera, fingertips). Weigh it first: the
 fit takes the mass from the scale and finds the centre of mass. On j5–j7 a payload's
@@ -167,8 +167,19 @@ differed from one sweep to the next would read as a centre-of-mass shift along t
 axis, so both sides are needed. j7 stays inside ±175° and alternate sweeps run
 backwards, so a wrist cable never winds more than half a turn:
 
+Whether a set of j6 angles works depends on the pose. Two angles that are mirror
+images about where the tool axis is horizontal load j6 identically, however far apart
+they are. Check the plan offline before the session; it refuses a set that cannot work
+and prints the expected uncertainty:
+
 ```sh
-# j1..j5, then two or more whole-degree j6 angles, at least 20° apart (60° is better)
+uv run python -m gravity_id wrist --urdf robot.urdf --ee-frame arm_end_effector_link \
+    --mass 0.150 --plan=-0.14,30.08,178.48,-90.23,0 --j6 30,90   # "=": the pose may start with "-"
+```
+
+Then on the Jetson (j1..j5, then the j6 angles in whole degrees):
+
+```sh
 ./wrist_sweep.sh -0.14,30.08,178.48,-90.23,0 30 90
 ```
 
@@ -185,10 +196,11 @@ It prints the centre of mass in the joint-7 frame with its uncertainty, the j5�
 offsets, and j7's gearbox ripple, then writes the URDF with the payload added to
 body 7. The fit models j7's ripple separately. Otherwise the ripple would read as
 an off-axis mass: on dojo it is ±0.17 N·m at 3 per turn, the same torque as
-17 g·m of off-axis mass. With two j6 angles 60° apart, expect a few millimetres
-for a 150 g payload. The printed uncertainty covers sensor noise only. A one-sided
+17 g·m of off-axis mass. For the example above, the plan check expects about 4 mm
+across the axis and 11 mm along it at 0.02 N·m of noise per hold. The printed
+uncertainty covers sensor noise only. A one-sided
 sweep, or a mis-weighed mass, adds error it cannot see. The fit refuses data from a
-single j6 angle, or from angles too close together.
+single j6 angle, or from angles that cannot separate the payload from the offsets.
 
 ## Fit (offline)
 
