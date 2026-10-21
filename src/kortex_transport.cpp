@@ -8,16 +8,14 @@
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
 
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
 #include <memory>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
+#include "kinova_lowlevel/actuator_switch_order.h"
 #include "kinova_lowlevel/units.h"
 
 namespace k_api = Kinova::Api;
@@ -79,10 +77,12 @@ struct KortexTransport::Impl {
 
   // Refresh that sends `hold` through the normal command path, keeping the cyclic
   // channel alive between per-actuator control-mode switches. Each actuator follows
-  // the field for its CURRENT mode: switched ones the incoming command, not-yet-
-  // switched position-mode ones the measured-position passthrough. Never zero
-  // torque: that drops the arm for the whole switch (#92). write_command applies the
-  // calibrated torque offset, like every torque command.
+  // the field for its CURRENT mode. Into torque: switched ones take the hold torque,
+  // unswitched position-mode ones the measured-position passthrough. Into position:
+  // switched ones take the hold position; unswitched torque-mode ones keep the
+  // outgoing mode's last torque, because a kPosition write leaves torque_joint
+  // untouched. Never zero torque: that drops the arm for the whole switch (#92).
+  // write_command applies the calibrated torque offset, like every torque command.
   void pump(const JointCommand& hold) {
     write_command(hold);
     fb_ = base_cyclic->Refresh(cmd_, 0);
@@ -276,17 +276,14 @@ void KortexTransport::set_servoing_low_level() {
 void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const JointCommand& hold) {
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
-  // channel between each call so it does not time out during the switch.
-  // Least-loaded joints first: a switched actuator holds with a fixed torque and
-  // no feedback until the switch ends, while one still in position mode holds
-  // stiffly. Ascending |hold torque| keeps the joints carrying the arm stiff the
-  // longest -- j2 last on a level mount (#92).
-  std::array<int, kNumJoints> order;
-  std::iota(order.begin(), order.end(), 0);
-  std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
-    return std::abs(hold.torque[a]) < std::abs(hold.torque[b]);
-  });
-  for (int j : order) {
+  // channel between each call so it does not time out during the switch. The
+  // order keeps the joints carrying the arm stiff for as much of the switch as
+  // possible; see actuator_switch_order (#92). Outgoing torque is what the
+  // actuators were last sent, in the applied convention (offset removed).
+  JointVec outgoing;
+  for (int j = 0; j < kNumJoints; ++j)
+    outgoing[j] = double(I.cmd_.actuators(j).torque_joint()) - I.torque_offset_[j];
+  for (int j : actuator_switch_order(modes, hold.torque, outgoing)) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[j]));
     I.act_cfg->SetControlMode(cm_msg, j + 1);

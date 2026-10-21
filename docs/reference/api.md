@@ -311,7 +311,15 @@ class RtExecutor {
   and one `compute` *before* `Transport::set_actuator_modes`, and passes that
   command as `hold`. The transport sends it while the actuators switch one by one
   (~160 ms on KORTEX), so the arm stays held instead of getting zero torque (#92).
-  That extra `compute` advances the mode's dt-driven state by one cycle.
+  The hold is computed once, from the last pre-switch feedback, and sent
+  unchanged: any velocity-dependent term in it (e.g. `JointTorqueMode` damping)
+  is frozen for the switch. That extra `compute` advances the mode's dt-driven
+  state by one cycle. KORTEX switches the actuators one at a time in the order
+  `actuator_switch_order` picks: into torque, the most gravity-loaded last (they
+  stay stiff in position mode longest); into position, the ones still carrying
+  the most outgoing torque first. Joints not yet switched keep what they
+  received before, so on a torque → position switch they hold the outgoing
+  mode's last torque for up to the switch duration.
 - `run` blocks until `stop` is set; it calls `enable_rt()` on its own thread.
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
@@ -373,8 +381,7 @@ class Transport {
     actuators' torque loop tracks their own sensor, so a sensor reading
     `true + offset` makes the joint deliver `command − offset`. The transport
     sends torque commands as `tau + offset` (in `kTorque` only, not `kCurrent`;
-    the mode-switch handshake sends the offset too, so "zero" means zero
-    delivered). It returns feedback torque as `measured − offset` in **every**
+    the mode-switch handshake sends its hold the same way). It returns feedback torque as `measured − offset` in **every**
     mode, read-only use included. The sign is as `gravity_id` fits it, in
     `JointFeedback::tau`'s applied-torque convention (not KORTEX's reaction sign).
     Identify the offsets with no offset set. Call it before `connect()`; it throws

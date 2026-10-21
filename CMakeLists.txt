@@ -371,6 +371,7 @@ add_executable(unit_tests
     tests/teleop_protocol_test.cpp
     tests/feedback_tap_test.cpp
     tests/rt_executor_test.cpp
+    tests/actuator_switch_order_test.cpp
     tests/interface/trajectory_executor_test.cpp
     tests/interface/execution_integration_test.cpp
     tests/interface/supervisor_test.cpp
