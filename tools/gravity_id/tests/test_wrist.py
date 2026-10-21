@@ -53,9 +53,23 @@ def test_ripple_is_not_read_as_an_off_axis_mass(arm):
     assert np.abs(fit.com[:2]).max() <= 0.001  # a leaked 1-per-turn ripple would be ~20 mm
 
 
-def test_one_j6_angle_is_refused(arm):
+@pytest.mark.parametrize("j6s", [(30,), (30, 35)])
+def test_too_few_or_too_close_j6_angles_are_refused(arm, j6s):
     with pytest.raises(ValueError, match="two or more j6 angles"):
-        fit_wrist(arm, wrist_holds(arm, (30,)), MASS)
+        fit_wrist(arm, wrist_holds(arm, j6s), MASS)
+
+
+def test_two_sided_j6_cancels_its_friction(arm):
+    # j6 friction of +-0.1 N*m by approach side (the sweep visits every pose from both).
+    # One-sided per sweep, this same bias moves COM z by ~200 mm.
+    holds = []
+    for side in (+1, -1):
+        hs = wrist_holds(arm, (30, 90))
+        for h in hs:
+            h.tau[5] += 0.1 * side
+        holds += hs
+    fit = fit_wrist(arm, holds, MASS)
+    assert np.abs(fit.com - COM).max() <= 0.005
 
 
 def test_mass_must_be_positive(arm):

@@ -153,23 +153,28 @@ fingertips, cable clips, anything else. Weigh every part that comes off
 flange. The fit cannot tell which body is wrong. These weights are what decide
 whether its tip correction is really the tip.
 
-## D4 — wrist payload (≈ 8 min per j6 angle)
+## D4 — wrist payload (≈ 5 min per j6 angle)
 
 For something added past joint 7 (a wrist camera, fingertips). Weigh it first: the
 fit takes the mass from the scale and finds the centre of mass. On j5–j7 a payload's
 mass and its distance along the tool axis change the torques almost identically, so
 the sweep cannot separate them by itself.
 
-At a pose with the wrist clear of everything, j1–j5 stay put. At each j6 angle,
-j7 turns through a full turn in 30° steps, and each step is approached from +10° and from −10°:
+At a pose with the wrist clear of everything, j1–j5 stay put. At each j6 angle, j7
+steps from −165° to +165° in 30° steps. Every step is held twice: once approached
+from (j6 + 5°, j7 + 10°) and once from (j6 − 5°, j7 − 10°). Friction on j6 that
+differed from one sweep to the next would read as a centre-of-mass shift along the tool
+axis, so both sides are needed. j7 stays inside ±175° and alternate sweeps run
+backwards, so a wrist cable never winds more than half a turn:
 
 ```sh
-./wrist_sweep.sh -0.14,30.08,178.48,-90.23,0 30 90   # j1..j5, then two or more j6 angles
+# j1..j5, then two or more whole-degree j6 angles, at least 20° apart (60° is better)
+./wrist_sweep.sh -0.14,30.08,178.48,-90.23,0 30 90
 ```
 
-**Check the moves before sending them.** Changing j6 swings the gripper, and j7's
-full turn winds any wrist cable. The first move refuses if the arm starts more
-than 30° from the sweep pose. Then, offline:
+**Check the moves before sending them.** Changing j6 swings the gripper. The first
+move refuses if the arm is more than 30° from the sweep pose with j7 at 90°. Then,
+offline:
 
 ```sh
 uv run python -m gravity_id wrist --urdf robot.urdf --ee-frame arm_end_effector_link \
@@ -180,9 +185,10 @@ It prints the centre of mass in the joint-7 frame with its uncertainty, the j5�
 offsets, and j7's gearbox ripple, then writes the URDF with the payload added to
 body 7. The fit models j7's ripple separately. Otherwise the ripple would read as
 an off-axis mass: on dojo it is ±0.17 N·m at 3 per turn, the same torque as
-17 g·m of off-axis mass. With two j6 angles 60° apart,
-expect a few millimetres for a 150 g payload; trust the printed uncertainty. The fit
-refuses data from a single j6 angle.
+17 g·m of off-axis mass. With two j6 angles 60° apart, expect a few millimetres
+for a 150 g payload. The printed uncertainty covers sensor noise only. A one-sided
+sweep, or a mis-weighed mass, adds error it cannot see. The fit refuses data from a
+single j6 angle, or from angles too close together.
 
 ## Fit (offline)
 

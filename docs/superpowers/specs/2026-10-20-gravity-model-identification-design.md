@@ -54,10 +54,13 @@ which are kept as the record of what was expected before the data.
   j5–j7 data cannot separate a payload's mass from its distance along the tool axis.
   Fitting both leaves about 3 kg of uncertainty, and j1–j4 carry about 0.5 N·m of friction.
   So the mass comes from a scale, and j7 sweeps at two or more j6 angles fit m·c in the
-  joint-7 frame, together with the j5–j7 offsets and j7 ripple harmonics 1–3. The 1-per-turn
-  term matters: on j7 alone it is indistinguishable from an off-axis mass, so j5 and
-  j6 carry that part. A single j6 angle is refused (m·c_z is then confounded with the
-  offsets). The result lands as a corrected URDF (body 7 via the Phase L writer).
+  joint-7 frame, together with the j5–j7 offsets and j7 ripple harmonics 1–3. At one j6
+  angle a 1-per-turn ripple is indistinguishable from an off-axis mass. Across j6 angles
+  the mass's torque scales with the tilt of j7's axis and the ripple's does not. A
+  single j6 angle, or angles closer than about 20°, is refused (column-scaled condition
+  number > 100). Every pose is approached from both sides on j6 and j7: j6 friction
+  that differs between sweeps reads as m·c_z (±0.05 N·m moved a 150 g COM by about 140 mm).
+  The result lands as a corrected URDF (body 7 via the Phase L writer).
 
 ## Why
 
