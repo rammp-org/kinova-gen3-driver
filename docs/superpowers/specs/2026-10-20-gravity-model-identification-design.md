@@ -45,6 +45,19 @@ which are kept as the record of what was expected before the data.
   waypoints. No more automated grids until a real collision checker gates every
   target and path.
 - **The new-arm procedure** is `docs/integration/torque_offset_calibration.md`.
+- **2026-10-21, j7 full turn** (30° steps, both sides, j1–j6 fixed): no mass sits off
+  the j7 axis (fit ≈ 1 g·m, flat j5 and j6). j7 reads `0.343 + 0.165·sin(3θ + φ)` N·m,
+  with friction 0.04. The ripple is mechanical, in an old gearbox, and is accepted
+  as is. The F1 j7 offset (0.221) sampled it at whatever angles the grid hit, so the
+  full-turn mean replaces it. That shortfall explains the −0.6° j7 settle #94 saw in joint impedance.
+- **Wrist payload fitter** (`gravity_id wrist`, for the coming wrist camera). Static
+  j5–j7 data cannot separate a payload's mass from its distance along the tool axis.
+  Fitting both leaves about 3 kg of uncertainty, and j1–j4 carry about 0.5 N·m of friction.
+  So the mass comes from a scale, and j7 sweeps at two or more j6 angles fit m·c in the
+  joint-7 frame, together with the j5–j7 offsets and j7 ripple harmonics 1–3. The 1-per-turn
+  term matters: on j7 alone it is indistinguishable from an off-axis mass, so j5 and
+  j6 carry that part. A single j6 angle is refused (m·c_z is then confounded with the
+  offsets). The result lands as a corrected URDF (body 7 via the Phase L writer).
 
 ## Why
 

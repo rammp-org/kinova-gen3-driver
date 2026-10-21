@@ -64,6 +64,14 @@ It refuses unless the transcript has returns from both the + and the − side.
 It prints the friction per joint (half the spread between the two approaches) and
 a ready-to-paste `--torque-offset o1,...,o7`.
 
+**j7 needs a full turn.** A gearbox can add a torque ripple that depends on the
+joint's angle, and the candle reads only one angle. On dojo, j7's reading is
+`0.343 + 0.165·sin(3θ + φ)` N·m: one candle angle can land anywhere from
+0.18 to 0.51. Take j7's offset as the mean over a full turn instead. The `j7`
+value printed by `gravity_id wrist` from the sweep in
+[the runbook's D4](gravity_identification.md#d4-wrist-payload-8-min-per-j6-angle)
+is that mean (the sweep also runs with no payload; pass any mass).
+
 ## 2. Cross-check with the pose grid (first calibration of an arm)
 
 Candle measures each offset at one configuration. The full pose grid
@@ -117,3 +125,5 @@ firmware, and the per-joint keep/zero decisions. Until the ROS 2 node takes the
 parameter, pass it to the standalone apps with `--torque-offset`.
 
 dojo, 2026-10-20 (49-pose grid, family F1): `-0.225,1.065,1.906,0.475,-0.079,0.007,0.221`.
+2026-10-21, j7 full turn at one pose: j7 is `0.343` (ripple ±0.165 at 3 per turn,
+friction 0.04), so use `-0.225,1.065,1.906,0.475,-0.079,0.007,0.343`.

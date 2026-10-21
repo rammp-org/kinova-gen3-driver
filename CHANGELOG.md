@@ -23,7 +23,8 @@ that heading to the new version and bumps `package.xml`.
 - `tools/gravity_id`: offline gravity-model identification (pose grid, dry-run
   transcript parser, nested-family fit with held-out selection, corrected-URDF
   writer). It is proven on synthetic data, and the on-arm runbook is
-  `docs/integration/gravity_identification.md` (#5, #40).
+  `docs/integration/gravity_identification.md` (#5, #40). `gravity_id wrist` fits
+  the centre of mass of a weighed wrist payload (a camera) from j7 sweeps.
 - `Dynamics` builds from URDF XML (`UrdfXml`) and reduces any model to the root→EE chain,
   locking other joints at zero, so the articulated description is accepted.
   `Dynamics::joint_names()` returns the arm's joints in chain order.

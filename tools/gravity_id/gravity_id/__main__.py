@@ -6,6 +6,7 @@
   drift     two dry-run transcripts (before/after a torque run) -> joint and EE drift
   candle    dry-run transcript(s) of two-sided returns to candle -> torque-sensor offsets
   synth     poses.csv -> a fake dry-run transcript with injected errors (rehearsal)
+  wrist     dry-run transcript(s) of j7 sweeps + the payload's weighed mass -> its COM
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from gravity_id.transcript import (
     write_holds_csv,
 )
 from gravity_id.urdf_write import write_corrected_urdf
+from gravity_id.wrist import WRIST, HARMONICS, fit_wrist
 
 
 def _floats(s: str, n: int) -> list[float]:
@@ -163,6 +165,25 @@ def cmd_synth(a, arm):
     print(f"wrote {a.out}")
 
 
+def cmd_wrist(a, arm):
+    tables = [t for path in a.transcripts for t in parse_tables(Path(path).read_text())]
+    if not tables:
+        raise SystemExit("no dry-run tables found")
+    check_against_model(tables, arm)
+    try:
+        fit = fit_wrist(arm, segment(tables), a.mass)
+    except ValueError as e:
+        raise SystemExit(str(e))
+    print(f"{fit.n_holds} holds; residual rms {fit.rms:.3f} N*m")
+    print(f"payload {a.mass:.3f} kg, COM [mm, joint-7 frame]: "
+          + "  ".join(f"{ax} {c * 1e3:+.1f} +- {s * 1e3:.1f}" for ax, c, s in zip("xyz", fit.com, fit.std_com)))
+    print("offsets [N*m]: " + " ".join(f"j{j + 1} {o:+.3f}" for j, o in zip(WRIST, fit.offsets)))
+    print("j7 ripple [N*m]: " + " ".join(f"{n}/turn {r:.3f}" for n, r in zip(HARMONICS, fit.ripple)))
+    if a.out_urdf:
+        write_corrected_urdf(a.urdf, a.ee_frame, point_mass(7, a.mass, fit.com), a.out_urdf)
+        print(f"wrote {a.out_urdf}")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="gravity_id", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -207,6 +228,11 @@ def main(argv=None):
     p.add_argument("--offsets", type=lambda s: _floats(s, NUM_JOINTS))
     p.add_argument("--noise", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=0)
+
+    p = add("wrist", cmd_wrist)
+    p.add_argument("--mass", type=float, required=True, help="the added payload's mass from a scale, kg")
+    p.add_argument("--out-urdf", help="write the URDF with the payload added to body 7")
+    p.add_argument("transcripts", nargs="+")
 
     a = ap.parse_args(argv)
     a.fn(a, ArmModel.load(a.urdf, a.ee_frame))

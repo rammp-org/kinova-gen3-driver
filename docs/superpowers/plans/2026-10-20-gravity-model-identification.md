@@ -306,3 +306,6 @@ Tasks 1–7 were implemented as planned. Beyond the plan, driven by the on-arm s
   than a URDF edit, because the offsets, not the masses, were wrong.
   `benchmark_grav_comp --torque-offset`, plus the procedure
   `docs/integration/torque_offset_calibration.md`.
+- 2026-10-21: `gravity_id wrist` (`gravity_id/wrist.py`, `tests/test_wrist.py`)
+  fits a weighed wrist payload's centre of mass from j7 sweeps
+  (`onarm/wrist_sweep.sh`). See the spec's Results for why the mass is an input.

@@ -1,3 +1,4 @@
+import re
 import subprocess
 import sys
 
@@ -120,3 +121,25 @@ def test_candle_side_from_the_turnaround_not_the_last_table(arm, tmp_path):
         text += [format_table(q0, arm.gravity(q0), arm.gravity(q0))] * 10
     (tmp_path / "c.txt").write_text("\n".join(text))
     assert "2 candle holds (1 from +, 1 from -)" in run("candle", str(tmp_path / "c.txt"))
+
+
+def test_wrist_end_to_end(arm, tmp_path):
+    from test_wrist import COM, MASS, OFFSETS, ripple, sweep
+    from gravity_id.synth import point_mass, true_torque
+
+    # Sensor noise matters here: the dry-run prints torque to 0.01 N*m, and without noise
+    # dithering it a hold's median sits on that grid (~5 mm of COM bias along z).
+    rng, tables = np.random.default_rng(0), []
+    for p in sweep((30, 90)):
+        tau = true_torque(arm, p.q, point_mass(7, MASS, COM), OFFSETS)
+        tau[6] += ripple(p.q[6])
+        tables += [format_table(p.q, tau + rng.normal(0, 0.01, 7), arm.gravity(p.q)) for _ in range(12)]
+    (tmp_path / "t.txt").write_text("\n".join(tables))
+    out = run("wrist", "--mass", str(MASS), "--out-urdf", str(tmp_path / "w.urdf"), str(tmp_path / "t.txt"))
+    assert "24 holds" in out
+    com = [float(v) for v in re.findall(r"[xyz] ([+-][\d.]+) \+-", out)]
+    assert np.abs(np.array(com) - COM * 1e3).max() <= 5.0  # mm
+    assert re.search(r"j7 \+0\.3[34]\d", out)
+    added = ArmModel.load(str(tmp_path / "w.urdf"), FIXTURE_EE).params() - arm.params()
+    # the URDF carries the FITTED COM (printed to 0.1 mm)
+    assert np.allclose(added[24:28], point_mass(7, MASS, np.array(com) / 1e3)[24:28], atol=2e-5)
