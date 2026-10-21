@@ -31,6 +31,10 @@
 //       --ee-frame end_effector_link --torque-limit 20
 //   ./benchmark_grav_comp --sim --urdf ../models/gen3_7dof.urdf
 //       --ee-frame end_effector_link --torque-limit 39,39,39,39,9,9,9
+//
+// --torque-offset <n|n1,...,n7>: THIS arm's per-joint torque-sensor offsets (N·m),
+// a robot-specific calibration from tools/gravity_id. Real arm only: passed to
+// KortexTransport::set_torque_offset, which compensates commands and feedback.
 
 #include <atomic>
 #include <chrono>
@@ -114,6 +118,8 @@ int main(int argc, char** argv) {
   double damping = 0.0;
   JointVec torque_limit_override = JointVec::Zero();
   bool torque_limit_set = false;
+  JointVec torque_offset = JointVec::Zero();
+  bool torque_offset_set = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -162,6 +168,9 @@ int main(int argc, char** argv) {
     else if (a == "--torque-limit") {
       next_joint_vec("--torque-limit", torque_limit_override);
       torque_limit_set = true;
+    } else if (a == "--torque-offset") {
+      next_joint_vec("--torque-offset", torque_offset);
+      torque_offset_set = true;
     } else {
       std::cerr << "unknown arg: " << a << "\n";
       std::exit(2);
@@ -204,6 +213,10 @@ int main(int argc, char** argv) {
 
   // Build transport. SimTransport is the only path exercised here.
   std::unique_ptr<Transport> transport;
+  if (use_sim && torque_offset_set) {
+    std::cerr << "--torque-offset calibrates a real arm's torque sensors; not with --sim\n";
+    return 2;
+  }
   if (use_sim) {
     JointFeedback init;  // zero state
     transport = std::make_unique<SimTransport>(init);
@@ -213,7 +226,14 @@ int main(int argc, char** argv) {
       std::cerr << "real-robot mode requires --ip <addr> (or pass --sim)\n";
       return 2;
     }
-    transport = std::make_unique<KortexTransport>(ip);
+    auto kortex = std::make_unique<KortexTransport>(ip);
+    if (torque_offset_set) {
+      kortex->set_torque_offset(torque_offset);
+      std::printf("[torque] sensor offsets [Nm]: %.3f %.3f %.3f %.3f %.3f %.3f %.3f\n",
+                  torque_offset[0], torque_offset[1], torque_offset[2], torque_offset[3],
+                  torque_offset[4], torque_offset[5], torque_offset[6]);
+    }
+    transport = std::move(kortex);
 #else
     std::cerr << "built without KORTEX; only --sim is available\n";
     return 2;

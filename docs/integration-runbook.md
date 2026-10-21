@@ -66,6 +66,8 @@ load-bearing. An **e-stop must be within reach** for the entire session.
    See [`integration/grav_comp_static_check.md`](integration/grav_comp_static_check.md)
    — if the URDF is missing the real end-effector payload inertia, gravity-comp
    will visibly **sag** (under-comp) or push. Verify before trusting torque output.
+   To measure and correct the mass model rather than eyeball it, run
+   [`integration/gravity_identification.md`](integration/gravity_identification.md).
    - **Bare arm:** `models/gen3_7dof.urdf`.
    - **With a Robotiq 2F-85 (the lab arm, confirmed 2026-06-02):** use
      `models/gen3_7dof_2f85.urdf`. It is Kinova's `kortex_description/gen3_2f85`

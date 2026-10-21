@@ -1,0 +1,36 @@
+[bench] urdf=models/gen3_7dof_2f85.urdf ee_frame=gen3_end_effector_link rate=1000Hz pacing=sleepspin cpu=-1 prio=80 duration=1.2s sim=yes
+[model] mount tilt 0.0 deg from vertical (0 = level; 30 = flatbot, gen_1_5)
+[dry-run] READ-ONLY gravity check — NO torque commanded, arm stays under its own control.
+          Move it to a few poses (pendant/web app); residual should be small if the URDF matches.
+          [--sim] expect residual = -gravity: the sim reports zero torque until torque is commanded.
+  j |   q[deg] | meas[Nm] | grav[Nm] |  resid[Nm]
+  1 |     0.00 |     0.00 |    -0.00 |    +0.000
+  2 |     0.00 |     0.00 |    -0.01 |    +0.014
+  3 |     0.00 |     0.00 |    -0.00 |    +0.000
+  4 |     0.00 |     0.00 |    -0.01 |    +0.015
+  5 |     0.00 |     0.00 |    -0.00 |    +0.000
+  6 |     0.00 |     0.00 |    -0.02 |    +0.015
+  7 |     0.00 |     0.00 |    -0.00 |    +0.000
+  -> max|residual| = 0.015 Nm  (large/growing toward the tip => URDF payload mismatch)
+
+  j |   q[deg] | meas[Nm] | grav[Nm] |  resid[Nm]
+  1 |     0.00 |     0.00 |    -0.00 |    +0.000
+  2 |     0.00 |     0.00 |    -0.01 |    +0.014
+  3 |     0.00 |     0.00 |    -0.00 |    +0.000
+  4 |     0.00 |     0.00 |    -0.01 |    +0.015
+  5 |     0.00 |     0.00 |    -0.00 |    +0.000
+  6 |     0.00 |     0.00 |    -0.02 |    +0.015
+  7 |     0.00 |     0.00 |    -0.00 |    +0.000
+  -> max|residual| = 0.015 Nm  (large/growing toward the tip => URDF payload mismatch)
+
+  j |   q[deg] | meas[Nm] | grav[Nm] |  resid[Nm]
+  1 |     0.00 |     0.00 |    -0.00 |    +0.000
+  2 |     0.00 |     0.00 |    -0.01 |    +0.014
+  3 |     0.00 |     0.00 |    -0.00 |    +0.000
+  4 |     0.00 |     0.00 |    -0.01 |    +0.015
+  5 |     0.00 |     0.00 |    -0.00 |    +0.000
+  6 |     0.00 |     0.00 |    -0.02 |    +0.015
+  7 |     0.00 |     0.00 |    -0.00 |    +0.000
+  -> max|residual| = 0.015 Nm  (large/growing toward the tip => URDF payload mismatch)
+
+[dry-run] done — no torque was ever commanded.
