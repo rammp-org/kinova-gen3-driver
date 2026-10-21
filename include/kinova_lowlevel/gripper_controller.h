@@ -51,7 +51,9 @@ class GripperController : public Transport {
 
   void connect() override { inner_.connect(); }
   void set_servoing_low_level() override { inner_.set_servoing_low_level(); }
-  void set_actuator_modes(const ActuatorModes& m) override { inner_.set_actuator_modes(m); }
+  void set_actuator_modes(const ActuatorModes& m, const JointCommand& hold) override {
+    inner_.set_actuator_modes(m, hold);
+  }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     inner_.exchange(stamp(c), fb);
   }

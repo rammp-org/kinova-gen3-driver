@@ -33,7 +33,7 @@ struct CartesianImpedanceParams {
   double manip_fd_step = 1e-4;  // forward finite-difference step (rad) for ∇w
   double pinv_damping = 1e-3;   // Levenberg-Marquardt lambda for the pseudo-inverse
   double torque_limit = 39.0;   // per-joint clamp (N·m)
-  double gain_ramp_s = 0.5;     // ramp the active wrench 0->1 over this window on entry
+  double gain_ramp_s = 0.1;     // ramp the active wrench 0->1 over this window on entry
 };
 
 // Task-space impedance: tau = gravity + ramp * (Jᵀ F + nullspace),

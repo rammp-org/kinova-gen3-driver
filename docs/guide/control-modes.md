@@ -24,7 +24,10 @@ Every mode implements the same small interface (`ControlMode`):
 
 You hand a mode to the executor with `request_mode(&mode)`; it's adopted at the
 next cycle boundary (an atomic-pointer swap). You keep ownership — the mode must
-outlive its time as the active mode.
+outlive its time as the active mode. At adoption the executor runs `on_enter` and
+one `compute` before the actuators switch mode, and that first command holds the
+arm during the switch. `compute` must therefore produce a sensible command
+straight after `on_enter`, which every shipped mode already does.
 
 Every shipped mode also echoes the measured joint position back in the command
 (*position passthrough*), so the robot's own low-level safety can fall back to a
@@ -103,7 +106,7 @@ headline mode that application developers build on.
   joint-space posture term holds a rest posture *without disturbing the tool*
   (it's projected into the task's nullspace). Turn it off with `nullspace_on =
   false`; tune with `nullspace_kp` / `nullspace_kd`.
-- **Entry ramp.** The spring/damper fade in over `gain_ramp_s` (default 0.5 s) so
+- **Entry ramp.** The spring/damper fade in over `gain_ramp_s` (default 0.1 s) so
   there's no torque jolt at the moment you enter the mode — while gravity is
   applied in full from the very first cycle, so the arm never sags during fade-in.
 - **Torque limit.** Every joint is clamped to `±torque_limit` as a hard safety
@@ -119,7 +122,7 @@ headline mode that application developers build on.
 | `Kx` (trans / rot) | 300 N/m / 30 N·m/rad | Spring stiffness. Raise for tighter tracking, lower for softer compliance. Too high → buzzing/instability. |
 | `Dx` (trans / rot) | 35 / 5 | Damping. Raise if the spring oscillates; roughly scale with √`Kx`. |
 | `nullspace_kp` / `kd` | 0 / 8 | How firmly the elbow holds its rest posture. `kp = 0` means pure damping — resist null-space motion without snapping back. Keep modest. |
-| `gain_ramp_s` | 0.5 s | Longer = gentler entry. |
+| `gain_ramp_s` | 0.1 s | Longer = gentler entry, but the spring is weak while it fades in and the arm can creep (#92). |
 | `torque_limit` | 39 N·m | Lower it for a more conservative cap during bring-up. |
 
 ## Joint-Space Impedance — `JointImpedanceMode`
