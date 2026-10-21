@@ -167,6 +167,8 @@ def cmd_synth(a, arm):
 
 def cmd_wrist(a, arm):
     if a.plan:
+        if not a.j6 or a.transcripts:
+            raise SystemExit("--plan takes --j6 A,B,... and no transcripts")
         poses = sweep_poses(_floats(a.plan, 5), [float(x) for x in a.j6.split(",")])
         try:
             std = plan_std(arm, poses, a.mass)
@@ -244,7 +246,7 @@ def main(argv=None):
     p.add_argument("--mass", type=float, required=True, help="the added payload's mass from a scale, kg")
     p.add_argument("--out-urdf", help="write the URDF with the payload added to body 7")
     p.add_argument("--plan", metavar="J1,..,J5", help="check a wrist_sweep.sh plan at this pose (deg); moves nothing")
-    p.add_argument("--j6", default="", metavar="A,B,...", help="with --plan: the sweep's j6 angles (deg)")
+    p.add_argument("--j6", default="", metavar="A,B,...", help="with --plan: the sweep's j6 angles (deg; --j6=-30,30 if the first is negative)")
     p.add_argument("transcripts", nargs="*")
 
     a = ap.parse_args(argv)

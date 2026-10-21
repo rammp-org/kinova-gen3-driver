@@ -52,8 +52,9 @@ def _rows(arm: ArmModel, h: Hold, mass: float) -> tuple[np.ndarray, np.ndarray]:
 
 
 def sweep_poses(base_deg: list[float], j6_deg: list[float]) -> list[np.ndarray]:
-    """The held poses of onarm/wrist_sweep.sh: j1..j5 at `base_deg`, j7 over SWEEP_J7 per j6."""
-    return [np.radians([*base_deg, j6, j7]) for j6 in j6_deg for j7 in SWEEP_J7]
+    """The holds of onarm/wrist_sweep.sh: j1..j5 at `base_deg`, j7 over SWEEP_J7 per j6, each
+    pose held twice (approached from either side)."""
+    return [np.radians([*base_deg, j6, j7]) for j6 in j6_deg for j7 in SWEEP_J7 for _ in range(2)]
 
 
 def check_design(A: np.ndarray, j6_deg: list[float]) -> float:
