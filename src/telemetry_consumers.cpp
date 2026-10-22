@@ -87,6 +87,7 @@ void TelemetrySink::consume(const CycleSample& s) {
   jitter_.add(s.wake_jitter_ns);
   overruns_ += (s.flags & 1u) ? 1 : 0;
   faults_ += (s.flags & 2u) ? 1 : 0;
+  comm_timeouts_ += (s.flags & 4u) ? 1 : 0;
   ++n_;
   if (csv_) {
     std::fprintf(static_cast<FILE*>(csv_), "%llu,%u,%u,%u,%u,%u\n",
@@ -97,16 +98,16 @@ void TelemetrySink::consume(const CycleSample& s) {
 
 std::string TelemetrySink::console_line() const {
   char buf[384];
-  std::snprintf(buf, sizeof(buf),
-                "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
-                "comm[p99=%.1f]us compute[p99=%.1f]us jitter[p99=%.1f]us "
-                "overruns=%llu faults=%llu",
-                static_cast<unsigned long long>(n_), cycle_.percentile(0.5) / 1000.0,
-                cycle_.percentile(0.99) / 1000.0, cycle_.percentile(0.999) / 1000.0,
-                cycle_.max() / 1000.0, comm_.percentile(0.99) / 1000.0,
-                compute_.percentile(0.99) / 1000.0, jitter_.percentile(0.99) / 1000.0,
-                static_cast<unsigned long long>(overruns_),
-                static_cast<unsigned long long>(faults_));
+  std::snprintf(
+      buf, sizeof(buf),
+      "n=%llu cycle[p50=%.1f p99=%.1f p99.9=%.1f max=%.1f]us "
+      "comm[p99=%.1f]us compute[p99=%.1f]us jitter[p99=%.1f]us "
+      "overruns=%llu faults=%llu comm_timeouts=%llu",
+      static_cast<unsigned long long>(n_), cycle_.percentile(0.5) / 1000.0,
+      cycle_.percentile(0.99) / 1000.0, cycle_.percentile(0.999) / 1000.0, cycle_.max() / 1000.0,
+      comm_.percentile(0.99) / 1000.0, compute_.percentile(0.99) / 1000.0,
+      jitter_.percentile(0.99) / 1000.0, static_cast<unsigned long long>(overruns_),
+      static_cast<unsigned long long>(faults_), static_cast<unsigned long long>(comm_timeouts_));
   return std::string(buf);
 }
 

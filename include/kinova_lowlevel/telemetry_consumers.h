@@ -37,7 +37,7 @@ class TelemetrySink {
 
  private:
   NanoHistogram cycle_, compute_, comm_, jitter_;
-  uint64_t overruns_ = 0, faults_ = 0, n_ = 0;
+  uint64_t overruns_ = 0, faults_ = 0, comm_timeouts_ = 0, n_ = 0;
   void* csv_ = nullptr;  // FILE*
 };
 }  // namespace kinova

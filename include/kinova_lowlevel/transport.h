@@ -1,8 +1,17 @@
 #pragma once
 #include <array>
+#include <stdexcept>
 
 #include "kinova_lowlevel/joint_types.h"
 namespace kinova {
+// Thrown by exchange() when one round-trip did not complete within the
+// transport's cyclic timeout: a single lost request or reply (KORTEX UDP has no
+// retransmission). The caller's JointFeedback is left untouched. RtExecutor
+// survives isolated ones; any other exception from exchange() stays fatal.
+class TransportTimeout : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
 using ActuatorModes = std::array<ActuatorMode, kNumJoints>;
 class Transport {
  public:

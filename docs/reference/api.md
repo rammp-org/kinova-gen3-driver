@@ -295,7 +295,9 @@ struct ExecutorConfig {
   double   rate_hz = 1000.0;
   Pacing   pacing  = Pacing::kSleepSpin;
   RtConfig rt{};                 // see rt_system.h
+  int      max_consecutive_misses = 3;  // exchange timeouts in a row => CommsLost
 };
+class CommsLost : public std::runtime_error {};  // thrown by run()
 
 class RtExecutor {
  public:
@@ -308,6 +310,13 @@ class RtExecutor {
 - `request_mode` stores a raw pointer adopted at a cycle boundary; the caller
   **retains ownership** and must keep the mode alive while active.
 - `run` blocks until `stop` is set; it calls `enable_rt()` on its own thread.
+- **Lost frames:** a `TransportTimeout` from `exchange` does not end the loop.
+  That cycle keeps the last good feedback, skips `compute` (so the next cycle
+  re-sends the previous command unchanged: no integration on stale feedback),
+  defers any pending mode switch until a good exchange, and sets `CycleSample`
+  bit2. `max_consecutive_misses` in a row is comms loss: `run` throws
+  `CommsLost` and the caller does `safe_shutdown()`. Any other exception from
+  `exchange` propagates as before.
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
 
@@ -353,15 +362,20 @@ class Transport {
   virtual void receive(JointFeedback&) = 0;
   virtual void safe_shutdown() = 0;
 };
+// exchange() round-trip did not complete within the transport's cyclic timeout
+class TransportTimeout : public std::runtime_error {};
 ```
 
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No
   hardware.
-- **`KortexTransport(const std::string& ip)`** (`kortex_transport.h`, KORTEX build
-  only) — the real Gen3 low-level handshake. Compiled in only with
-  `-DKINOVA_ENABLE_KORTEX=ON`.
+- **`KortexTransport(ip, user = "admin", password = "admin", cyclic_timeout_ms = 20)`**
+  (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `exchange` bounds each
+  `Refresh` at `cyclic_timeout_ms` (KORTEX's default is 3000 ms) and maps KORTEX's
+  own timeout to `TransportTimeout`; error frames from the arm still throw
+  `KDetailedException`.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:
@@ -381,7 +395,7 @@ same shape, forward everything, and hook the one call each cares about:
 struct CycleSample {
   uint64_t cycle_index;
   uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;
-  uint16_t flags;          // bit0 overrun, bit1 fault
+  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout
 };
 
 class SampleRing {                       // lock-free SPSC, drop-don't-block

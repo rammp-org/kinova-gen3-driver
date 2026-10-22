@@ -3,6 +3,7 @@
 #include <ActuatorConfigClientRpc.h>
 #include <BaseClientRpc.h>
 #include <BaseCyclicClientRpc.h>
+#include <KDetailedException.h>
 #include <RouterClient.h>
 #include <SessionManager.h>
 #include <TransportClientTcp.h>
@@ -10,6 +11,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -63,14 +65,19 @@ struct KortexTransport::Impl {
 
   k_api::BaseCyclic::Command cmd_;
   k_api::BaseCyclic::Feedback fb_;  // latest feedback (kept to seed passthrough positions)
+  k_api::RouterClientSendOptions cyclic_opts_;  // exchange() only
 
   int n_ = 0;
   uint16_t frame_id_ = 0;
   bool connected_ = false;
   bool low_level_ = false;
 
-  explicit Impl(std::string ip_in, std::string user_in, std::string password_in)
-      : ip(std::move(ip_in)), user(std::move(user_in)), password(std::move(password_in)) {}
+  explicit Impl(std::string ip_in, std::string user_in, std::string password_in,
+                uint32_t cyclic_timeout_ms)
+      : ip(std::move(ip_in)),
+        user(std::move(user_in)),
+        password(std::move(password_in)),
+        cyclic_opts_{false, 0, cyclic_timeout_ms} {}
 
   // Refresh that re-sends current measured positions + zero torque, keeping the
   // cyclic channel alive (used between per-actuator control-mode switches).
@@ -186,8 +193,10 @@ struct KortexTransport::Impl {
   }
 };
 
-KortexTransport::KortexTransport(std::string ip, std::string user, std::string password)
-    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password))) {}
+KortexTransport::KortexTransport(std::string ip, std::string user, std::string password,
+                                 uint32_t cyclic_timeout_ms)
+    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password),
+                                   cyclic_timeout_ms)) {}
 
 KortexTransport::~KortexTransport() {
   // Defensive: revert + tear down if still connected. Never throw from dtor.
@@ -272,7 +281,18 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
 void KortexTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   auto& I = *impl_;
   I.write_command(cmd);
-  I.fb_ = I.base_cyclic->Refresh(I.cmd_, 0);
+  try {
+    I.fb_ = I.base_cyclic->Refresh(I.cmd_, 0, I.cyclic_opts_);
+  } catch (const k_api::KDetailedException&) {
+    throw;  // an error frame the arm sent back, not a lost one
+  } catch (const std::runtime_error& e) {
+    // KORTEX (2.8.0) reports its own wait expiring as a plain runtime_error
+    // "timeout detected: BaseCyclicClient::Refresh". Map exactly that; fb_ and fb
+    // keep the last good feedback. A reply arriving late resolves its own
+    // (abandoned) message id, so it is never taken as the next cycle's reply.
+    if (std::strncmp(e.what(), "timeout detected", 16) != 0) throw;
+    throw TransportTimeout(e.what());
+  }
   I.fill_feedback(fb);
 }
 

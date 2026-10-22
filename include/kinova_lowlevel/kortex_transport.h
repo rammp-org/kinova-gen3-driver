@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -8,7 +9,11 @@ namespace kinova {
 // KORTEX/protobuf headers (kept out of this header via pimpl).
 class KortexTransport : public Transport {
  public:
-  KortexTransport(std::string ip, std::string user = "admin", std::string password = "admin");
+  // cyclic_timeout_ms bounds each exchange() round-trip (KORTEX's own default is
+  // 3000 ms). Normal RTT is ~0.4 ms (p99 0.7 ms, worst seen 7.9 ms under network
+  // load); 20 ms clears that with margin, and expiry throws TransportTimeout.
+  KortexTransport(std::string ip, std::string user = "admin", std::string password = "admin",
+                  uint32_t cyclic_timeout_ms = 20);
   ~KortexTransport() override;
   void connect() override;
   void set_servoing_low_level() override;

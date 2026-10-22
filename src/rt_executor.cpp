@@ -3,7 +3,9 @@
 #include <errno.h>
 #include <time.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstdio>
 
 namespace kinova {
 
@@ -70,9 +72,32 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   JointCommand cmd;  // benign hold: kTorque, zero torque, zero position
   JointFeedback fb;
 
+  // One exchange. false on a TransportTimeout: fb keeps the last good feedback
+  // and cmd is untouched. CommsLost once max_misses happen in a row. Any other
+  // exception propagates unchanged.
+  const int max_misses = std::max(1, cfg_.max_consecutive_misses);
+  int misses = 0;  // consecutive
+  auto exchange_ok = [&]() -> bool {
+    try {
+      t_.exchange(cmd, fb);
+    } catch (const TransportTimeout& e) {
+      if (++misses < max_misses) return false;
+      char msg[256];
+      std::snprintf(msg, sizeof(msg),
+                    "RtExecutor: comms lost after %d consecutive exchange timeouts (last: %s)",
+                    misses, e.what());
+      std::fprintf(stderr, "%s\n", msg);
+      throw CommsLost(msg);
+    }
+    misses = 0;
+    return true;
+  };
+
   // Seed one feedback read with the benign hold command so fb is populated and
-  // the first control compute sees real joint state.
-  t_.exchange(cmd, fb);
+  // the first control compute sees real joint state. A lost frame is retried:
+  // no mode may see fb before one real read.
+  while (!exchange_ok()) {
+  }
 
   uint64_t cycle_index = 0;
   int64_t boundary = ns_now() + period_ns;
@@ -95,8 +120,10 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     const int64_t t0 = ns_now();
     const uint32_t wake_jitter = clamp_u32(t0 - boundary);
 
-    // 3. adopt requested mode at this boundary
-    ControlMode* req = requested_.exchange(nullptr, std::memory_order_acq_rel);
+    // 3. adopt requested mode at this boundary. Deferred while the last exchange
+    //    missed: on_enter seeds from fb, which is then stale.
+    ControlMode* req =
+        misses == 0 ? requested_.exchange(nullptr, std::memory_order_acq_rel) : nullptr;
     if (req && req != active) {
       if (active) active->on_exit();
       // set_actuator_modes performs the pumping handshake; acceptable at a
@@ -106,16 +133,19 @@ void RtExecutor::run(std::atomic<bool>& stop) {
       active = req;
     }
 
-    // 4. comm round-trip
-    t_.exchange(cmd, fb);
+    // 4. comm round-trip. On a miss fb still holds the last good feedback.
+    const bool missed = !exchange_ok();
     const int64_t t1 = ns_now();
     const uint32_t comm_ns = clamp_u32(t1 - t0);
 
     // 5. fault flag from feedback
     const bool fault = fb.fault;
 
-    // 6. compute (or hold last cmd if no active mode)
-    if (active) active->compute(fb, dt_s, cmd);
+    // 6. compute (or hold last cmd if no active mode). Skipped on a miss, so the
+    //    next cycle re-sends this cycle's command unchanged: compute() on stale fb
+    //    would still advance its integrators (JointVelocityMode's q_ref += qd*dt,
+    //    the reference rate limiters, watchdogs) with the arm unobserved.
+    if (active && !missed) active->compute(fb, dt_s, cmd);
     const int64_t t2 = ns_now();
     const uint32_t compute_ns = clamp_u32(t2 - t1);
 
@@ -135,7 +165,7 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     s.comm_ns = comm_ns;
     s.compute_ns = compute_ns;
     s.cycle_ns = clamp_u32(t2 - t0);
-    s.flags = uint16_t((overrun ? 1u : 0u) | (fault ? 2u : 0u));
+    s.flags = uint16_t((overrun ? 1u : 0u) | (fault ? 2u : 0u) | (missed ? 4u : 0u));
     ring_.push(s);  // drop-don't-block; return ignored on the RT path
   }
 }
