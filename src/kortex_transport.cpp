@@ -51,9 +51,6 @@ k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
 // and the first replies after entering low-level servoing are unmeasured, so it
 // keeps KORTEX's own default.
 constexpr std::chrono::milliseconds kSetupTimeout{3000};
-// Pumps in a row that may be lost during a mode switch before it is comms loss
-// (ExecutorConfig::max_consecutive_misses' default).
-constexpr int kMaxPumpMisses = 3;
 }  // namespace
 
 struct KortexTransport::Impl {
@@ -297,15 +294,15 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
   // channel between each call so it does not time out during the switch. A pump
-  // only keeps the channel alive, so a lost one is skipped; kMaxPumpMisses in a
-  // row rethrows the TransportTimeout.
+  // only keeps the channel alive, so a lost one is skipped;
+  // kMaxConsecutiveTimeouts in a row rethrows the TransportTimeout.
   int misses = 0;
   auto pump = [&] {
     try {
       I.pump();
       misses = 0;
     } catch (const TransportTimeout&) {
-      if (++misses >= kMaxPumpMisses) throw;
+      if (++misses >= kMaxConsecutiveTimeouts) throw;
     }
   };
   for (int idx = 1; idx <= I.n_; ++idx) {

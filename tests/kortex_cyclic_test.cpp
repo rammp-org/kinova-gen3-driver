@@ -1,6 +1,8 @@
 // KORTEX build only (-DKINOVA_ENABLE_KORTEX=ON). Drives kortex_cyclic_call()
 // through the SDK's real RouterClient over a fake link, so the lost-frame
 // handling is checked against KORTEX itself, not against a model of it.
+#include "kortex_cyclic.h"
+
 #include <BaseCyclic.pb.h>
 #include <HeaderInfo.h>
 #include <ITransportClient.h>
@@ -15,8 +17,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "kortex_cyclic.h"
 
 namespace k_api = Kinova::Api;
 using namespace kinova;
@@ -152,9 +152,8 @@ TEST(KortexCyclic, ReplyIsReturned) {
 TEST(KortexCyclic, LostReplyIsATimeoutAtTheBound) {
   Rig r;
   const auto t0 = steady_clock::now();
-  EXPECT_THROW(
-      kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(20)),
-      TransportTimeout);
+  EXPECT_THROW(kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(20)),
+               TransportTimeout);
   const auto ms = duration_cast<milliseconds>(steady_clock::now() - t0).count();
   EXPECT_GE(ms, 20);
   EXPECT_LT(ms, 200);
@@ -164,9 +163,8 @@ TEST(KortexCyclic, LostReplyIsATimeoutAtTheBound) {
 // reply: the next call gets its own.
 TEST(KortexCyclic, LateReplyIsNotTakenByTheNextCall) {
   Rig r;
-  EXPECT_THROW(
-      kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(20)),
-      TransportTimeout);
+  EXPECT_THROW(kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(20)),
+               TransportTimeout);
   std::thread arm([&] {
     ASSERT_TRUE(r.link.wait_requests(2));
     r.link.reply(0, 1);  // the stale one first

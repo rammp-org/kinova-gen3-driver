@@ -129,8 +129,9 @@ that heading to the new version and bumps `package.xml`.
   survives a lost exchange: the cycle keeps the last good feedback and re-sends
   the previous command unchanged, sets `CycleSample` bit2, and
   `TelemetrySink::console_line()` gains `comm_timeouts=`. `run()` throws
-  `CommsLost` after `ExecutorConfig::max_consecutive_misses` (default 3, ~60 ms)
-  in a row, after `max_window_misses` within `miss_window` exchanges (default 5
+  `CommsLost` after `ExecutorConfig::max_consecutive_misses` in a row (default
+  the new `kMaxConsecutiveTimeouts` = 3, i.e. 60 ms with no reply at the default
+  cyclic timeout; mode-switch pumps use the same limit), after `max_window_misses` within `miss_window` exchanges (default 5
   in 1000), or when a mode switch's pumps time out. Miss limits below 1 are
   rejected. Other exchange errors propagate as before.
 

@@ -295,7 +295,7 @@ struct ExecutorConfig {
   double   rate_hz = 1000.0;
   Pacing   pacing  = Pacing::kSleepSpin;
   RtConfig rt{};                 // see rt_system.h
-  int      max_consecutive_misses = 3;  // exchange timeouts in a row => CommsLost
+  int      max_consecutive_misses = kMaxConsecutiveTimeouts;  // 3 exchange timeouts in a row => CommsLost
   int      max_window_misses = 5;       // ...or this many within miss_window => CommsLost
   int      miss_window = 1000;          // exchanges
 };
@@ -303,7 +303,7 @@ class CommsLost : public std::runtime_error {};  // thrown by run()
 
 class RtExecutor {
  public:
-  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit < 1
+  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit or miss_window < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
   void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread
 };
@@ -368,6 +368,9 @@ class Transport {
 };
 // a cyclic round-trip did not complete within the transport's cyclic timeout
 class TransportTimeout : public std::runtime_error {};
+// TransportTimeouts in a row taken as the link being down; the default for
+// ExecutorConfig::max_consecutive_misses and the limit for mode-switch pumps
+inline constexpr int kMaxConsecutiveTimeouts = 3;
 ```
 
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
@@ -382,9 +385,10 @@ class TransportTimeout : public std::runtime_error {};
   `TransportTimeout`. The calls go through `IRouterClient::send` and wait on the
   reply with a `steady_clock` deadline, so a timeout is typed rather than
   recognised from KORTEX's error message. `set_actuator_modes` skips isolated lost
-  pumps (3 in a row rethrow). `set_servoing_low_level`'s seed reads keep 3000 ms.
-  Error frames from the arm, and failed local sends, still throw
-  `KDetailedException`.
+  pumps (`kMaxConsecutiveTimeouts` in a row rethrow). `set_servoing_low_level`'s
+  seed reads keep 3000 ms. An error frame from the arm still throws
+  `KDetailedException`, and a failed local send (`sendto`) throws KORTEX's
+  `std::runtime_error`; both are fatal (#96).
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:

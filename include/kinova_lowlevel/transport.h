@@ -13,6 +13,11 @@ class TransportTimeout : public std::runtime_error {
  public:
   using std::runtime_error::runtime_error;
 };
+// TransportTimeouts in a row taken as the link being down rather than dropping
+// frames: that many cyclic timeouts with no reply (60 ms at KortexTransport's
+// default 20 ms). ExecutorConfig::max_consecutive_misses defaults to it; the
+// pumps in KortexTransport::set_actuator_modes() always use it.
+inline constexpr int kMaxConsecutiveTimeouts = 3;
 using ActuatorModes = std::array<ActuatorMode, kNumJoints>;
 class Transport {
  public:

@@ -14,12 +14,14 @@ struct ExecutorConfig {
   RtConfig rt{};
   // Consecutive exchange timeouts (TransportTimeout) treated as comms loss:
   // run() throws CommsLost. Each miss has already blocked for the transport's
-  // cyclic timeout (KortexTransport: 20 ms), so 3 is ~60 ms with no reply.
-  int max_consecutive_misses = 3;
+  // cyclic timeout, so this is max_consecutive_misses x that timeout with no
+  // reply (default: 3 x KortexTransport's 20 ms = 60 ms).
+  int max_consecutive_misses = kMaxConsecutiveTimeouts;
   // Any good exchange resets that count, so a link losing every other frame would
   // never trip it. Also comms loss: max_window_misses timeouts within the last
   // miss_window exchanges. 5 in 1000 (>= 1 s at 1 kHz, more while misses block)
-  // trips an every-other-frame loss in ~100 ms; isolated misses never add up.
+  // trips an every-other-frame loss after 5 timeouts (~100 ms at 20 ms each);
+  // isolated misses never add up.
   int max_window_misses = 5;
   int miss_window = 1000;  // exchanges
 };
@@ -33,7 +35,8 @@ class CommsLost : public std::runtime_error {
 };
 class RtExecutor {
  public:
-  // Throws std::invalid_argument if a miss limit or miss_window is < 1.
+  // Throws std::invalid_argument if max_consecutive_misses, max_window_misses or
+  // miss_window is < 1.
   RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);
   // Ownership: the caller retains ownership of `*m`. The executor only stores a
   // raw pointer and adopts it at a cycle boundary, so the ControlMode MUST
