@@ -166,8 +166,9 @@ thread, which reads the reply off the socket. The SDK starts it as a normal
 thread on any core, where other load can preempt it and delay replies. Pass
 `KortexTransport` an `rx_priority` one below the executor's priority and
 `rx_cpu` equal to its core (the apps do this from `--rt-priority`/`--cpu`). It
-sits above the NIC IRQ threads (FIFO 50) and yields to the RT loop, which only
-blocks while it waits for that reply. Only this one SDK thread is raised; the TCP
+yields to the RT loop and runs while the loop is blocked, either waiting for the
+reply or sleeping between cycles. At the default `--rt-priority 80` it also sits
+above the NIC IRQ threads (FIFO 50). Only this one SDK thread is raised; the TCP
 receive and session keepalive threads stay normal. `connect()` prints the outcome
 to stderr. Confirm with:
 

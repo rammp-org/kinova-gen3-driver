@@ -128,7 +128,7 @@ that heading to the new version and bumps `package.xml`.
 - A single lost KORTEX UDP frame no longer kills the driver. `KortexTransport`
   bounds every cyclic call on the RT path (`exchange`, `send`, `receive`, and the
   pumps during a mode switch) at `cyclic_timeout_ms` (new constructor argument,
-  default 20 ms; KORTEX's default was 3000 ms) and reports expiry as the new
+  sixth, after `rx_priority`/`rx_cpu`; default 20 ms; KORTEX's default was 3000 ms) and reports expiry as the new
   `TransportTimeout`. The timeout is detected by type, not by matching KORTEX's
   error message: the calls wait on `IRouterClient::send`'s reply with a
   `steady_clock` deadline. A mode switch skips isolated lost pumps. `RtExecutor`
