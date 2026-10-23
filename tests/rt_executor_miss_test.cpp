@@ -27,7 +27,9 @@ class DroppingTransport : public Transport {
   }
   void connect() override {}
   void set_servoing_low_level() override {}
-  void set_actuator_modes(const ActuatorModes&) override {}
+  void set_actuator_modes(const ActuatorModes&) override {
+    if (modes_timeout) throw TransportTimeout("timeout detected: fake pump");
+  }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     const uint64_t i = calls++;
     sent.push_back(c);
@@ -44,6 +46,7 @@ class DroppingTransport : public Transport {
   uint64_t calls = 0;
   std::vector<JointCommand> sent;
   uint64_t throw_runtime_at = UINT64_MAX;
+  bool modes_timeout = false;
   std::function<void(uint64_t)> on_call;
 
  private:
@@ -216,4 +219,67 @@ TEST(RtExecutorMiss, OtherExceptionsPropagate) {
     EXPECT_STREQ(e.what(), "not a timeout");
   }
   EXPECT_EQ(t.calls, 6u);
+}
+
+// Misses that never come in a row still end in CommsLost once max_window_misses
+// fall within miss_window exchanges: every other frame lost trips it at the 5th.
+TEST(RtExecutorMiss, AlternatingMissesTripTheWindowBudget) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t i) { return i >= 10 && i % 2 == 1; }, 1000, stop);
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&mode);
+
+  EXPECT_THROW(ex.run(stop), CommsLost);
+  EXPECT_EQ(t.calls, 20u);  // misses at 11, 13, 15, 17, 19
+}
+
+// The window boundary: 3 misses spanning exactly miss_window exchanges trip it,
+// 3 spanning one more do not.
+TEST(RtExecutorMiss, WindowBudgetBoundary) {
+  ExecutorConfig c = cfg(3);
+  c.max_window_misses = 3;
+  c.miss_window = 100;
+  {
+    std::atomic<bool> stop{false};
+    DroppingTransport t([](uint64_t i) { return i > 0 && i % 50 == 0; }, 400, stop);
+    SampleRing ring(1024);
+    RtExecutor ex(t, ring, c);
+    ASSERT_NO_THROW(ex.run(stop));  // 50, 100, 150: span 101 exchanges
+  }
+  {
+    std::atomic<bool> stop{false};
+    DroppingTransport t([](uint64_t i) { return (i > 0 && i % 50 == 0) || i == 149; }, 400, stop);
+    SampleRing ring(1024);
+    RtExecutor ex(t, ring, c);
+    EXPECT_THROW(ex.run(stop), CommsLost);  // 50, 100, 149: span 100
+    EXPECT_EQ(t.calls, 150u);
+  }
+}
+
+// A mode switch whose pumps keep timing out is comms loss, not a raw timeout.
+TEST(RtExecutorMiss, ModeSwitchTimeoutIsCommsLost) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.modes_timeout = true;
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&mode);
+
+  EXPECT_THROW(ex.run(stop), CommsLost);
+  EXPECT_EQ(mode.entered_frame, UINT64_MAX);  // never entered
+}
+
+// Miss limits below 1 are rejected, not clamped.
+TEST(RtExecutorMiss, InvalidMissConfigIsRejected) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 10, stop);
+  SampleRing ring(16);
+  for (int field = 0; field < 3; ++field) {
+    ExecutorConfig c = cfg(3);
+    (field == 0 ? c.max_consecutive_misses : field == 1 ? c.max_window_misses : c.miss_window) = 0;
+    EXPECT_THROW(RtExecutor(t, ring, c), std::invalid_argument) << "field " << field;
+  }
 }

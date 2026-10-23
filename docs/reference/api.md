@@ -296,12 +296,14 @@ struct ExecutorConfig {
   Pacing   pacing  = Pacing::kSleepSpin;
   RtConfig rt{};                 // see rt_system.h
   int      max_consecutive_misses = 3;  // exchange timeouts in a row => CommsLost
+  int      max_window_misses = 5;       // ...or this many within miss_window => CommsLost
+  int      miss_window = 1000;          // exchanges
 };
 class CommsLost : public std::runtime_error {};  // thrown by run()
 
 class RtExecutor {
  public:
-  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);
+  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
   void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread
 };
@@ -314,7 +316,9 @@ class RtExecutor {
   That cycle keeps the last good feedback, skips `compute` (so the next cycle
   re-sends the previous command unchanged: no integration on stale feedback),
   defers any pending mode switch until a good exchange, and sets `CycleSample`
-  bit2. `max_consecutive_misses` in a row is comms loss: `run` throws
+  bit2. Comms loss is `max_consecutive_misses` in a row, `max_window_misses`
+  within the last `miss_window` exchanges (so a link losing every other frame
+  can't run on forever), or a mode switch whose pumps time out: `run` throws
   `CommsLost` and the caller does `safe_shutdown()`. Any other exception from
   `exchange` propagates as before.
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
@@ -362,7 +366,7 @@ class Transport {
   virtual void receive(JointFeedback&) = 0;
   virtual void safe_shutdown() = 0;
 };
-// exchange() round-trip did not complete within the transport's cyclic timeout
+// a cyclic round-trip did not complete within the transport's cyclic timeout
 class TransportTimeout : public std::runtime_error {};
 ```
 
@@ -372,9 +376,14 @@ class TransportTimeout : public std::runtime_error {};
   hardware.
 - **`KortexTransport(ip, user = "admin", password = "admin", cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
-  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `exchange` bounds each
-  `Refresh` at `cyclic_timeout_ms` (KORTEX's default is 3000 ms) and maps KORTEX's
-  own timeout to `TransportTimeout`; error frames from the arm still throw
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. Every cyclic call on the RT
+  path (`exchange`, `send`, `receive`, the pumps in `set_actuator_modes`) is
+  bounded at `cyclic_timeout_ms` (KORTEX's default is 3000 ms); expiry is a
+  `TransportTimeout`. The calls go through `IRouterClient::send` and wait on the
+  reply with a `steady_clock` deadline, so a timeout is typed rather than
+  recognised from KORTEX's error message. `set_actuator_modes` skips isolated lost
+  pumps (3 in a row rethrow). `set_servoing_low_level`'s seed reads keep 3000 ms.
+  Error frames from the arm, and failed local sends, still throw
   `KDetailedException`.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —

@@ -3,9 +3,10 @@
 #include <errno.h>
 #include <time.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <stdexcept>
+#include <vector>
 
 namespace kinova {
 
@@ -51,7 +52,12 @@ inline uint32_t clamp_u32(int64_t v) {
 }  // namespace
 
 RtExecutor::RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg)
-    : t_(t), ring_(ring), cfg_(cfg) {}
+    : t_(t), ring_(ring), cfg_(cfg) {
+  if (cfg_.max_consecutive_misses < 1 || cfg_.max_window_misses < 1 || cfg_.miss_window < 1) {
+    throw std::invalid_argument(
+        "ExecutorConfig: max_consecutive_misses, max_window_misses and miss_window must be >= 1");
+  }
+}
 
 void RtExecutor::request_mode(ControlMode* m) noexcept {
   requested_.store(m, std::memory_order_release);
@@ -72,22 +78,36 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   JointCommand cmd;  // benign hold: kTorque, zero torque, zero position
   JointFeedback fb;
 
+  auto comms_lost = [](const char* why, const char* last) {
+    char msg[256];
+    std::snprintf(msg, sizeof(msg), "RtExecutor: comms lost: %s (last: %s)", why, last);
+    std::fprintf(stderr, "%s\n", msg);
+    throw CommsLost(msg);
+  };
+
   // One exchange. false on a TransportTimeout: fb keeps the last good feedback
-  // and cmd is untouched. CommsLost once max_misses happen in a row. Any other
-  // exception propagates unchanged.
-  const int max_misses = std::max(1, cfg_.max_consecutive_misses);
+  // and cmd is untouched. CommsLost on max_consecutive_misses in a row, or
+  // max_window_misses within miss_window exchanges. Any other exception
+  // propagates unchanged.
   int misses = 0;  // consecutive
+  // Exchange index of each of the last max_window_misses misses, as a ring.
+  std::vector<uint64_t> miss_at(size_t(cfg_.max_window_misses), 0);
+  uint64_t exchanges = 0, total_misses = 0;
   auto exchange_ok = [&]() -> bool {
+    const uint64_t n = exchanges++;
     try {
       t_.exchange(cmd, fb);
     } catch (const TransportTimeout& e) {
-      if (++misses < max_misses) return false;
-      char msg[256];
-      std::snprintf(msg, sizeof(msg),
-                    "RtExecutor: comms lost after %d consecutive exchange timeouts (last: %s)",
-                    misses, e.what());
-      std::fprintf(stderr, "%s\n", msg);
-      throw CommsLost(msg);
+      if (++misses >= cfg_.max_consecutive_misses) {
+        comms_lost("max_consecutive_misses exchange timeouts in a row", e.what());
+      }
+      miss_at[total_misses++ % miss_at.size()] = n;
+      // The oldest of the last max_window_misses misses, this one included.
+      if (total_misses >= miss_at.size() &&
+          n - miss_at[total_misses % miss_at.size()] < uint64_t(cfg_.miss_window)) {
+        comms_lost("max_window_misses exchange timeouts within miss_window exchanges", e.what());
+      }
+      return false;
     }
     misses = 0;
     return true;
@@ -127,8 +147,13 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     if (req && req != active) {
       if (active) active->on_exit();
       // set_actuator_modes performs the pumping handshake; acceptable at a
-      // boundary on a mode change only.
-      t_.set_actuator_modes(req->required_modes());
+      // boundary on a mode change only. It survives isolated lost pumps itself,
+      // so a TransportTimeout out of it is comms loss.
+      try {
+        t_.set_actuator_modes(req->required_modes());
+      } catch (const TransportTimeout& e) {
+        comms_lost("cyclic pumps timed out during a mode switch", e.what());
+      }
       req->on_enter(fb);
       active = req;
     }

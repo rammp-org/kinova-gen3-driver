@@ -120,13 +120,19 @@ that heading to the new version and bumps `package.xml`.
 ### Fixed
 
 - A single lost KORTEX UDP frame no longer kills the driver. `KortexTransport`
-  bounds the cyclic `Refresh` at `cyclic_timeout_ms` (new constructor argument,
+  bounds every cyclic call on the RT path (`exchange`, `send`, `receive`, and the
+  pumps during a mode switch) at `cyclic_timeout_ms` (new constructor argument,
   default 20 ms; KORTEX's default was 3000 ms) and reports expiry as the new
-  `TransportTimeout`. `RtExecutor` survives it: the cycle keeps the last good
-  feedback and re-sends the previous command unchanged, sets `CycleSample` bit2,
-  and `TelemetrySink::console_line()` gains `comm_timeouts=`. After
-  `ExecutorConfig::max_consecutive_misses` (default 3, ~60 ms) in a row, `run()`
-  throws `CommsLost`. Other exchange errors propagate as before.
+  `TransportTimeout`. The timeout is detected by type, not by matching KORTEX's
+  error message: the calls wait on `IRouterClient::send`'s reply with a
+  `steady_clock` deadline. A mode switch skips isolated lost pumps. `RtExecutor`
+  survives a lost exchange: the cycle keeps the last good feedback and re-sends
+  the previous command unchanged, sets `CycleSample` bit2, and
+  `TelemetrySink::console_line()` gains `comm_timeouts=`. `run()` throws
+  `CommsLost` after `ExecutorConfig::max_consecutive_misses` (default 3, ~60 ms)
+  in a row, after `max_window_misses` within `miss_window` exchanges (default 5
+  in 1000), or when a mode switch's pumps time out. Miss limits below 1 are
+  rejected. Other exchange errors propagate as before.
 
 ## [1.2.0] — 2026-10-02
 

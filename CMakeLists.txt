@@ -379,6 +379,13 @@ add_executable(unit_tests
     tests/interface/gains_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
+if(KINOVA_ENABLE_KORTEX)
+    # Drives src/kortex_cyclic.h through the SDK's real RouterClient (no arm).
+    target_sources(unit_tests PRIVATE tests/kortex_cyclic_test.cpp)
+    target_include_directories(unit_tests PRIVATE src ${KORTEX_INCLUDE_DIRS})
+    target_compile_definitions(unit_tests PRIVATE _OS_UNIX)
+    target_link_libraries(unit_tests PRIVATE ${KORTEX_LIB} dl)
+endif()
 
 # URDF path for tests that load the Gen3 model (used by later tasks).
 target_compile_definitions(unit_tests PRIVATE
