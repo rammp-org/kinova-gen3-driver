@@ -338,6 +338,9 @@ struct RtConfig {
 struct RtReport { bool mlock_ok; bool cpu_latency_pinned; int policy, priority, cpu; std::string note; };
 
 RtReport enable_rt(const RtConfig&);   // best-effort; NEVER throws (degrades to SCHED_OTHER)
+// SCHED_FIFO `priority` on another, already-running thread, then pin it to `cpu` (-1 = no pinning)
+// only if the priority took. NEVER throws; returns "" on success, else what failed.
+std::string raise_thread(pthread_t thread, int priority, int cpu);
 
 struct ResourceUsage { uint64_t minflt, majflt, nvcsw, nivcsw; };
 ResourceUsage read_usage();            // getrusage(RUSAGE_THREAD) — per calling thread
@@ -345,7 +348,9 @@ std::string introspect();              // applied sched policy/priority/affinity
 ```
 
 `enable_rt` is best-effort: without privileges it logs a note and runs at
-`SCHED_OTHER` (no hard-RT guarantees, but it still runs). The driver needs **no
+`SCHED_OTHER` (no hard-RT guarantees, but it still runs). `raise_thread` is for
+threads the driver doesn't create, such as the KORTEX SDK's UDP receive thread
+(`KortexTransport`'s `rx_priority`/`rx_cpu`). The driver needs **no
 runtime sudo** — see [Real-Time Tuning](../rt-tuning.md). `majflt+=0` across a run
 proves memory stayed locked.
 
@@ -377,9 +382,14 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No
   hardware.
-- **`KortexTransport(ip, user = "admin", password = "admin", cyclic_timeout_ms = 20)`**
+- **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
-  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. Every cyclic call on the RT
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` moves the SDK's
+  UDP receive thread — the one every `exchange()` waits on — to `SCHED_FIFO`
+  `rx_priority` pinned to `rx_cpu` (via `raise_thread`, see
+  [rt_system](#real-time-system-rt_systemh)); pass one below the executor's priority and its CPU.
+  `rx_priority = 0` leaves it a normal thread. Best effort: the outcome goes to
+  stderr either way. Every cyclic call on the RT
   path (`exchange`, `send`, `receive`, the pumps in `set_actuator_modes`) is
   bounded at `cyclic_timeout_ms` (KORTEX's default is 3000 ms); expiry is a
   `TransportTimeout`. The calls go through `IRouterClient::send` and wait on the

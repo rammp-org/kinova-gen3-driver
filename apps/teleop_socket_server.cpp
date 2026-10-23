@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
       std::cerr << "real-robot mode requires --ip <addr> (or pass --sim)\n";
       return 2;
     }
-    base_transport = std::make_unique<KortexTransport>(ip);
+    base_transport = std::make_unique<KortexTransport>(ip, "admin", "admin", rt_priority - 1, cpu);
 #else
     std::cerr << "built without KORTEX; only --sim is available\n";
     return 2;

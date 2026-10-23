@@ -80,7 +80,9 @@ leaking into each other. When editing, preserve these invariants:
   velocity) slot in as new implementations.
 - **`RtExecutor` is the ONLY thread-aware unit.** It owns the single RT thread
   and per cycle: pace → `exchange` → check faults → `compute` → push a
-  `CycleSample`. Neither `Transport` nor `ControlMode` knows a thread exists.
+  `CycleSample`. Neither `Transport` nor `ControlMode` knows a thread exists —
+  except that `KortexTransport::connect()` hands the KORTEX SDK's own UDP
+  receive thread to `rt_system`'s `raise_thread`.
   **Mode switch = atomic-pointer swap adopted at a cycle boundary**
   (`request_mode`); the executor stores a raw pointer and never owns the mode —
   the ControlMode must outlive the executor.

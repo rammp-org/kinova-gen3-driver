@@ -1,4 +1,6 @@
 #pragma once
+#include <pthread.h>
+
 #include <cstdint>
 #include <string>
 namespace kinova {
@@ -17,6 +19,10 @@ struct RtReport {
   std::string note;
 };
 RtReport enable_rt(const RtConfig&);  // best-effort; never throws
+// Moves an already-running thread (e.g. one a vendor SDK started) to SCHED_FIFO `priority` and,
+// if that took, pins it to `cpu` (-1 = leave unpinned). Pinning a normal thread onto the RT loop's
+// core would starve it. Best effort, never throws; returns "" on success, else what failed.
+std::string raise_thread(pthread_t thread, int priority, int cpu);
 struct ResourceUsage {
   uint64_t minflt = 0, majflt = 0, nvcsw = 0, nivcsw = 0;
 };
