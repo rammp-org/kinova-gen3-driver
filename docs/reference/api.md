@@ -344,9 +344,13 @@ class Transport {
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No
   hardware.
-- **`KortexTransport(const std::string& ip)`** (`kortex_transport.h`, KORTEX build
-  only) — the real Gen3 low-level handshake. Compiled in only with
-  `-DKINOVA_ENABLE_KORTEX=ON`.
+- **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1)`**
+  (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `rx_priority`/`rx_cpu` create
+  the SDK's UDP receive thread — the one every `exchange()` waits on — at
+  `SCHED_FIFO` `rx_priority` on `rx_cpu`; pass one below the executor's priority
+  and its CPU. Best effort: without the privilege it stays a normal, unpinned
+  thread and a line goes to stderr.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:

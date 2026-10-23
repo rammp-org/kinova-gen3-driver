@@ -8,7 +8,10 @@ namespace kinova {
 // KORTEX/protobuf headers (kept out of this header via pimpl).
 class KortexTransport : public Transport {
  public:
-  KortexTransport(std::string ip, std::string user = "admin", std::string password = "admin");
+  // rx_priority / rx_cpu: SCHED_FIFO priority and CPU for the SDK's UDP receive thread, which
+  // every exchange() waits on. The defaults leave it a normal thread.
+  KortexTransport(std::string ip, std::string user = "admin", std::string password = "admin",
+                  int rx_priority = 0, int rx_cpu = -1);
   ~KortexTransport() override;
   void connect() override;
   void set_servoing_low_level() override;

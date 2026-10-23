@@ -7,9 +7,13 @@
 #include <SessionManager.h>
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
+#include <pthread.h>
+#include <sched.h>
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -31,6 +35,50 @@ constexpr float kPctPerUnit = 100.0f;
 
 inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
+// TransportClientUdp::connect() starts the SDK's receive thread, which reads every Refresh() reply
+// off the socket, so the RT loop waits on it each cycle. A new thread inherits its creator's policy
+// and affinity, so connect with this thread briefly at `priority` on `cpu`: that raises only the
+// UDP receive thread, not the TCP receive or session keepalive threads. Best effort, like
+// enable_rt(), but the CPU is pinned only if the priority took: a normal thread pinned next to the
+// RT loop's busy-spin is worse off than an unpinned one.
+void connect_udp(k_api::TransportClientUdp& udp, const std::string& ip, int priority, int cpu) {
+  if (priority <= 0) {
+    udp.connect(ip, kUdpPort);
+    return;
+  }
+  const pthread_t self = pthread_self();
+  int policy;
+  sched_param saved{};
+  cpu_set_t mask;
+  pthread_getschedparam(self, &policy, &saved);
+  pthread_getaffinity_np(self, sizeof(mask), &mask);
+  auto restore = [&] {
+    pthread_setschedparam(self, policy, &saved);
+    pthread_setaffinity_np(self, sizeof(mask), &mask);
+  };
+
+  sched_param p{};
+  p.sched_priority = priority;
+  if (int err = pthread_setschedparam(self, SCHED_FIFO, &p)) {
+    std::fprintf(stderr, "KortexTransport: UDP receive thread left SCHED_OTHER, unpinned: %s\n",
+                 std::strerror(err));
+  } else if (cpu >= 0) {
+    cpu_set_t one;
+    CPU_ZERO(&one);
+    CPU_SET(cpu, &one);
+    if (int err = pthread_setaffinity_np(self, sizeof(one), &one))
+      std::fprintf(stderr, "KortexTransport: UDP receive thread not pinned to CPU %d: %s\n", cpu,
+                   std::strerror(err));
+  }
+  try {
+    udp.connect(ip, kUdpPort);
+  } catch (...) {
+    restore();
+    throw;
+  }
+  restore();
+}
+
 // Map our ActuatorMode -> KORTEX ActuatorConfig control mode.
 k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
   switch (m) {
@@ -49,6 +97,7 @@ k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
 
 struct KortexTransport::Impl {
   std::string ip, user, password;
+  int rx_priority, rx_cpu;
 
   // RAII-owned KORTEX objects (creation order matters; destroyed in reverse).
   std::unique_ptr<k_api::TransportClientTcp> tcp;
@@ -69,8 +118,12 @@ struct KortexTransport::Impl {
   bool connected_ = false;
   bool low_level_ = false;
 
-  explicit Impl(std::string ip_in, std::string user_in, std::string password_in)
-      : ip(std::move(ip_in)), user(std::move(user_in)), password(std::move(password_in)) {}
+  Impl(std::string ip_in, std::string user_in, std::string password_in, int rx_prio, int rx_cpu_in)
+      : ip(std::move(ip_in)),
+        user(std::move(user_in)),
+        password(std::move(password_in)),
+        rx_priority(rx_prio),
+        rx_cpu(rx_cpu_in) {}
 
   // Refresh that re-sends current measured positions + zero torque, keeping the
   // cyclic channel alive (used between per-actuator control-mode switches).
@@ -181,8 +234,10 @@ struct KortexTransport::Impl {
   }
 };
 
-KortexTransport::KortexTransport(std::string ip, std::string user, std::string password)
-    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password))) {}
+KortexTransport::KortexTransport(std::string ip, std::string user, std::string password,
+                                 int rx_priority, int rx_cpu)
+    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password), rx_priority,
+                                   rx_cpu)) {}
 
 KortexTransport::~KortexTransport() {
   // Defensive: revert + tear down if still connected. Never throw from dtor.
@@ -197,7 +252,7 @@ void KortexTransport::connect() {
   I.tcp = std::make_unique<k_api::TransportClientTcp>();
   I.udp = std::make_unique<k_api::TransportClientUdp>();
   I.tcp->connect(I.ip, kTcpPort);
-  I.udp->connect(I.ip, kUdpPort);
+  connect_udp(*I.udp, I.ip, I.rx_priority, I.rx_cpu);
 
   auto on_err = [](k_api::KError) {};
   I.tcp_router = std::make_unique<k_api::RouterClient>(I.tcp.get(), on_err);
