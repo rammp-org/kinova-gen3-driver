@@ -295,11 +295,15 @@ struct ExecutorConfig {
   double   rate_hz = 1000.0;
   Pacing   pacing  = Pacing::kSleepSpin;
   RtConfig rt{};                 // see rt_system.h
+  int      max_consecutive_misses = kMaxConsecutiveTimeouts;  // 3 exchange timeouts in a row => CommsLost
+  int      max_window_misses = 5;       // ...or this many within miss_window => CommsLost
+  int      miss_window = 1000;          // exchanges
 };
+class CommsLost : public std::runtime_error {};  // thrown by run()
 
 class RtExecutor {
  public:
-  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);
+  RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit or miss_window < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
   void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread
 };
@@ -308,6 +312,15 @@ class RtExecutor {
 - `request_mode` stores a raw pointer adopted at a cycle boundary; the caller
   **retains ownership** and must keep the mode alive while active.
 - `run` blocks until `stop` is set; it calls `enable_rt()` on its own thread.
+- **Lost frames:** a `TransportTimeout` from `exchange` does not end the loop.
+  That cycle keeps the last good feedback, skips `compute` (so the next cycle
+  re-sends the previous command unchanged: no integration on stale feedback),
+  defers any pending mode switch until a good exchange, and sets `CycleSample`
+  bit2. Comms loss is `max_consecutive_misses` in a row, `max_window_misses`
+  within the last `miss_window` exchanges (so a link losing every other frame
+  can't run on forever), or a mode switch whose pumps time out: `run` throws
+  `CommsLost` and the caller does `safe_shutdown()`. Any other exception from
+  `exchange` propagates as before.
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
 
@@ -353,15 +366,29 @@ class Transport {
   virtual void receive(JointFeedback&) = 0;
   virtual void safe_shutdown() = 0;
 };
+// a cyclic round-trip did not complete within the transport's cyclic timeout
+class TransportTimeout : public std::runtime_error {};
+// TransportTimeouts in a row taken as the link being down; the default for
+// ExecutorConfig::max_consecutive_misses and the limit for mode-switch pumps
+inline constexpr int kMaxConsecutiveTimeouts = 3;
 ```
 
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No
   hardware.
-- **`KortexTransport(const std::string& ip)`** (`kortex_transport.h`, KORTEX build
-  only) — the real Gen3 low-level handshake. Compiled in only with
-  `-DKINOVA_ENABLE_KORTEX=ON`.
+- **`KortexTransport(ip, user = "admin", password = "admin", cyclic_timeout_ms = 20)`**
+  (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. Every cyclic call on the RT
+  path (`exchange`, `send`, `receive`, the pumps in `set_actuator_modes`) is
+  bounded at `cyclic_timeout_ms` (KORTEX's default is 3000 ms); expiry is a
+  `TransportTimeout`. The calls go through `IRouterClient::send` and wait on the
+  reply with a `steady_clock` deadline, so a timeout is typed rather than
+  recognised from KORTEX's error message. `set_actuator_modes` skips isolated lost
+  pumps (`kMaxConsecutiveTimeouts` in a row rethrow). `set_servoing_low_level`'s
+  seed reads keep 3000 ms. An error frame from the arm still throws
+  `KDetailedException`, and a failed local send (`sendto`) throws KORTEX's
+  `std::runtime_error`; both are fatal (#96).
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:
@@ -381,7 +408,7 @@ same shape, forward everything, and hook the one call each cares about:
 struct CycleSample {
   uint64_t cycle_index;
   uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;
-  uint16_t flags;          // bit0 overrun, bit1 fault
+  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout
 };
 
 class SampleRing {                       // lock-free SPSC, drop-don't-block

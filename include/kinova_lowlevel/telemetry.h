@@ -10,7 +10,7 @@ struct CycleSample {
   uint32_t comm_ns = 0;
   uint32_t compute_ns = 0;
   uint32_t cycle_ns = 0;
-  uint16_t flags = 0;  // bit0 overrun, bit1 fault
+  uint16_t flags = 0;  // bit0 overrun, bit1 fault, bit2 comm timeout (exchange missed)
 };
 class SampleRing {
  public:

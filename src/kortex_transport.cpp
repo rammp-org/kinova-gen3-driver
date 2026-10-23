@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "kinova_lowlevel/units.h"
+#include "kortex_cyclic.h"
 
 namespace k_api = Kinova::Api;
 
@@ -45,6 +46,11 @@ k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
   }
   return k_api::ActuatorConfig::ControlMode::POSITION;
 }
+
+// Bound for the cyclic reads in set_servoing_low_level(): setup, not the RT path,
+// and the first replies after entering low-level servoing are unmeasured, so it
+// keeps KORTEX's own default.
+constexpr std::chrono::milliseconds kSetupTimeout{3000};
 }  // namespace
 
 struct KortexTransport::Impl {
@@ -58,19 +64,45 @@ struct KortexTransport::Impl {
   std::unique_ptr<k_api::SessionManager> tcp_sess;
   std::unique_ptr<k_api::SessionManager> udp_sess;
   std::unique_ptr<k_api::Base::BaseClient> base;
+  // Unused for calls (they go through kortex_cyclic_call()); kept for what its
+  // constructor registers with udp_router.
   std::unique_ptr<k_api::BaseCyclic::BaseCyclicClient> base_cyclic;
   std::unique_ptr<k_api::ActuatorConfig::ActuatorConfigClient> act_cfg;
 
   k_api::BaseCyclic::Command cmd_;
   k_api::BaseCyclic::Feedback fb_;  // latest feedback (kept to seed passthrough positions)
+  std::chrono::milliseconds cyclic_timeout_;  // every cyclic call on the RT path
 
   int n_ = 0;
   uint16_t frame_id_ = 0;
   bool connected_ = false;
   bool low_level_ = false;
 
-  explicit Impl(std::string ip_in, std::string user_in, std::string password_in)
-      : ip(std::move(ip_in)), user(std::move(user_in)), password(std::move(password_in)) {}
+  explicit Impl(std::string ip_in, std::string user_in, std::string password_in,
+                uint32_t cyclic_timeout_ms)
+      : ip(std::move(ip_in)),
+        user(std::move(user_in)),
+        password(std::move(password_in)),
+        cyclic_timeout_(cyclic_timeout_ms) {}
+
+  // See kortex_cyclic_call(): bounded, and a timeout is a TransportTimeout.
+  k_api::Frame cyclic_call(uint32_t fct, const std::string& payload,
+                           std::chrono::milliseconds timeout) {
+    return kortex_cyclic_call(*udp_router, fct, payload, timeout);
+  }
+
+  // Refresh: send cmd_, store the feedback in fb_. fb_ is untouched on a timeout.
+  void refresh(std::chrono::milliseconds timeout) {
+    k_api::Frame reply =
+        cyclic_call(k_api::BaseCyclic::eUidRefresh, cmd_.SerializeAsString(), timeout);
+    parse_feedback(reply);
+  }
+
+  void parse_feedback(const k_api::Frame& reply) {
+    if (!fb_.ParseFromString(reply.payload())) {
+      throw std::runtime_error("KortexTransport: unparseable BaseCyclic feedback");
+    }
+  }
 
   // Refresh that re-sends current measured positions + zero torque, keeping the
   // cyclic channel alive (used between per-actuator control-mode switches).
@@ -79,7 +111,7 @@ struct KortexTransport::Impl {
       cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
       cmd_.mutable_actuators(i)->set_torque_joint(0.0f);
     }
-    fb_ = base_cyclic->Refresh(cmd_, 0);
+    refresh(cyclic_timeout_);
   }
 
   void fill_feedback(JointFeedback& fb) {
@@ -186,8 +218,10 @@ struct KortexTransport::Impl {
   }
 };
 
-KortexTransport::KortexTransport(std::string ip, std::string user, std::string password)
-    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password))) {}
+KortexTransport::KortexTransport(std::string ip, std::string user, std::string password,
+                                 uint32_t cyclic_timeout_ms)
+    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password),
+                                   cyclic_timeout_ms)) {}
 
 KortexTransport::~KortexTransport() {
   // Defensive: revert + tear down if still connected. Never throw from dtor.
@@ -247,44 +281,56 @@ void KortexTransport::set_servoing_low_level() {
   I.base->SetServoingMode(sm);
 
   // Seed: read feedback, build a command echoing current positions, one Refresh.
-  I.fb_ = I.base_cyclic->RefreshFeedback();
+  I.parse_feedback(I.cyclic_call(k_api::BaseCyclic::eUidRefreshFeedback, "", kSetupTimeout));
   I.cmd_.clear_actuators();
   for (int i = 0; i < I.n_; ++i) {
     I.cmd_.add_actuators()->set_position(I.fb_.actuators(i).position());
   }
-  I.fb_ = I.base_cyclic->Refresh(I.cmd_);
+  I.refresh(kSetupTimeout);
   I.low_level_ = true;
 }
 
 void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
-  // channel between each call so it does not time out during the switch.
+  // channel between each call so it does not time out during the switch. A pump
+  // only keeps the channel alive, so a lost one is skipped;
+  // kMaxConsecutiveTimeouts in a row rethrows the TransportTimeout.
+  int misses = 0;
+  auto pump = [&] {
+    try {
+      I.pump();
+      misses = 0;
+    } catch (const TransportTimeout&) {
+      if (++misses >= kMaxConsecutiveTimeouts) throw;
+    }
+  };
   for (int idx = 1; idx <= I.n_; ++idx) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
     I.act_cfg->SetControlMode(cm_msg, idx);
-    I.pump();
+    pump();
   }
-  for (int k = 0; k < 10; ++k) I.pump();
+  for (int k = 0; k < 10; ++k) pump();
 }
 
 void KortexTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   auto& I = *impl_;
   I.write_command(cmd);
-  I.fb_ = I.base_cyclic->Refresh(I.cmd_, 0);
+  I.refresh(I.cyclic_timeout_);  // on a TransportTimeout fb keeps the last good feedback
   I.fill_feedback(fb);
 }
 
 void KortexTransport::send(const JointCommand& cmd) {
   auto& I = *impl_;
   I.write_command(cmd);
-  I.base_cyclic->RefreshCommand(I.cmd_, 0);
+  I.cyclic_call(k_api::BaseCyclic::eUidRefreshCommand, I.cmd_.SerializeAsString(),
+                I.cyclic_timeout_);
 }
 
 void KortexTransport::receive(JointFeedback& fb) {
   auto& I = *impl_;
-  I.fb_ = I.base_cyclic->RefreshFeedback();
+  I.parse_feedback(I.cyclic_call(k_api::BaseCyclic::eUidRefreshFeedback, "", I.cyclic_timeout_));
   I.fill_feedback(fb);
 }
 
