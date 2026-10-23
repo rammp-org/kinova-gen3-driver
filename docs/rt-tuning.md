@@ -161,6 +161,20 @@ trick cyclictest uses — so we don't depend on the system-wide cpuidle disable 
 - low **involuntary context-switch** count — a non-zero count means something
   still preempted the RT thread; revisit isolation (§B).
 
+On the real arm, every `exchange()` also waits on the KORTEX SDK's UDP receive
+thread, which reads the reply off the socket. The SDK starts it as a normal
+thread on any core, where other load can preempt it and delay replies. Pass
+`KortexTransport` an `rx_priority` one below the executor's priority and
+`rx_cpu` equal to its core (the apps do this from `--rt-priority`/`--cpu`). It
+sits above the NIC IRQ threads (FIFO 50) and yields to the RT loop, which only
+blocks while it waits for that reply. Only this one SDK thread is raised; the TCP
+receive and session keepalive threads stay normal. `connect()` prints the outcome
+to stderr. Confirm with:
+
+```sh
+ps -eLo tid,cls,rtprio,psr,comm | grep FF   # the RT loop and the UDP receive thread, both on core 11
+```
+
 ## D. Validate — measure, don't assume
 
 Install the standard RT latency probe and get a number:

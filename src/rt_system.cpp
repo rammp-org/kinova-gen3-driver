@@ -111,6 +111,23 @@ RtReport enable_rt(const RtConfig& cfg) {
   return rep;
 }
 
+std::string raise_thread(pthread_t thread, int priority, int cpu) {
+  struct sched_param p{};
+  p.sched_priority = priority;
+  if (int err = pthread_setschedparam(thread, SCHED_FIFO, &p)) {
+    return std::string("SCHED_FIFO failed: ") + std::strerror(err);
+  }
+  if (cpu >= 0) {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (int err = pthread_setaffinity_np(thread, sizeof(set), &set)) {
+      return "pinning to CPU " + std::to_string(cpu) + " failed: " + std::strerror(err);
+    }
+  }
+  return "";
+}
+
 ResourceUsage read_usage() {
   ResourceUsage u;
   struct rusage ru{};

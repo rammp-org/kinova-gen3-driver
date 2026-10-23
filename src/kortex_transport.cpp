@@ -10,11 +10,13 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
 
+#include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/units.h"
 #include "kortex_cyclic.h"
 
@@ -55,6 +57,7 @@ constexpr std::chrono::milliseconds kSetupTimeout{3000};
 
 struct KortexTransport::Impl {
   std::string ip, user, password;
+  int rx_priority, rx_cpu;
 
   // RAII-owned KORTEX objects (creation order matters; destroyed in reverse).
   std::unique_ptr<k_api::TransportClientTcp> tcp;
@@ -78,11 +81,13 @@ struct KortexTransport::Impl {
   bool connected_ = false;
   bool low_level_ = false;
 
-  explicit Impl(std::string ip_in, std::string user_in, std::string password_in,
-                uint32_t cyclic_timeout_ms)
+  explicit Impl(std::string ip_in, std::string user_in, std::string password_in, int rx_prio,
+                int rx_cpu_in, uint32_t cyclic_timeout_ms)
       : ip(std::move(ip_in)),
         user(std::move(user_in)),
         password(std::move(password_in)),
+        rx_priority(rx_prio),
+        rx_cpu(rx_cpu_in),
         cyclic_timeout_(cyclic_timeout_ms) {}
 
   // See kortex_cyclic_call(): bounded, and a timeout is a TransportTimeout.
@@ -219,9 +224,9 @@ struct KortexTransport::Impl {
 };
 
 KortexTransport::KortexTransport(std::string ip, std::string user, std::string password,
-                                 uint32_t cyclic_timeout_ms)
-    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password),
-                                   cyclic_timeout_ms)) {}
+                                 int rx_priority, int rx_cpu, uint32_t cyclic_timeout_ms)
+    : impl_(std::make_unique<Impl>(std::move(ip), std::move(user), std::move(password), rx_priority,
+                                   rx_cpu, cyclic_timeout_ms)) {}
 
 KortexTransport::~KortexTransport() {
   // Defensive: revert + tear down if still connected. Never throw from dtor.
@@ -237,6 +242,19 @@ void KortexTransport::connect() {
   I.udp = std::make_unique<k_api::TransportClientUdp>();
   I.tcp->connect(I.ip, kTcpPort);
   I.udp->connect(I.ip, kUdpPort);
+  // connect() starts the SDK's UDP receive thread, which reads every Refresh() reply off the
+  // socket, so the RT loop waits on it each cycle. Raise only that one: the TCP receive and
+  // session keepalive threads stay normal.
+  if (I.rx_priority > 0) {
+    const std::string err =
+        raise_thread(I.udp->m_receiveThread.native_handle(), I.rx_priority, I.rx_cpu);
+    if (err.empty()) {
+      std::fprintf(stderr, "KortexTransport: UDP receive thread SCHED_FIFO %d, CPU %d\n",
+                   I.rx_priority, I.rx_cpu);
+    } else {
+      std::fprintf(stderr, "KortexTransport: UDP receive thread: %s\n", err.c_str());
+    }
+  }
 
   auto on_err = [](k_api::KError) {};
   I.tcp_router = std::make_unique<k_api::RouterClient>(I.tcp.get(), on_err);

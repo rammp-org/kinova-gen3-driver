@@ -57,6 +57,12 @@ that heading to the new version and bumps `package.xml`.
   latches the newest target each cycle), feeding forward the rate the
   reference actually advanced at — equal to the commanded rate in free
   motion, zero once the leash pins against a blocked arm.
+- `KortexTransport` takes optional `rx_priority` / `rx_cpu`: `connect()` moves
+  the SDK's UDP receive thread, which every `exchange()` waits on, to
+  `SCHED_FIFO` `rx_priority` pinned to `rx_cpu`. The TCP receive and session
+  keepalive threads are left alone. Without this it was a normal thread on any
+  core, preempted ~10k times in 30 min under perception load (#97). The apps
+  pass `--rt-priority - 1` and `--cpu`. New `raise_thread()` in `rt_system`.
 
 ### Changed
 
