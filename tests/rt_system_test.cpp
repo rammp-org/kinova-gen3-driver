@@ -58,6 +58,7 @@ TEST(RtSystem, RaiseThreadDoesNotPinWhenThePriorityFails) {
   IdleThread idle;
   const pthread_t h = idle.t.native_handle();
   const cpu_set_t before = affinity(h);
+  if (CPU_COUNT(&before) < 2) GTEST_SKIP() << "pinning to the only CPU changes nothing";
   const std::string err = raise_thread(h, 0, first_cpu(before));
   EXPECT_NE(err.find("SCHED_FIFO failed"), std::string::npos) << err;
   const cpu_set_t after = affinity(h);
