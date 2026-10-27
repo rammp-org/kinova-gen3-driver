@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <mutex>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -30,7 +31,8 @@ class Arbiter : public CommandSink, public StreamSink, public GripperSink, publi
           ArbitrationMode mode, uint64_t seed = 0);
 
   // ArbitrationSink
-  GrantResult grant(const std::string& owner_id) override;
+  GrantResult grant(const std::string& owner_id,
+                    const std::optional<Token>& token = std::nullopt) override;
   void revoke() override;
   void estop() override;
   void estop_clear() override;

@@ -15,7 +15,7 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 
 ## The token lifecycle
 
-- **The driver mints tokens**, not the orchestrator. `grant(owner_id)` returns a
+- **By default the driver mints tokens**, not the orchestrator. `grant(owner_id)` returns a
   fresh random 128-bit token. This makes the handover ordering race impossible:
   the orchestrator has nothing to hand a module until the driver has already
   issued it, so a module can never start commanding before the driver knows
@@ -25,6 +25,16 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 - **A driver restart voids every token.** After a restart the arm's state is
   unknown and nothing should hold ownership across it — the orchestrator must
   re-grant.
+- **The orchestrator may bring its own key.** `grant(owner_id, token)` adopts
+  the given token instead of minting one, so an orchestrator can share one key
+  across several capabilities. Doing so gives up all three guarantees above.
+  A module handed the key before the grant lands is refused until it does.
+  Re-granting the same key does not lock out a zombie that still holds it,
+  and neither does a driver restart followed by a re-grant of that key.
+  **Every module holding the key is the owner at once**; `owner_id` is only a
+  label. Re-granting is still revoke-then-grant, so the arm halts either way.
+  An all-zero token is refused, and the current owner keeps the arm, because
+  all-zero is what an untokened command carries.
 - **`generation`** increments per grant. It is not used for the check (a stale
   token already fails to match); it exists so a rejection is diagnosable.
 
@@ -33,7 +43,7 @@ It knows nothing about control: no `ControlMode`, no `RtExecutor`, no
 | State | Meaning |
 |---|---|
 | no owner | no valid grant; commands are refused in `enforced` mode |
-| owned | exactly one owner: token, `owner_id`, `generation` |
+| owned | exactly one owner: token, `owner_id`, `generation` (with a caller-supplied key, everyone holding it) |
 | e-stopped | **latched**; every gated command is refused, `disabled` mode included — a handful of exceptions below are never gated |
 
 A command is admitted iff the bypass is on, or it carries the live token —

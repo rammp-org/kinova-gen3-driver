@@ -78,7 +78,14 @@ possible ordering rather than documentation someone must obey. Secondarily, the
 comparing party is the only one that can guarantee a new token never collides
 with a stale one held by a zombie node.
 
-**Consequence.** A driver restart voids every outstanding token and the
+**Amendment (#89).** Minting remains the default. `grant(owner_id, token)` now
+lets a caller supply a token, so an orchestrator can share one key across
+several capabilities. A caller that does this accepts losing both properties
+above, and the restart voiding below: re-granting the same key after a restart
+re-admits every holder from before it. Every holder of the key is the owner at
+once. The driver refuses an all-zero token, which is the no-owner sentinel.
+
+**Consequence.** A driver restart voids every outstanding minted token and the
 orchestrator must re-grant. This is correct — after a restart the arm's state is
 unknown and nothing should hold ownership across it — but the orchestrator has
 to handle it.
