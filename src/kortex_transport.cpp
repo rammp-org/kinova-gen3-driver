@@ -246,8 +246,12 @@ void KortexTransport::connect() {
   // socket, so the RT loop waits on it each cycle. Raise only that one: the TCP receive and
   // session keepalive threads stay normal.
   if (I.rx_priority > 0) {
+    // A connect() that failed may not have started the thread, and a default std::thread's
+    // native_handle() is not a valid pthread_t.
     const std::string err =
-        raise_thread(I.udp->m_receiveThread.native_handle(), I.rx_priority, I.rx_cpu);
+        I.udp->m_receiveThread.joinable()
+            ? raise_thread(I.udp->m_receiveThread.native_handle(), I.rx_priority, I.rx_cpu)
+            : "not started";
     if (err.empty()) {
       std::fprintf(stderr, "KortexTransport: UDP receive thread SCHED_FIFO %d, CPU %d\n",
                    I.rx_priority, I.rx_cpu);
