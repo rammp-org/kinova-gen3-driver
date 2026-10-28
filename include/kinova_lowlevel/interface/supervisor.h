@@ -147,6 +147,10 @@ class Supervisor : public CommandSink,
     GoalId id;
     TrajectoryGoal goal;
     bool cancel = false;
+    // ACCEPTed but overtaken by a halt (or accepted while the arm is down): the
+    // sampler settles it kHalted with `why` instead of running it.
+    bool halted = false;
+    HaltReason why = HaltReason::kOwnershipRevoked;
   };
   void sampler_loop();
   void pump_loop();
@@ -266,9 +270,8 @@ class Supervisor : public CommandSink,
   HaltReason halt_reason_ = HaltReason::kOwnershipRevoked;  // guarded by q_mtx_
   Seqlock<ArmState> state_snap_;                            // pump -> query_state
 
-  // Written by on_link_state; read by the goal/stream pre-checks and the pump.
+  // Written by on_link_state; read by the goal/stream/gripper pre-checks.
   std::atomic<bool> ready_{true};
-  std::atomic<kinova::LinkState> link_state_{kinova::LinkState::kRunning};
 
   std::atomic<bool> running_{false};
   std::thread sampler_, pump_;

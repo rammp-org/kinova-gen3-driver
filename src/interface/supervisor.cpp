@@ -88,12 +88,16 @@ void Supervisor::stop() {
 void Supervisor::pump_loop() {
   const auto period = std::chrono::duration<double>(1.0 / cfg_.pump_hz);
   const auto t0 = clock::now();
+  uint32_t published_version = 0;  // the snapshot version last published
   while (running_.load(std::memory_order_acquire)) {
     JointFeedback fb;
-    // While reconnecting nothing refreshes the snapshot: publishing it would
-    // present the last state before the outage as live. (kFaulted is fine:
-    // ArmLink keeps feedback flowing through the tap.)
-    if (link_state_.load() != kinova::LinkState::kConnecting && snap_.load(fb)) {
+    // Only feedback new since the last publish. While the link reconnects
+    // nothing refreshes the snapshot, and while faulted ArmLink's polls may get
+    // no answer: republishing the last state with a fresh stamp would present a
+    // frozen pose as live. (Version 0: never written, the default JointFeedback.)
+    const uint32_t version = snap_.version();
+    if (version != published_version && snap_.load(fb)) {
+      published_version = version;
       ArmState s;
       s.q = fb.q;
       s.qd = fb.qd;
@@ -279,6 +283,13 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         if (inbox_.empty()) break;
         in = inbox_.front();
         inbox_.pop_front();
+      }
+      if (in.halted) {
+        TrajectoryResult r;
+        r.error_code = result_code::kHalted;
+        r.error_string = halt_reason_string(in.why);
+        action_.settle(in.id, r);
+        continue;
       }
       if (in.cancel) {
         // Abort the whole chain and reset the executor to idle; the mode keeps
@@ -526,7 +537,14 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
 }
 void Supervisor::on_trajectory_accepted(const GoalId& id, const TrajectoryGoal& g) {
   std::lock_guard<std::mutex> l(q_mtx_);
-  inbox_.push_back({id, g, false});
+  // The goal and accepted callbacks are separate, and the link can drop between
+  // them. on_link_state stores ready_ = false before on_halt takes q_mtx_, so
+  // either this push lands first and on_halt marks it halted, or this sees the
+  // link down. Either way the client gets a result and the arm never runs it.
+  if (!ready_.load())
+    inbox_.push_back({id, g, false, true, HaltReason::kArmUnavailable});
+  else
+    inbox_.push_back({id, g, false});
 }
 CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c) {
   std::lock_guard<std::mutex> l(q_mtx_);
@@ -534,21 +552,22 @@ CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c) {
   return CancelResponse::kAccept;
 }
 // on_link_state (ArmLink's thread). Leaving kRunning: ArmLink's executor run has
-// already returned, so nothing is commanding. Refuse new work FIRST, then line the
+// already returned, so nothing is commanding. Refuse new work FIRST, then halt:
+// settle the goals, close the stream, stop stamping the gripper. Then line the
 // next run up to adopt position mode -- on_enter seeds it from fresh feedback and
 // drops every old target, which is what makes the arm hold where it IS after the
-// outage rather than where it was -- then halt: settle the goals, close the stream,
-// stop stamping the gripper. Entering kRunning only re-admits work.
+// outage rather than where it was. Entering kRunning only re-admits work.
 void Supervisor::on_link_state(kinova::LinkState s) {
-  link_state_.store(s);
   if (s == kinova::LinkState::kRunning) {
     ready_.store(true);
     return;
   }
   if (!ready_.exchange(false)) return;  // already down: one halt per outage
+  // Halt BEFORE recording the switch to position: close_stream() tears down the
+  // stream's own (still recorded) mode -- its hold, its watchdog.
+  on_halt(HaltReason::kArmUnavailable);
   active_mode_kind_.store(ControlModeKind::kPosition);
   exec_.request_mode(&pos_);
-  on_halt(HaltReason::kArmUnavailable);
 }
 
 // on_halt (backend thread): latch + flush the queue, nothing else. The sampler owns
@@ -562,7 +581,20 @@ void Supervisor::on_halt(HaltReason r) {
   // being dropped from wherever the arm happened to be.
   if (grip_) grip_->release();
   std::lock_guard<std::mutex> l(q_mtx_);
-  inbox_.clear();  // a halt must never sit behind queued trajectories
+  // A halt must never sit behind queued trajectories, but they were ACCEPTed:
+  // settle them (the sampler, after the halt) rather than drop them, or their
+  // clients wait for a result forever. Queued cancels have nothing left to do.
+  for (auto it = inbox_.begin(); it != inbox_.end();) {
+    if (it->cancel) {
+      it = inbox_.erase(it);
+    } else {
+      if (!it->halted) {
+        it->halted = true;
+        it->why = r;
+      }
+      ++it;
+    }
+  }
   halt_reason_ = r;
   halt_pending_ = true;
 }
@@ -663,6 +695,9 @@ ArmState Supervisor::on_query_state() {
 
 void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
   if (!grip_) return;  // no gripper on this robot: a no-op, not an error
+  // While the arm is down, a setpoint would re-arm stamping that the halt
+  // released, and the gripper would move on its own at recovery. Dropped.
+  if (!ready_.load()) return;
   // Matches the six arm-setpoint siblings: GripperController::set_target is
   // documented as belonging to ONE non-RT thread (its double-buffer write is not
   // itself thread-safe against a second concurrent writer), and nothing upstream

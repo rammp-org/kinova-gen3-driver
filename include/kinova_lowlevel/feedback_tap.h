@@ -29,6 +29,9 @@ class Seqlock {
     std::atomic_thread_fence(std::memory_order_release);
     seq_.store(s + 2, std::memory_order_release);  // publish (even)
   }
+  // Changes on every store(); 0 until the first. Lets a reader skip a value it
+  // has already consumed.
+  uint32_t version() const { return seq_.load(std::memory_order_acquire); }
   bool load(T& out) const {  // reader: retry while a write is in flight
     for (int i = 0; i < 16; ++i) {
       const uint32_t s1 = seq_.load(std::memory_order_acquire);
