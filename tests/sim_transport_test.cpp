@@ -188,7 +188,7 @@ TEST(SimTransport, InjectedFaultShowsInFeedbackAndQuery) {
   t.exchange(c, fb);
   EXPECT_FALSE(fb.fault);
   EXPECT_FALSE(t.arm_in_fault());
-  EXPECT_EQ(t.clears, 1);
+  EXPECT_EQ(t.clears.load(), 1);
 }
 TEST(SimTransport, StickyFaultSurvivesClear) {
   SimTransport t(JointFeedback{});
@@ -203,7 +203,7 @@ TEST(SimTransport, FailConnectsThrowsThenSucceeds) {
   EXPECT_THROW(t.connect(), std::runtime_error);
   EXPECT_THROW(t.connect(), std::runtime_error);
   EXPECT_NO_THROW(t.connect());
-  EXPECT_EQ(t.connects, 3);
+  EXPECT_EQ(t.connects.load(), 3);
 }
 TEST(SimTransport, LowLevelFeedbackKnob) {
   SimTransport t(JointFeedback{});

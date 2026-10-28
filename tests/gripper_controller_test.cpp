@@ -184,7 +184,7 @@ TEST(GripperController, ForwardsReleaseAndFaultQuery) {
   SimTransport sim(JointFeedback{});
   GripperController gc(sim);
   gc.release_low_level();
-  EXPECT_EQ(sim.releases, 1);
+  EXPECT_EQ(sim.releases.load(), 1);
   sim.set_arm_fault(true);
   EXPECT_TRUE(gc.arm_in_fault());
 }

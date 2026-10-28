@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <functional>
 
 #include "kinova_lowlevel/transport.h"
@@ -33,8 +34,9 @@ class SimTransport : public Transport {
   // this sim's effort value.
   void set_gripper_blocked_at(float position) { gripper_block_ = position; }
 
-  // Test knobs for the link lifecycle (ArmLink). Not synchronised: set them before
-  // run() or from the RT thread's own hooks, except where a test joins first.
+  // Test knobs for the link lifecycle (ArmLink). Atomic, so a test may flip them
+  // while the link runs on another thread (throw_on_exchange excepted: set it
+  // before run(), and have the hook read its own atomics).
   // The next n connect() calls throw std::runtime_error("sim: arm unreachable").
   void fail_connects(int n) { fail_connects_ = n; }
   // An arm fault: reported in feedback and by arm_in_fault(); clear_faults() ends
@@ -48,7 +50,7 @@ class SimTransport : public Transport {
   // The next n arm_in_fault() calls throw TransportTimeout.
   void fail_health(int n) { fail_health_ = n; }
   // Call counts.
-  int connects = 0, low_level_entries = 0, releases = 0, shutdowns = 0, clears = 0;
+  std::atomic<int> connects{0}, low_level_entries{0}, releases{0}, shutdowns{0}, clears{0};
 
  private:
   void step_torque(const JointCommand&);
@@ -60,8 +62,8 @@ class SimTransport : public Transport {
   uint64_t frame_ = 0;
   float gripper_lag_ = 1.0f;     // default: reach the target in one cycle (old behaviour)
   float gripper_block_ = -1.0f;  // no object
-  int fail_connects_ = 0, fail_health_ = 0;
-  bool arm_fault_ = false, fault_sticky_ = false, low_level_fb_ = true;
+  std::atomic<int> fail_connects_{0}, fail_health_{0};
+  std::atomic<bool> arm_fault_{false}, fault_sticky_{false}, low_level_fb_{true};
   std::function<void()> on_exchange_;
 };
 }  // namespace kinova
