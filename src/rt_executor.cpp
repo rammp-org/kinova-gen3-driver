@@ -144,8 +144,7 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     not_low_level = fb.low_level ? 0 : not_low_level + 1;
     const char* why = nullptr;
     if (faulty >= kFaultConfirmExchanges) why = "the arm reports a fault";
-    if (not_low_level >= kLeftLowLevelConfirmExchanges)
-      why = "the base left low-level servoing";
+    if (not_low_level >= kLeftLowLevelConfirmExchanges) why = "the base left low-level servoing";
     if (!why) return;
     char msg[160];
     std::snprintf(msg, sizeof(msg), "RtExecutor: arm fault: %s", why);
