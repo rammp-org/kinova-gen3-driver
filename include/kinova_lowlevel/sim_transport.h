@@ -49,6 +49,9 @@ class SimTransport : public Transport {
   void throw_on_exchange(std::function<void()> f) { on_exchange_ = std::move(f); }
   // The next n arm_in_fault() calls throw TransportTimeout.
   void fail_health(int n) { fail_health_ = n; }
+  // Teleport the arm (a move made while the driver was not commanding). Call only
+  // while nothing is running the transport.
+  void set_joint_positions(const JointVec& q) { state_.q = q; }
   // Call counts.
   std::atomic<int> connects{0}, low_level_entries{0}, releases{0}, shutdowns{0}, clears{0};
 

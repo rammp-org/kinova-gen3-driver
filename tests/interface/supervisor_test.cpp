@@ -2174,3 +2174,109 @@ TEST(SupervisorGains, GainsAtOpenApplyToACompliantVelocityStream) {
   EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
   EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
 }
+
+// --- Link state (never-crash design): the Supervisor as ArmLink's listener.
+
+TEST(SupervisorLink, GoalsAndStreamsRejectedWhileNotReady) {
+  SupFix f;
+  f.sup.start();
+  EXPECT_TRUE(f.sup.arm_ready());
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  EXPECT_FALSE(f.sup.arm_ready());
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+  interface::StreamOpenRequest r;
+  r.timeout_s = 1.0;
+  const interface::StreamOpenResult res = f.sup.on_stream_open(r);
+  EXPECT_FALSE(res.accepted);
+  EXPECT_EQ(res.message, "arm not ready");
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  EXPECT_TRUE(f.sup.arm_ready());
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.stop();
+}
+
+TEST(SupervisorLink, LinkDownHaltsTheActiveGoal) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 3;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_EQ(f.be.last_result().error_string, "halted: arm fault or connection lost");
+}
+
+TEST(SupervisorLink, LinkDownClosesTheStream) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  EXPECT_FALSE(f.sup.stream_is_open());
+  f.sup.stop();
+  f.teardown();
+}
+
+// The anti-goal: after an outage the arm holds where it IS, never drives back
+// toward a target from before it (the operator may have moved it meanwhile).
+TEST(SupervisorLink, ReconnectHoldsWhereTheArmIsNow) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 4;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  // The link drops: ArmLink's run() has returned before it tells the listener.
+  f.teardown();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sim.set_joint_positions(JointVec::Constant(-0.3));  // moved by hand meanwhile
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  f.stop = false;
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  f.sup.stop();
+  f.teardown();
+  const JointCommand c = f.sim.last_command();
+  EXPECT_EQ(c.mode, ActuatorMode::kPosition);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.position[i], -0.3, 1e-6) << "joint " << i;
+}
+
+TEST(SupervisorLink, NoStatePublishedWhileConnecting) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));  // drain an in-flight publish
+  const size_t before = f.be.state_count();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_EQ(f.be.state_count(), before);
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_GT(f.be.state_count(), before);
+  f.sup.stop();
+  f.teardown();
+}

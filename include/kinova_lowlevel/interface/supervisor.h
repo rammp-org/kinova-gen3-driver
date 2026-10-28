@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <thread>
 
+#include "kinova_lowlevel/arm_link.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
@@ -82,7 +83,10 @@ struct SupervisorDeps {
   SupervisorConfig cfg{};
 };
 
-class Supervisor : public CommandSink, public StreamSink, public GripperSink {
+class Supervisor : public CommandSink,
+                   public StreamSink,
+                   public GripperSink,
+                   public kinova::LinkListener {
  public:
   explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
@@ -107,6 +111,13 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void on_setpoint_pose(const PoseSetpoint&) override;
   void on_setpoint_twist(const TwistSetpoint&) override;
   StreamStatus on_query_stream() override;
+
+  // LinkListener (called on ArmLink's thread). Not kRunning: halt everything,
+  // refuse goals and streams, and have the next executor run adopt position mode
+  // seeded from fresh feedback. kRunning: accept work again. A Supervisor that
+  // is never told (no ArmLink) stays ready, as before.
+  void on_link_state(kinova::LinkState s) override;
+  bool arm_ready() const { return ready_.load(); }
 
   // GripperSink (called on the backend thread):
   void on_gripper_setpoint(const GripperSetpoint&) override;
@@ -254,6 +265,10 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   bool halt_pending_ = false;                               // guarded by q_mtx_
   HaltReason halt_reason_ = HaltReason::kOwnershipRevoked;  // guarded by q_mtx_
   Seqlock<ArmState> state_snap_;                            // pump -> query_state
+
+  // Written by on_link_state; read by the goal/stream pre-checks and the pump.
+  std::atomic<bool> ready_{true};
+  std::atomic<kinova::LinkState> link_state_{kinova::LinkState::kRunning};
 
   std::atomic<bool> running_{false};
   std::thread sampler_, pump_;

@@ -20,6 +20,8 @@ static const char* halt_reason_string(HaltReason r) {
       return "halted: emergency stop";
     case HaltReason::kOperatorRequest:
       return "halted: operator request";
+    case HaltReason::kArmUnavailable:
+      return "halted: arm fault or connection lost";
   }
   return "halted";
 }
@@ -88,7 +90,10 @@ void Supervisor::pump_loop() {
   const auto t0 = clock::now();
   while (running_.load(std::memory_order_acquire)) {
     JointFeedback fb;
-    if (snap_.load(fb)) {
+    // While reconnecting nothing refreshes the snapshot: publishing it would
+    // present the last state before the outage as live. (kFaulted is fine:
+    // ArmLink keeps feedback flowing through the tap.)
+    if (link_state_.load() != kinova::LinkState::kConnecting && snap_.load(fb)) {
       ArmState s;
       s.q = fb.q;
       s.qd = fb.qd;
@@ -487,6 +492,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 
 // on_trajectory_goal (backend thread): fast pre-check only, no executor mutation.
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
+  if (!ready_.load()) return GoalResponse::kReject;               // faulted or reconnecting
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
   // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
@@ -527,6 +533,24 @@ CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c) {
   inbox_.push_back({c.id, {}, true});
   return CancelResponse::kAccept;
 }
+// on_link_state (ArmLink's thread). Leaving kRunning: ArmLink's executor run has
+// already returned, so nothing is commanding. Refuse new work FIRST, then line the
+// next run up to adopt position mode -- on_enter seeds it from fresh feedback and
+// drops every old target, which is what makes the arm hold where it IS after the
+// outage rather than where it was -- then halt: settle the goals, close the stream,
+// stop stamping the gripper. Entering kRunning only re-admits work.
+void Supervisor::on_link_state(kinova::LinkState s) {
+  link_state_.store(s);
+  if (s == kinova::LinkState::kRunning) {
+    ready_.store(true);
+    return;
+  }
+  if (!ready_.exchange(false)) return;  // already down: one halt per outage
+  active_mode_kind_.store(ControlModeKind::kPosition);
+  exec_.request_mode(&pos_);
+  on_halt(HaltReason::kArmUnavailable);
+}
+
 // on_halt (backend thread): latch + flush the queue, nothing else. The sampler owns
 // traj_ and settle(), so the control action happens there -- which keeps
 // settle-exactly-once true by construction rather than by careful reasoning.
@@ -684,6 +708,7 @@ StreamStatus Supervisor::on_query_stream() {
 }
 
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
+  if (!ready_.load()) return {false, result_code::kStreamRejected, "arm not ready"};
   if (in_flight_.load())
     return {false, result_code::kStreamRejected, "a trajectory goal is in flight"};
   // The next three checks are DELIBERATELY duplicated in StreamingSession::open.
