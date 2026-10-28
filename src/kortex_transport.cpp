@@ -339,10 +339,18 @@ void KortexTransport::set_servoing_low_level() {
   // Re-entry (after a reconnect or a cleared fault) must not resend the gripper
   // target from before the outage: the operator may have moved it since. Clearing
   // the submessage leaves the gripper uncommanded, as at first startup, until the
-  // next gripper command.
+  // next gripper command. (Cost: write_command's one-time allocation of that
+  // submessage now happens once per re-entry rather than once per process.)
   I.cmd_.clear_interconnect();
+  // Seed torque with the measured torque (reaction-signed, so negated) rather
+  // than 0: after a link loss the revert may never have reached the arm, and an
+  // actuator still in TORQUE mode would take this seed as "apply nothing" and
+  // drop. In POSITION mode the field is ignored. The pumps that follow during a
+  // mode switch still send 0 (#92).
   for (int i = 0; i < I.n_; ++i) {
-    I.cmd_.add_actuators()->set_position(I.fb_.actuators(i).position());
+    auto* a = I.cmd_.add_actuators();
+    a->set_position(I.fb_.actuators(i).position());
+    a->set_torque_joint(-I.fb_.actuators(i).torque());
   }
   I.refresh(kSetupTimeout);
   I.low_level_ = true;
@@ -395,31 +403,32 @@ void KortexTransport::receive(JointFeedback& fb) {
 void KortexTransport::release_low_level() {
   auto& I = *impl_;
   // Revert the robot only if we actually put it in low-level servoing / changed
-  // actuator control modes. Each RPC is bounded at kShortRpc and the revert stops
-  // at the first failure: a link that did not answer one will not answer the
-  // rest, and each would otherwise block for its own timeout.
+  // actuator control modes. Each RPC is bounded at kShortRpc. A refusal (an error
+  // reply: the link is up, that one request was rejected, e.g. a faulted
+  // actuator) moves on to the next; anything else (a timeout) stops the revert:
+  // a link that did not answer one will not answer the rest, and each would
+  // otherwise block for its own timeout.
   if (!I.low_level_) return;
   I.low_level_ = false;
   bool ok = true;
+  auto attempt = [&](auto&& call) {
+    try {
+      call();
+    } catch (const k_api::KDetailedException&) {
+    } catch (...) {
+      ok = false;
+    }
+  };
   if (I.act_cfg && I.n_ > 0) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
-    for (int idx = 1; ok && idx <= I.n_; ++idx) {
-      try {
-        I.act_cfg->SetControlMode(cm_msg, idx, kShortRpc);
-      } catch (...) {
-        ok = false;
-      }
-    }
+    for (int idx = 1; ok && idx <= I.n_; ++idx)
+      attempt([&] { I.act_cfg->SetControlMode(cm_msg, idx, kShortRpc); });
   }
   if (ok && I.base) {
     k_api::Base::ServoingModeInformation sm;
     sm.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
-    try {
-      I.base->SetServoingMode(sm, 0, kShortRpc);
-    } catch (...) {
-      ok = false;
-    }
+    attempt([&] { I.base->SetServoingMode(sm, 0, kShortRpc); });
   }
   // Let the mode/servoing revert settle before anything else talks to the arm
   // (mirrors the validated prototype; avoids closing mid-transition). Skipped

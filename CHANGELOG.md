@@ -91,7 +91,7 @@ that heading to the new version and bumps `package.xml`.
   `TransportTimeout`. `connect()` no longer clears faults silently, and an
   actuator-count mismatch is `std::invalid_argument` (was `runtime_error`).
   `safe_shutdown()`'s revert bounds each RPC at 500 ms and stops at the first
-  failure (a dead link took ~24 s). Base fault banks and `ARMSTATE_IN_FAULT`
+  unanswered one (a dead link took ~24 s); a refused one moves on. Base fault banks and `ARMSTATE_IN_FAULT`
   now set `JointFeedback::fault`. `set_servoing_low_level()` drops the retained
   gripper command, so re-entry leaves the gripper uncommanded, as at startup.
 

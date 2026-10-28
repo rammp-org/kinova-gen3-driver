@@ -465,7 +465,7 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   (KORTEX's `"timeout detected"` `runtime_error`) is `TransportTimeout`.
   `connect()` does not clear faults; an actuator-count mismatch is
   `std::invalid_argument`. `release_low_level()` and `arm_in_fault()` bound each
-  RPC at 500 ms, and the revert stops at the first failure. `fill_feedback`
+  RPC at 500 ms; the revert moves past a refusal and stops at the first RPC that goes unanswered. `fill_feedback`
   folds the base's fault banks and `ARMSTATE_IN_FAULT` into `fault` and sets
   `low_level` from the base's `active_state`. `set_servoing_low_level()` clears
   the retained gripper command, so re-entry leaves the gripper uncommanded, as at

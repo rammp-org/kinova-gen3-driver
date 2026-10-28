@@ -29,7 +29,7 @@ class KortexTransport : public Transport {
   void receive(JointFeedback&) override;
   // release_low_level() + close the sessions and sockets. Idempotent.
   void safe_shutdown() override;
-  // Every RPC bounded at 500 ms; stops at the first that fails.
+  // Every RPC bounded at 500 ms; moves past a refusal, stops at the first unanswered.
   void release_low_level() override;
   // GetArmState over TCP (500 ms bound) == ARMSTATE_IN_FAULT.
   bool arm_in_fault() override;

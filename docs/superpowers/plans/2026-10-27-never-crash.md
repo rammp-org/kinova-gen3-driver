@@ -163,7 +163,7 @@ Listener and stderr log fire on each state *change* only. `latch()` bumps `fault
   - `kortex_cyclic_call`: `send()` throwing a non-KORTEX `std::runtime_error` → `TransportTimeout`; `get()` throwing `KDetailedException` → `ArmRejected(what)`.
   - A file-local `template <class F> auto rpc(F&&)` used for every TCP RPC on the run path (`SetControlMode`, `SetServoingMode`, `GetArmState`, `GetActuatorCount`, `ClearFaults`): `KDetailedException` → `ArmRejected`; `std::runtime_error` whose `what()` starts with `"timeout detected"` (KORTEX 2.8.0 RPC timeout text) → `TransportTimeout`.
   - `connect()`: drop the `ClearFaults()` call; actuator-count mismatch throws `std::invalid_argument`.
-  - `release_low_level()`: the revert half of today's `safe_shutdown()`, every RPC with `RouterClientSendOptions{false, 0, 500}`, stop at the first failure, keep the 500 ms settle only if a revert RPC was sent; sets `low_level_ = false`. `safe_shutdown()` = `release_low_level()` + today's teardown.
+  - `release_low_level()`: the revert half of today's `safe_shutdown()`, every RPC with `RouterClientSendOptions{false, 0, 500}`, stop at the first unanswered RPC (a refusal moves on), keep the 500 ms settle only if a revert RPC was sent; sets `low_level_ = false`. `safe_shutdown()` = `release_low_level()` + today's teardown.
   - `arm_in_fault()`: `base->GetArmState({false,0,500})`, `== ARMSTATE_IN_FAULT`.
   - `fill_feedback`: also `fault |= base().fault_bank_a() || base().fault_bank_b() || base().active_state() == ARMSTATE_IN_FAULT`; `fb.low_level = base().active_state() == ARMSTATE_SERVOING_LOW_LEVEL`.
   - `set_servoing_low_level()`: `cmd_.clear_interconnect()` before the seed; after the seed Refresh, `set_actuator_modes(all kPosition)`.
