@@ -66,6 +66,8 @@ class FeedbackTap : public Transport {
     snap_.store(fb);
   }
   void safe_shutdown() override { inner_.safe_shutdown(); }
+  void release_low_level() override { inner_.release_low_level(); }
+  bool arm_in_fault() override { return inner_.arm_in_fault(); }
   void clear_faults() override { inner_.clear_faults(); }
 
  private:

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cmath>
+#include <stdexcept>
 
 #include "kinova_lowlevel/units.h"  // wrap_to_pi
 
@@ -29,10 +30,28 @@ SimTransport::SimTransport(const JointFeedback& initial, int latency_us)
   state_.gripper.present = true;
 }
 
-void SimTransport::connect() {}
-void SimTransport::set_servoing_low_level() {}
+void SimTransport::connect() {
+  ++connects;
+  if (fail_connects_ > 0) {
+    --fail_connects_;
+    throw std::runtime_error("sim: arm unreachable");
+  }
+}
+void SimTransport::set_servoing_low_level() { ++low_level_entries; }
 void SimTransport::set_actuator_modes(const ActuatorModes&) {}
-void SimTransport::safe_shutdown() {}
+void SimTransport::safe_shutdown() { ++shutdowns; }
+void SimTransport::release_low_level() { ++releases; }
+bool SimTransport::arm_in_fault() {
+  if (fail_health_ > 0) {
+    --fail_health_;
+    throw TransportTimeout("sim: no reply to the arm-state query");
+  }
+  return arm_fault_;
+}
+void SimTransport::clear_faults() {
+  ++clears;
+  if (!fault_sticky_) arm_fault_ = false;
+}
 
 // Advance the simulated gripper one cycle toward its target. Extracted because
 // exchange() and send() must step it identically -- they already duplicate the
@@ -75,8 +94,10 @@ void SimTransport::step_gripper(const GripperCommand& g) {
 // the whole suite would run in a representation where a continuous joint's wrap can
 // never occur. That is how #52 reached the arm: the bug was structurally unreachable
 // from CI. Kinematically a no-op for the bounded joints, whose limits are inside +/-pi.
-static void report_wrapped(const JointFeedback& state, JointFeedback& fb) {
-  fb = state;
+void SimTransport::report_wrapped(JointFeedback& fb) const {
+  fb = state_;
+  fb.fault = state_.fault || arm_fault_;
+  fb.low_level = low_level_fb_;
   for (int i = 0; i < kNumJoints; ++i) fb.q[i] = wrap_to_pi(fb.q[i]);
 }
 
@@ -91,6 +112,7 @@ void SimTransport::step_torque(const JointCommand& cmd) {
 }
 
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
+  if (on_exchange_) on_exchange_();
   last_cmd_ = cmd;
   step_torque(cmd);
   step_gripper(cmd.gripper);
@@ -101,7 +123,7 @@ void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {
   }
   ++frame_;
   state_.frame_id = frame_;
-  report_wrapped(state_, fb);
+  report_wrapped(fb);
 }
 
 void SimTransport::send(const JointCommand& cmd) {
@@ -112,6 +134,6 @@ void SimTransport::send(const JointCommand& cmd) {
   state_.frame_id = frame_;
 }
 
-void SimTransport::receive(JointFeedback& fb) { report_wrapped(state_, fb); }
+void SimTransport::receive(JointFeedback& fb) { report_wrapped(fb); }
 
 }  // namespace kinova

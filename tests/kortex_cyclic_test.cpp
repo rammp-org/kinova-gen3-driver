@@ -176,8 +176,9 @@ TEST(KortexCyclic, LateReplyIsNotTakenByTheNextCall) {
   EXPECT_EQ(frame_id_of(f), 2u);
 }
 
-// An error frame from the arm is a KDetailedException, not a timeout.
-TEST(KortexCyclic, ErrorFrameIsKDetailedException) {
+// An error frame from the arm is ArmRejected (the KDetailedException
+// classified at the boundary), not a timeout.
+TEST(KortexCyclic, ErrorFrameIsArmRejected) {
   Rig r;
   std::thread arm([&] {
     ASSERT_TRUE(r.link.wait_requests(1));
@@ -185,26 +186,23 @@ TEST(KortexCyclic, ErrorFrameIsKDetailedException) {
   });
   EXPECT_THROW(
       kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(500)),
-      k_api::KDetailedException);
+      ArmRejected);
   arm.join();
 }
 
 // A failed local send (sendto error) is TransportClientUdp's own runtime_error,
-// passed straight through RouterClient::send: not a timeout and not a
-// KDetailedException, so it is fatal today (#96). The router stays usable after
-// it: the next call is not blocked by the send that threw.
-TEST(KortexCyclic, FailedLocalSendIsARuntimeErrorAndTheRouterStaysUsable) {
+// passed straight through RouterClient::send. On a congested NIC that is a lost
+// frame, so it is reported as one: a TransportTimeout carrying the sendto text,
+// survived like any other miss (#96). The router stays usable after it: the
+// next call is not blocked by the send that threw.
+TEST(KortexCyclic, FailedLocalSendIsALostFrameAndTheRouterStaysUsable) {
   Rig r;
   r.link.fail_sends = true;
   try {
     kortex_cyclic_call(r.router, k_api::BaseCyclic::eUidRefresh, kCmd, milliseconds(20));
     FAIL() << "expected the send failure";
-  } catch (const k_api::KDetailedException&) {
-    FAIL() << "not reported as an error frame";
-  } catch (const TransportTimeout&) {
-    FAIL() << "not reported as a timeout";
-  } catch (const std::runtime_error& e) {
-    EXPECT_STREQ(e.what(), "fake sendto failure");
+  } catch (const TransportTimeout& e) {
+    EXPECT_NE(std::string(e.what()).find("fake sendto failure"), std::string::npos) << e.what();
   }
   r.link.fail_sends = false;
   std::thread arm([&] {

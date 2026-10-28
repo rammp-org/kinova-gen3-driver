@@ -42,6 +42,8 @@ class DroppingTransport : public Transport {
   void send(const JointCommand&) override {}
   void receive(JointFeedback&) override {}
   void safe_shutdown() override {}
+  void release_low_level() override {}
+  bool arm_in_fault() override { return false; }
 
   uint64_t calls = 0;
   std::vector<JointCommand> sent;
