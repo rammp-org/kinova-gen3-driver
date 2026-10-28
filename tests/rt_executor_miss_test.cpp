@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <sched.h>
 
 #include <atomic>
 #include <functional>
@@ -421,4 +422,35 @@ TEST(RtExecutorFault, ConfigIsReadable) {
   SampleRing ring(16);
   RtExecutor ex(t, ring, fault_cfg());
   EXPECT_TRUE(ex.config().exit_on_fault);
+}
+
+// run() puts the calling thread back as it found it. ArmLink reconnects from the
+// thread that ran the loop, and every thread KORTEX creates in connect() inherits
+// its scheduling: left at SCHED_FIFO on the RT core, the SDK's TCP receive and
+// keepalive threads would land there too. Affinity is the part an unprivileged
+// test can change.
+TEST(RtExecutorFault, RunRestoresTheThreadsSchedulingOnExit) {
+  cpu_set_t before;
+  CPU_ZERO(&before);
+  ASSERT_EQ(sched_getaffinity(0, sizeof(before), &before), 0);
+  if (CPU_COUNT(&before) < 2) GTEST_SKIP() << "needs two CPUs to observe a pin";
+  int pin = -1;
+  for (int c = 0; c < CPU_SETSIZE && pin < 0; ++c)
+    if (CPU_ISSET(c, &before)) pin = c;
+
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.on_call = [](uint64_t i) {
+    if (i == 5) throw ArmRejected("fake: rejected");  // the exception path too
+  };
+  SampleRing ring(64);
+  ExecutorConfig c = fault_cfg();
+  c.rt.cpu = pin;
+  RtExecutor ex(t, ring, c);
+  EXPECT_THROW(ex.run(stop), ArmRejected);
+
+  cpu_set_t after;
+  CPU_ZERO(&after);
+  ASSERT_EQ(sched_getaffinity(0, sizeof(after), &after), 0);
+  EXPECT_TRUE(CPU_EQUAL(&before, &after)) << "CPUs after run: " << CPU_COUNT(&after);
 }
