@@ -103,6 +103,7 @@ struct KortexTransport::Impl {
   int n_ = 0;
   uint16_t frame_id_ = 0;
   bool connected_ = false;
+  bool unanswered_ = false;  // the last revert hit an RPC the arm never answered
   bool low_level_ = false;
 
   explicit Impl(std::string ip_in, std::string user_in, std::string password_in, int rx_prio,
@@ -314,6 +315,10 @@ void KortexTransport::connect() {
   // No ClearFaults() here: an arm that is faulted at connect stays faulted until
   // someone clears it explicitly (ArmLink waits for that).
   I.n_ = rpc([&] { return I.base->GetActuatorCount().count(); });
+  // A booting arm answers on its base before its actuators are up, and reports
+  // none: not ready yet (ArmLink retries), unlike a wrong count.
+  if (I.n_ == 0)
+    throw std::runtime_error("KortexTransport: the arm reports no actuators yet (still booting?)");
   // Guard the fixed-size JointVec: this build is compiled for kNumJoints DOF.
   // A robot reporting a different count would otherwise index out of bounds in
   // fill_feedback/write_command. Hard throw (see no-silent-footgun principle).
@@ -434,6 +439,7 @@ void KortexTransport::release_low_level() {
   // (mirrors the validated prototype; avoids closing mid-transition). Skipped
   // when the arm stopped answering: there is no transition to wait for.
   if (ok) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  I.unanswered_ = !ok;
 }
 
 bool KortexTransport::arm_in_fault() {
@@ -449,18 +455,22 @@ void KortexTransport::safe_shutdown() {
   // leaves some network objects alive; they must still be torn down.
   release_low_level();
 
-  if (I.tcp_sess) {
+  // CloseSession() takes no send options and waits KORTEX's default 3 s for a
+  // reply. Skip it when the revert found the arm not answering: the arm drops the
+  // session itself after the 2 s connection inactivity timeout set at connect.
+  if (I.tcp_sess && !I.unanswered_) {
     try {
       I.tcp_sess->CloseSession();
     } catch (...) {
     }
   }
-  if (I.udp_sess) {
+  if (I.udp_sess && !I.unanswered_) {
     try {
       I.udp_sess->CloseSession();
     } catch (...) {
     }
   }
+  I.unanswered_ = false;
   if (I.tcp_router) I.tcp_router->SetActivationStatus(false);
   if (I.udp_router) I.udp_router->SetActivationStatus(false);
   if (I.tcp) {

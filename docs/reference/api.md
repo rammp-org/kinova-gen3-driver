@@ -355,6 +355,7 @@ struct ArmLinkConfig {
   double fault_poll_hz = 100.0;  // receive() while faulted, so feedback stays live
   double health_period_s = 0.5;  // arm_in_fault() while faulted
   int health_max_failures = 3;   // unanswered in a row = link lost
+  double clear_settle_s = 2.0;   // after a clear, how long the arm may take to leave IN_FAULT
 };
 class ArmLink {
  public:
@@ -367,12 +368,13 @@ class ArmLink {
 
 | Event | What `ArmLink` does | Next state |
 |---|---|---|
-| `connect()` fails (arm off, link renegotiating, RPC timeout) | `safe_shutdown()`, retry every `retry_period_s`, forever | `kConnecting` |
+| `connect()` fails (arm off or still booting, link renegotiating, RPC timeout) | `safe_shutdown()`, retry every `retry_period_s`, forever | `kConnecting` |
 | connected, base reports `ARMSTATE_IN_FAULT` | hand the arm back to the base (`release_low_level`) | `kFaulted` |
 | connected, no fault | `set_servoing_low_level()`, every actuator to POSITION, `exec.run()` | `kRunning` |
-| `CommsLost`, or a `TransportTimeout` outside the loop | `safe_shutdown()`, reconnect; **no clear needed** | `kConnecting` |
+| `CommsLost` or `TransportTimeout` out of the loop | latch `"connection lost: …"`, `safe_shutdown()`, reconnect | `kConnecting` → `kFaulted` |
+| `TransportTimeout` before the loop ran (entering low-level) | `safe_shutdown()`, reconnect; no latch | `kConnecting` |
 | `ArmFault`, `ArmRejected`, any other exception | latch the fault, `release_low_level()` | `kFaulted` |
-| `request_clear()` | `clear_faults()`; still in fault → stays, reason `"fault persists after clear"` | `kRunning` |
+| `request_clear()` | `clear_faults()`; still in fault after `clear_settle_s` → stays, reason `"fault persists after clear"` | `kRunning` |
 | arm stops answering while faulted (`health_max_failures`) | `safe_shutdown()`, reconnect; **the fault stays latched** | `kConnecting` → `kFaulted` |
 | `std::logic_error` from `connect()` (actuator-count mismatch) | `safe_shutdown()`, rethrow | — |
 

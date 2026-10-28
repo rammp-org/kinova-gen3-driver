@@ -212,17 +212,19 @@ The driver does not exit on any of these (`ArmLink`, see the
 | Situation | Driver | Arm | You |
 |---|---|---|---|
 | Arm off when the driver starts, or link renegotiating | `kConnecting`, retries every 1 s, logs `waiting for the arm` | — | Power the arm on; the driver connects by itself |
-| Cable pulled / link lost while running | goals halted, `kConnecting`, reconnects by itself | holds where it is once back | Nothing; no clear needed |
+| Cable pulled, power lost (the red e-stop on this cell), link lost while running | goals halted, `kConnecting`, reconnects, then `kFaulted` (`connection lost: …`) | base control once back: the Kinova controller works | Clear the fault (`/clear_faults` in ROS) when you want the driver back |
 | E-stop / protective stop / fault | goals halted, `kFaulted`, arm handed back to the base | base control: the Kinova controller and the web app work | Clear the cause, then clear the fault (`/clear_faults` in ROS) |
 | Something else switches the arm out of low-level (web app) | same as a fault | base control | Clear when done |
 | Arm already in fault at driver start | `kFaulted`; the driver no longer clears it silently | — | Clear explicitly |
 
 To drive the arm by hand with the Kinova controller mid-session: fault it
-(e-stop), release the e-stop, drive with the controller, then clear the fault.
+(web-app e-stop, or the red e-stop where it cuts power and the arm reboots),
+clear the arm's own fault and drive with the controller, then clear the
+driver's fault.
 The clear re-enters low-level and the arm holds where you left it. It never
 resumes an interrupted goal.
 
-Not yet verified on the arm (first attended session): feedback while faulted
-(`/joint_states` may go quiet; the state machine does not depend on it), the
-base's reported state during low-level running, and the clear after an e-stop
-release. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.
+Validated on the arm 2026-10-28: start with the arm unreachable, cable pull,
+web-app e-stop → controller → clear; feedback keeps flowing while faulted. Not
+yet run end to end: the red e-stop power cycle, and another client switching the
+arm out of low-level. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.

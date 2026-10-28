@@ -43,6 +43,9 @@ class SimTransport : public Transport {
   // it unless it is sticky.
   void set_arm_fault(bool f) { arm_fault_ = f; }
   void set_fault_sticky(bool s) { fault_sticky_ = s; }
+  // After a clear_faults() that ends the fault, arm_in_fault() still reports it n
+  // more times: the real arm takes a moment to leave IN_FAULT.
+  void set_clear_lag(int n) { clear_lag_ = n; }
   // What feedback reports as JointFeedback::low_level.
   void set_low_level_feedback(bool l) { low_level_fb_ = l; }
   // Called at the top of every exchange(); may throw.
@@ -65,7 +68,7 @@ class SimTransport : public Transport {
   uint64_t frame_ = 0;
   float gripper_lag_ = 1.0f;     // default: reach the target in one cycle (old behaviour)
   float gripper_block_ = -1.0f;  // no object
-  std::atomic<int> fail_connects_{0}, fail_health_{0};
+  std::atomic<int> fail_connects_{0}, fail_health_{0}, clear_lag_{0}, lag_left_{0};
   std::atomic<bool> arm_fault_{false}, fault_sticky_{false}, low_level_fb_{true};
   std::function<void()> on_exchange_;
 };

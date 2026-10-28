@@ -44,6 +44,7 @@ struct ArmLinkConfig {
   double fault_poll_hz = 100.0;  // receive() while kFaulted, so feedback stays live
   double health_period_s = 0.5;  // arm_in_fault() while kFaulted: is the arm still there?
   int health_max_failures = 3;   // that many unanswered in a row = link lost
+  double clear_settle_s = 2.0;   // after a clear, how long the arm may take to leave IN_FAULT
 };
 
 // Owns the link lifecycle so that no arm-side event ends the process: a fault,
@@ -54,12 +55,18 @@ struct ArmLinkConfig {
 // connect, backoff, revert and fault polling all happen outside the RT loop.
 //
 //   arm unreachable  -> retry every retry_period_s, forever
-//   comms lost       -> revert + tear down, reconnect; no clear needed, and the
-//                       arm resumes holding where it is (the listener re-requests
-//                       a hold mode; ArmLink itself never picks a mode)
+//   comms lost while commanding
+//                    -> tear down, reconnect, then wait for request_clear() as for
+//                       a fault: the arm may have rebooted under its base (an
+//                       e-stop that cuts power) with an operator driving it
+//   comms lost before commanding (an RPC timeout while starting)
+//                    -> tear down and retry; no clear needed
 //   fault, rejected command, unknown exception
 //                    -> hand the arm back to its base, report, wait for
 //                       request_clear(); a fault stays latched across reconnects
+//
+// After a clear the arm resumes holding where it is (the listener re-requests a
+// hold mode; ArmLink itself never picks a mode).
 //
 // The fault is never cleared on ArmLink's own initiative.
 class ArmLink {
@@ -83,6 +90,7 @@ class ArmLink {
  private:
   enum class Wait { kClear, kLost, kStop };
   Wait wait_faulted(std::atomic<bool>& stop);
+  bool fault_persists(std::atomic<bool>& stop);
   // Logs and tells the listener on a change, or always with `announce`.
   void set_state(LinkState s, const std::string& reason, bool announce = false);
   void latch(const std::string& reason);

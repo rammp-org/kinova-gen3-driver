@@ -46,11 +46,17 @@ bool SimTransport::arm_in_fault() {
     --fail_health_;
     throw TransportTimeout("sim: no reply to the arm-state query");
   }
+  if (lag_left_ > 0) {
+    --lag_left_;
+    return true;
+  }
   return arm_fault_;
 }
 void SimTransport::clear_faults() {
   ++clears;
-  if (!fault_sticky_) arm_fault_ = false;
+  if (fault_sticky_) return;
+  arm_fault_ = false;
+  lag_left_ = clear_lag_.load();
 }
 
 // Advance the simulated gripper one cycle toward its target. Extracted because

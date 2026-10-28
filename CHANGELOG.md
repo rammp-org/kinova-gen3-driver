@@ -17,9 +17,11 @@ that heading to the new version and bumps `package.xml`.
 - **The driver no longer dies on arm-side events** (#96, #59, #100). New
   `ArmLink` (`arm_link.h`) owns the link lifecycle (`kConnecting` /
   `kRunning` / `kFaulted`) around `RtExecutor::run()`. An unreachable arm is
-  retried every second, forever. A comms loss reconnects with no clear needed.
-  A fault, a rejected command or any unknown exception hands the arm back to
-  its base, is reported, and waits for `request_clear()`. Only an
+  retried every second, forever, including an arm still booting (0
+  actuators). A fault, a rejected command, any unknown exception, or a comms
+  loss while commanding hands the arm back to its base, is reported, and waits
+  for `request_clear()`: after a power-cutting e-stop the arm comes back under
+  its base, and the Kinova controller keeps it until the clear. Only an
   actuator-count mismatch still escapes. The `Supervisor` is its listener
   (`on_link_state`): goals halt with `"halted: arm fault or connection lost"`
   (`HaltReason::kArmUnavailable`), work is refused while the arm is down, and

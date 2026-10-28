@@ -89,17 +89,23 @@ Transitions:
 - `kConnecting` → connect succeeds → ask the base its state over TCP
   (`GetArmState`). `ARMSTATE_IN_FAULT` → `kFaulted`. Otherwise enter low-level, set every actuator to POSITION, then
   `kRunning`.
-- `kRunning` → **comms loss** (`CommsLost`, or a timeout entering low-level) →
-  best-effort revert + teardown → `kConnecting`. **No clear needed**: when the
-  link comes back the driver re-enters low-level and holds where the arm is
-  (my call — see Decisions).
+- `kRunning` → **comms loss** (`CommsLost`, or a `TransportTimeout` out of the
+  loop) → `kConnecting`, then best-effort revert + teardown. The loss **latches
+  like a fault**: on reconnect the driver goes to `kFaulted` and waits for a
+  clear (Swapnil, 2026-10-28). On this cell the red e-stop cuts arm power, so the
+  arm comes back rebooted under its base, possibly with an operator driving it
+  from the Kinova controller; taking it back unasked would fight them.
+- `kConnecting` → a timeout **before** the loop ever ran on this connection (an
+  RPC timeout while entering low-level, #59) → teardown, retry, no latch: the
+  driver never commanded the arm, so there is nothing to hand back.
 - `kRunning` → **arm fault** (fault bits in feedback, base state `IN_FAULT`, or
   base no longer reporting `SERVOING_LOW_LEVEL`) or **arm rejected a command**
   (`KDetailedException`) or **any other exception** from the loop → revert to
   base control, keep the session → `kFaulted`, reason recorded.
 - `kFaulted` → explicit clear request → `ClearFaults()` → `GetArmState` no
-  longer `IN_FAULT` → enter low-level → `kRunning`. If the fault persists, stay `kFaulted`
-  and say so.
+  longer `IN_FAULT` within `clear_settle_s` (2 s; the arm takes a moment to leave
+  `IN_FAULT`) → enter low-level → `kRunning`. If the fault persists, stay
+  `kFaulted` and say so.
 - `kFaulted` → the `GetArmState` health poll (2 Hz) fails 3 times in a row →
   teardown → `kConnecting`,
   **fault stays latched**: on reconnect it goes back to `kFaulted`, not
@@ -276,8 +282,10 @@ Swapnil's:
 
 My calls (flagged to Swapnil 2026-10-27, to confirm):
 
-1. A reconnect after comms loss resumes without a clear (holds where the arm
-   is). Only a fault needs a clear.
+1. ~~A reconnect after comms loss resumes without a clear.~~ Overruled by
+   Swapnil 2026-10-28: a loss while commanding latches and waits for a clear,
+   so the e-stop → controller → clear routine works when the e-stop cuts power.
+   A loss before the loop ran still retries on its own.
 2. `connect()`'s silent `ClearFaults()` is removed. An arm already faulted at
    startup waits for a clear.
 3. `/clear_faults` is `std_srvs/Trigger`, not gated by arbitration. The fault is
@@ -306,23 +314,39 @@ My calls (flagged to Swapnil 2026-10-27, to confirm):
   has no unit test: there is no fake TCP router. The cyclic-call
   classification is tested through the SDK's real `RouterClient`.
 
+## On the arm (abra, 2026-10-28)
+
+Passed: arm unreachable at start, then reachable (connects by itself); cable
+pull while holding (the arm did not fault on losing commands; reconnect
+worked); web-app e-stop → `kFaulted`, feedback keeps flowing, `/clear_faults`
+re-enters; drive with the Kinova controller while faulted, then clear: the arm
+holds where it was left (0.000° over 3 s). The base does report
+`ARMSTATE_SERVOING_LOW_LEVEL` while we command (0 faults over 70 k cycles).
+
+Found, and fixed on this branch:
+
+- A booting arm answers on its base before its actuators are up and reports
+  **0 actuators**; the count check treated that as a wrong robot and exited.
+  0 is now a retryable "not ready".
+- The re-check right after `ClearFaults()` still saw `IN_FAULT`, so the first
+  clear always answered "fault persists". Now polled for `clear_settle_s`.
+- 7 s between losing the link and reporting `kConnecting`: two
+  `CloseSession()` calls at KORTEX's fixed 3 s timeout. Skipped when the revert
+  found the arm not answering, and `kConnecting` is now reported before the
+  teardown.
+
+Seen, not fixed: with no route to the arm (abra's `eno1` lost its static
+address and traffic went out over wifi), one `connect()` blocks ~127 s in TCP
+SYN retries with an empty reason. On the direct link an off arm fails at once.
+
 ## Not verified (needs the arm)
 
-- That `RefreshFeedback` answers in single-level servoing and while the base is
-  in fault. If it doesn't, `/joint_states` goes quiet in `kFaulted`; the state
-  machine and the clear don't depend on it.
-- What the base reports in `active_state` during normal low-level running
-  (assumed `ARMSTATE_SERVOING_LOW_LEVEL`), and during a protective stop. If the
-  assumption is wrong, every start ends in `kFaulted` 50 ms in, with the reason
-  naming the reported state: loud on the first attended run, and the check is
-  one line to drop.
+- What the base reports during a protective stop.
 - What the 2F-85 does when left uncommanded after a re-entry (expected: the
   same as at first startup).
-- Whether the arm's own watchdog leaves low-level or faults when cyclic commands
-  stop, and in which actuator mode it leaves the actuators.
-- That `ClearFaults()` + `SetServoingMode(LOW_LEVEL)` re-enters cleanly after an
-  e-stop release.
-- How long `TransportClientTcp::connect` blocks against an arm that is off.
+- In which actuator mode the arm leaves the actuators after a cable pull.
+- The red e-stop (power cut → reboot) path end to end, and something else
+  switching the arm out of low-level (tested with a second KORTEX client).
 
 Attended validation (with Swapnil): arm off at start then powered on; cable pull
 while holding; e-stop → controller drive → `/clear_faults`; web app forcing

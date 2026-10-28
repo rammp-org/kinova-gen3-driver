@@ -128,15 +128,40 @@ ArmLink::Wait ArmLink::wait_faulted(std::atomic<bool>& stop) {
   return Wait::kStop;
 }
 
+// The arm takes a moment to leave IN_FAULT after ClearFaults, so poll for up to
+// clear_settle_s before calling the fault persistent.
+bool ArmLink::fault_persists(std::atomic<bool>& stop) {
+  const auto deadline = std::chrono::steady_clock::now() +
+                        std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<double>(cfg_.clear_settle_s));
+  while (t_.arm_in_fault()) {
+    if (stop.load(std::memory_order_acquire) || std::chrono::steady_clock::now() >= deadline)
+      return true;
+    std::this_thread::sleep_for(std::chrono::duration<double>(1.0 / cfg_.fault_poll_hz));
+  }
+  return false;
+}
+
 void ArmLink::run(std::atomic<bool>& stop) {
   set_state(LinkState::kConnecting, "", /*announce=*/true);
   bool connected = false, ever_connected = false;
+  bool commanding = false;  // the RT loop ran on this connection
   auto shutdown = [&] {
     try {
       t_.safe_shutdown();
     } catch (...) {
     }
     connected = false;
+  };
+  // A loss while commanding latches: the arm may come back rebooted under its
+  // base, with an operator driving it, so it is not taken back without a clear.
+  // A loss before that (an RPC timeout while starting) just retries.
+  auto lost = [&](const char* what) {
+    if (commanding) latch(std::string("connection lost: ") + what);
+    commanding = false;
+    set_state(LinkState::kConnecting, what);
+    shutdown();
+    sleep_for(cfg_.retry_period_s, stop);
   };
 
   while (!stop.load(std::memory_order_acquire)) {
@@ -176,7 +201,7 @@ void ArmLink::run(std::atomic<bool>& stop) {
         if (w == Wait::kLost) throw TransportTimeout("the arm stopped answering while faulted");
         clearing_ = true;
         t_.clear_faults();
-        if (t_.arm_in_fault()) {
+        if (fault_persists(stop)) {
           fault_reason_ = "fault persists after clear";
           continue;
         }
@@ -191,19 +216,18 @@ void ArmLink::run(std::atomic<bool>& stop) {
       position.fill(ActuatorMode::kPosition);
       t_.set_actuator_modes(position);
       set_state(LinkState::kRunning, "");
+      commanding = true;
       exec_.run(stop);
       break;  // run() returns only on stop
     } catch (const CommsLost& e) {
-      shutdown();
-      set_state(LinkState::kConnecting, e.what());
-      sleep_for(cfg_.retry_period_s, stop);
+      lost(e.what());
     } catch (const TransportTimeout& e) {
-      shutdown();
-      set_state(LinkState::kConnecting, e.what());
-      sleep_for(cfg_.retry_period_s, stop);
+      lost(e.what());
     } catch (const std::exception& e) {
+      commanding = false;
       latch(e.what());
     } catch (...) {
+      commanding = false;
       latch("unknown exception");
     }
   }

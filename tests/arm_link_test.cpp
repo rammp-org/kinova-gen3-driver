@@ -43,6 +43,7 @@ ArmLinkConfig fast_link() {
   c.retry_period_s = 0.01;
   c.fault_poll_hz = 1000.0;
   c.health_period_s = 0.005;
+  c.clear_settle_s = 0.05;
   return c;
 }
 
@@ -126,7 +127,7 @@ TEST(ArmLink, ConnectingReportsTheLastError) {
   EXPECT_EQ(s.reason, "sim: arm unreachable");
 }
 
-TEST(ArmLink, CommsLossReconnectsWithoutAClear) {
+TEST(ArmLink, CommsLossMidRunWaitsForAClear) {
   Rig r;
   std::atomic<bool> drop{false};
   r.sim.throw_on_exchange([&drop] {
@@ -138,10 +139,28 @@ TEST(ArmLink, CommsLossReconnectsWithoutAClear) {
   ASSERT_TRUE(r.wait_state(LinkState::kConnecting));
   EXPECT_GE(r.sim.shutdowns.load(), 1);
   drop.store(false);
-  ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+  // Back, but the arm may have rebooted under its base (an operator driving it):
+  // the driver watches it and waits for a clear instead of taking it.
+  ASSERT_TRUE(r.wait_state(LinkState::kFaulted));
+  EXPECT_TRUE(r.holds_state(LinkState::kFaulted, 0.05));
   EXPECT_GE(r.link.status().reconnects, 1u);
-  EXPECT_EQ(r.sim.clears.load(), 0);
+  EXPECT_EQ(r.sim.low_level_entries.load(), 1);
+  EXPECT_EQ(r.link.status().faults, 1u);
+  EXPECT_NE(r.link.status().reason.find("connection lost"), std::string::npos)
+      << r.link.status().reason;
+  EXPECT_TRUE(r.link.request_clear());
+  ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+  EXPECT_EQ(r.sim.low_level_entries.load(), 2);
+}
+
+TEST(ArmLink, LinkLossBeforeRunningRetriesWithoutAClear) {
+  Rig r;
+  r.sim.fail_health(1);  // the startup fault check times out: never commanded yet
+  r.start();
+  ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+  EXPECT_EQ(r.sim.connects.load(), 2);
   EXPECT_EQ(r.link.status().faults, 0u);
+  EXPECT_EQ(r.sim.clears.load(), 0);
 }
 
 TEST(ArmLink, FaultWaitsForAnExplicitClear) {
@@ -228,6 +247,18 @@ TEST(ArmLink, ClearWhileStillFaultedStaysFaulted) {
   r.sim.set_fault_sticky(false);
   EXPECT_TRUE(r.link.request_clear());
   ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+}
+
+TEST(ArmLink, ClearWaitsForTheArmToLeaveFault) {
+  Rig r;
+  r.sim.set_arm_fault(true);
+  r.start();
+  ASSERT_TRUE(r.wait_state(LinkState::kFaulted));
+  r.sim.set_clear_lag(3);  // the arm still reports IN_FAULT just after ClearFaults
+  EXPECT_TRUE(r.link.request_clear());
+  ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+  EXPECT_EQ(r.link.status().clears_done, 1u);
+  EXPECT_EQ(r.sim.clears.load(), 1);
 }
 
 TEST(ArmLink, FaultSurvivesAReconnect) {
