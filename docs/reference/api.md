@@ -678,9 +678,15 @@ raised by the `Supervisor` itself, never by a caller, from
 `kRunning`, it refuses new goals and stream opens (`"arm not ready"`), requests
 position mode for the next executor run (seeded from fresh feedback, every old
 target dropped, so the arm holds where it is *now* after the outage), then
-halts. The pump stops publishing `ArmState` while `kConnecting`, since nothing
-refreshes the snapshot then; it keeps publishing while `kFaulted`. Entering
-`kRunning` re-admits work. A `Supervisor` never told stays ready.
+halts. Gripper setpoints are dropped while the arm is down, and a goal ACCEPTed
+after the drop is settled `kHalted` rather than run. Entering `kRunning`
+re-admits work. A `Supervisor` never told stays ready.
+
+A halt (any reason) settles goals still waiting in the inbox with `kHalted`
+rather than dropping them. The pump publishes `ArmState` only when the feedback
+snapshot is new since its last publish (`Seqlock::version()`), so a frozen
+snapshot (link reconnecting, faulted polls unanswered, nothing read yet) is
+never republished as live.
 
 ### Gating
 

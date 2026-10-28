@@ -224,9 +224,12 @@ cost joint state, never the state machine: liveness comes from the
 - entering `kRunning`: mark ready;
 - `on_trajectory_goal` rejects and `on_stream_open` refuses ("arm not ready")
   while not ready;
-- the pump stops publishing `ArmState` while `kConnecting`: the snapshot is stale
-  then. It publishes in `kFaulted`, where `ArmLink`'s polling keeps the snapshot
-  fresh through `FeedbackTap::receive`.
+- the pump publishes `ArmState` only when the feedback snapshot is new since its
+  last publish, so nothing goes out while `kConnecting`, and in `kFaulted` only
+  while `ArmLink`'s polling gets answers (implemented with `Seqlock::version()`;
+  originally specced as a `kConnecting` check, tightened after review);
+- gripper setpoints are dropped while not ready, and a goal accepted after the
+  drop is settled halted (review findings).
 
 `SimTransport` gains test knobs: fail the next N `connect()`s, inject a fault
 into feedback, throw `ArmRejected` / `TransportTimeout` from `exchange()`. Tests
