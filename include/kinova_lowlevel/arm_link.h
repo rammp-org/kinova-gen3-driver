@@ -24,6 +24,11 @@ struct LinkStatus {
   std::string reason;
   uint64_t faults = 0;      // faults latched since start
   uint64_t reconnects = 0;  // successful connects after the first
+  // Clear attempts that have resolved: bumped, together with the state/reason it
+  // resolved to, when the state machine next publishes after taking a clear. A
+  // caller that read it before request_clear() waits for it to move to learn the
+  // outcome (kRunning, or kFaulted with the reason).
+  uint64_t clears_done = 0;
 };
 
 // Told about every state change, on ArmLink::run()'s thread, before the new
@@ -90,6 +95,7 @@ class ArmLink {
   ArmLinkConfig cfg_;
 
   bool latched_ = false;      // run()'s thread only
+  bool clearing_ = false;     // run()'s thread only: a clear taken, not yet resolved
   std::string fault_reason_;  // run()'s thread only; survives a reconnect
   uint64_t connect_failures_ = 0;
   std::string last_connect_error_;

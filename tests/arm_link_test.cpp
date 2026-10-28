@@ -154,8 +154,10 @@ TEST(ArmLink, FaultWaitsForAnExplicitClear) {
   EXPECT_TRUE(r.holds_state(LinkState::kFaulted, 0.1));  // never clears on its own
   EXPECT_EQ(r.sim.clears.load(), 0);
   EXPECT_NE(r.link.status().reason.find("fault"), std::string::npos) << r.link.status().reason;
+  EXPECT_EQ(r.link.status().clears_done, 0u);
   EXPECT_TRUE(r.link.request_clear());
   ASSERT_TRUE(r.wait_state(LinkState::kRunning));
+  EXPECT_EQ(r.link.status().clears_done, 1u);
   EXPECT_EQ(r.sim.clears.load(), 1);
   EXPECT_EQ(r.sim.low_level_entries.load(), 2);
   EXPECT_EQ(r.link.status().faults, 1u);
@@ -217,7 +219,8 @@ TEST(ArmLink, ClearWhileStillFaultedStaysFaulted) {
   r.start();
   ASSERT_TRUE(r.wait_state(LinkState::kFaulted));
   EXPECT_TRUE(r.link.request_clear());
-  ASSERT_TRUE(r.wait_for([](const LinkStatus& s) { return s.reason == "fault persists after clear"; }));
+  ASSERT_TRUE(r.wait_for([](const LinkStatus& s) { return s.clears_done == 1; }));
+  EXPECT_EQ(r.link.status().reason, "fault persists after clear");
   EXPECT_EQ(r.link.status().state, LinkState::kFaulted);
   EXPECT_EQ(r.sim.clears.load(), 1);
   EXPECT_EQ(r.sim.low_level_entries.load(), 0);

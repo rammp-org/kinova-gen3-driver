@@ -348,7 +348,7 @@ thread that would otherwise call `RtExecutor::run()` and calls it while
 ```cpp
 enum class LinkState { kConnecting, kRunning, kFaulted };
 const char* to_string(LinkState);
-struct LinkStatus { LinkState state; std::string reason; uint64_t faults, reconnects; };
+struct LinkStatus { LinkState state; std::string reason; uint64_t faults, reconnects, clears_done; };
 class LinkListener { public: virtual void on_link_state(LinkState) = 0; };
 struct ArmLinkConfig {
   double retry_period_s = 1.0;   // between connect attempts, and after a link loss

@@ -47,6 +47,10 @@ void ArmLink::set_state(LinkState s, const std::string& reason, bool announce) {
     changed = announce || st_.state != s;
     st_.state = s;
     st_.reason = reason;
+    if (clearing_) {
+      ++st_.clears_done;
+      clearing_ = false;
+    }
   }
   // A clear asked for in one faulted episode must not fire in the next.
   if (s != LinkState::kFaulted) clear_requested_.store(false);
@@ -170,6 +174,7 @@ void ArmLink::run(std::atomic<bool>& stop) {
         const Wait w = wait_faulted(stop);
         if (w == Wait::kStop) break;
         if (w == Wait::kLost) throw TransportTimeout("the arm stopped answering while faulted");
+        clearing_ = true;
         t_.clear_faults();
         if (t_.arm_in_fault()) {
           fault_reason_ = "fault persists after clear";
