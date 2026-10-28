@@ -298,14 +298,19 @@ struct ExecutorConfig {
   int      max_consecutive_misses = kMaxConsecutiveTimeouts;  // 3 exchange timeouts in a row => CommsLost
   int      max_window_misses = 5;       // ...or this many within miss_window => CommsLost
   int      miss_window = 1000;          // exchanges
+  bool     exit_on_fault = false;       // a confirmed fault in feedback ends run() with ArmFault
 };
 class CommsLost : public std::runtime_error {};  // thrown by run()
+class ArmFault : public std::runtime_error {};   // thrown by run() under exit_on_fault
+inline constexpr int kFaultConfirmExchanges = 3;
+inline constexpr int kLeftLowLevelConfirmExchanges = 50;
 
 class RtExecutor {
  public:
   RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit or miss_window < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
-  void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread
+  void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread; may be called again
+  const ExecutorConfig& config() const noexcept;
 };
 ```
 
@@ -320,9 +325,60 @@ class RtExecutor {
   within the last `miss_window` exchanges (so a link losing every other frame
   can't run on forever), or a mode switch whose pumps time out: `run` throws
   `CommsLost` and the caller does `safe_shutdown()`. Any other exception from
-  `exchange` propagates as before.
+  `exchange` (such as `ArmRejected`) propagates as before.
+- **Faults (`exit_on_fault`):** off by default, so a caller that clears faults
+  in place while the loop runs (the teleop app) keeps today's behaviour. On, a
+  good exchange reporting `JointFeedback::fault` `kFaultConfirmExchanges` times
+  in a row, or `!low_level` `kLeftLowLevelConfirmExchanges` times in a row,
+  ends `run` with `ArmFault`. A miss neither confirms nor clears the count.
+  `ArmLink` requires it.
+- **Re-running:** `run` may be called again after it returns or throws; a mode
+  requested in between is adopted by the new run (from a fresh seed read).
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
+
+---
+
+## `ArmLink` — `arm_link.h`
+
+Owns the link lifecycle so no arm-side event ends the process. Runs on the
+thread that would otherwise call `RtExecutor::run()` and calls it while
+`kRunning`; it owns no thread of its own.
+
+```cpp
+enum class LinkState { kConnecting, kRunning, kFaulted };
+const char* to_string(LinkState);
+struct LinkStatus { LinkState state; std::string reason; uint64_t faults, reconnects; };
+class LinkListener { public: virtual void on_link_state(LinkState) = 0; };
+struct ArmLinkConfig {
+  double retry_period_s = 1.0;   // between connect attempts, and after a link loss
+  double fault_poll_hz = 100.0;  // receive() while faulted, so feedback stays live
+  double health_period_s = 0.5;  // arm_in_fault() while faulted
+  int health_max_failures = 3;   // unanswered in a row = link lost
+};
+class ArmLink {
+ public:
+  ArmLink(Transport&, RtExecutor&, LinkListener*, ArmLinkConfig = {});  // invalid_argument unless exit_on_fault
+  void run(std::atomic<bool>& stop);  // returns on stop, transport shut down; only std::logic_error escapes
+  bool request_clear();               // any thread; true only while kFaulted
+  LinkStatus status() const;          // any thread
+};
+```
+
+| Event | What `ArmLink` does | Next state |
+|---|---|---|
+| `connect()` fails (arm off, link renegotiating, RPC timeout) | `safe_shutdown()`, retry every `retry_period_s`, forever | `kConnecting` |
+| connected, base reports `ARMSTATE_IN_FAULT` | hand the arm back to the base (`release_low_level`) | `kFaulted` |
+| connected, no fault | `set_servoing_low_level()`, every actuator to POSITION, `exec.run()` | `kRunning` |
+| `CommsLost`, or a `TransportTimeout` outside the loop | `safe_shutdown()`, reconnect; **no clear needed** | `kConnecting` |
+| `ArmFault`, `ArmRejected`, any other exception | latch the fault, `release_low_level()` | `kFaulted` |
+| `request_clear()` | `clear_faults()`; still in fault → stays, reason `"fault persists after clear"` | `kRunning` |
+| arm stops answering while faulted (`health_max_failures`) | `safe_shutdown()`, reconnect; **the fault stays latched** | `kConnecting` → `kFaulted` |
+| `std::logic_error` from `connect()` (actuator-count mismatch) | `safe_shutdown()`, rethrow | — |
+
+`ArmLink` never clears a fault on its own initiative. The listener (the
+`Supervisor`) is told every state change before it takes effect on the arm; see
+`Supervisor::on_link_state`.
 
 ---
 
@@ -369,10 +425,15 @@ class Transport {
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;
-  virtual void safe_shutdown() = 0;
+  virtual void safe_shutdown() = 0;            // release_low_level() + close the connection
+  virtual void release_low_level() = 0;        // actuators POSITION + base single-level; keeps the connection
+  virtual bool arm_in_fault() = 0;             // base state over the control channel; TransportTimeout if unanswered
+  virtual void clear_faults() {}               // re-enters low-level only if still in it
 };
 // a cyclic round-trip did not complete within the transport's cyclic timeout
 class TransportTimeout : public std::runtime_error {};
+// the arm refused a request (an error reply, e.g. WRONG_SERVOING_MODE)
+class ArmRejected : public std::runtime_error {};
 // TransportTimeouts in a row taken as the link being down; the default for
 // ExecutorConfig::max_consecutive_misses and the limit for mode-switch pumps
 inline constexpr int kMaxConsecutiveTimeouts = 3;
@@ -381,7 +442,9 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No
-  hardware.
+  hardware. Test knobs for the link lifecycle: `fail_connects`, `set_arm_fault`,
+  `set_fault_sticky`, `set_low_level_feedback`, `throw_on_exchange`,
+  `fail_health`, `set_joint_positions`, and call counters.
 - **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
   Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` moves the SDK's
@@ -396,9 +459,17 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   reply with a `steady_clock` deadline, so a timeout is typed rather than
   recognised from KORTEX's error message. `set_actuator_modes` skips isolated lost
   pumps (`kMaxConsecutiveTimeouts` in a row rethrow). `set_servoing_low_level`'s
-  seed reads keep 3000 ms. An error frame from the arm still throws
-  `KDetailedException`, and a failed local send (`sendto`) throws KORTEX's
-  `std::runtime_error`; both are fatal (#96).
+  seed reads keep 3000 ms. KORTEX errors are classified at this boundary: an
+  error reply from the arm (`KDetailedException`) is `ArmRejected`; a failed
+  local send (`sendto`) is a lost frame, `TransportTimeout`; a TCP RPC timeout
+  (KORTEX's `"timeout detected"` `runtime_error`) is `TransportTimeout`.
+  `connect()` does not clear faults; an actuator-count mismatch is
+  `std::invalid_argument`. `release_low_level()` and `arm_in_fault()` bound each
+  RPC at 500 ms, and the revert stops at the first failure. `fill_feedback`
+  folds the base's fault banks and `ARMSTATE_IN_FAULT` into `fault` and sets
+  `low_level` from the base's `active_state`. `set_servoing_low_level()` clears
+  the retained gripper command, so re-entry leaves the gripper uncommanded, as at
+  first startup.
 
 Two decorators wrap a `Transport` rather than implementing one from scratch —
 same shape, forward everything, and hook the one call each cares about:
@@ -600,6 +671,16 @@ sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
 every queued goal with `result_code::kHalted`, then holds the active mode's
 target at the last-good **measured** q.
+
+`HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
+raised by the `Supervisor` itself, never by a caller, from
+`Supervisor::on_link_state` (it is `ArmLink`'s `LinkListener`). Leaving
+`kRunning`, it refuses new goals and stream opens (`"arm not ready"`), requests
+position mode for the next executor run (seeded from fresh feedback, every old
+target dropped, so the arm holds where it is *now* after the outage), then
+halts. The pump stops publishing `ArmState` while `kConnecting`, since nothing
+refreshes the snapshot then; it keeps publishing while `kFaulted`. Entering
+`kRunning` re-admits work. A `Supervisor` never told stays ready.
 
 ### Gating
 

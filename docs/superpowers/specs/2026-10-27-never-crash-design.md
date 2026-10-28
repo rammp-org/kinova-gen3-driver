@@ -1,6 +1,6 @@
 # The driver never crashes — design
 
-Status: proposed 2026-10-27. Tracks #96 (items 4–7), #59, and option 1 of #100.
+Status: implemented 2026-10-27 on `feat/96-never-crash` (sim-tested; on-arm validation pending). Tracks #96 (items 4–7), #59, and option 1 of #100.
 
 ## Why
 
@@ -154,7 +154,7 @@ the actuator-count mismatch). Everything else is caught, classified, reported.
 |---|---|---|---|
 | `TransportTimeout` (exists) | cyclic call, and now a failed local `sendto` | lost frame | executor survives isolated ones (#95) |
 | `CommsLost` (exists) | executor, after sustained misses | link down | → `kConnecting` |
-| `ArmFault` (new, in `rt_executor.h`) | executor with `exit_on_fault`, fault seen in feedback for 3 consecutive good exchanges | arm faulted / left low-level | → `kFaulted` |
+| `ArmFault` (new, in `rt_executor.h`) | executor with `exit_on_fault`, fault in feedback on 3 consecutive good exchanges, or not low-level on 50 | arm faulted / left low-level | → `kFaulted` |
 | `ArmRejected` (new, in `transport.h`) | `KortexTransport`, wrapping `KDetailedException` | arm refused a command | → `kFaulted` |
 | `std::logic_error` | `connect()` actuator-count mismatch (changed from `runtime_error` to `std::invalid_argument`) | wrong robot | rethrown, process exits |
 | anything else | anywhere | unknown | → `kFaulted`, reason = `what()` |
@@ -172,7 +172,8 @@ banks). The default is `true`, so `SimTransport` and every test fake stay
 "healthy" untouched. With the new `ExecutorConfig::exit_on_fault` (default
 **false**, so the attended apps keep today's behaviour: teleop's clear packet
 still clears and resumes in place), the executor throws `ArmFault` after
-`fault || !low_level` on 3 consecutive good exchanges. `ArmLink`'s constructor
+`fault` on 3 consecutive good exchanges, or `!low_level` on 50 (the base's
+reported state may trail the switch into low-level by a few frames). `ArmLink`'s constructor
 throws `std::invalid_argument` if handed an executor without it, so the ROS node
 can't forget it (3 ms at 1 kHz: a single garbled frame doesn't
 take the arm down; a latched fault does). Counting is a couple of integer ops,
@@ -281,8 +282,8 @@ My calls (flagged to Swapnil 2026-10-27, to confirm):
    rammp-interfaces-ros2 is untouched.
 4. Unknown exceptions become a fault (wait for clear), not an exit. Only the
    actuator-count mismatch exits.
-5. A fault requires 3 consecutive faulty frames. Leaving low-level counts as a
-   fault.
+5. A fault requires 3 consecutive faulty frames; leaving low-level, 50.
+   Leaving low-level counts as a fault.
 7. Fault-exit is opt-in on the executor (`exit_on_fault`); the apps keep
    today's behaviour, `ArmLink` requires it.
 8. Re-entry leaves the gripper uncommanded, as at startup.
@@ -292,6 +293,16 @@ My calls (flagged to Swapnil 2026-10-27, to confirm):
 6. Connect retry is a fixed 1 s, not exponential: the arm is on a dedicated
    link, and a short fixed period gets back fastest after a 4 s renegotiation.
 
+## Implementation notes (2026-10-27)
+
+- Setting every actuator to POSITION on re-entry lives in `ArmLink` (after
+  `set_servoing_low_level()`), not inside `set_servoing_low_level()`: the teleop
+  app's in-place `clear_faults()` re-enters through it while its loop keeps
+  commanding torque, and must keep doing so.
+- `KortexTransport`'s TCP-RPC classification (`ArmRejected` / `TransportTimeout`)
+  has no unit test: there is no fake TCP router. The cyclic-call
+  classification is tested through the SDK's real `RouterClient`.
+
 ## Not verified (needs the arm)
 
 - That `RefreshFeedback` answers in single-level servoing and while the base is
@@ -299,7 +310,7 @@ My calls (flagged to Swapnil 2026-10-27, to confirm):
   machine and the clear don't depend on it.
 - What the base reports in `active_state` during normal low-level running
   (assumed `ARMSTATE_SERVOING_LOW_LEVEL`), and during a protective stop. If the
-  assumption is wrong, every start ends in `kFaulted` 3 ms in, with the reason
+  assumption is wrong, every start ends in `kFaulted` 50 ms in, with the reason
   naming the reported state: loud on the first attended run, and the check is
   one line to drop.
 - What the 2F-85 does when left uncommanded after a re-entry (expected: the

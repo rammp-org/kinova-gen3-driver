@@ -16,7 +16,7 @@
 - KORTEX types never leave `kortex_transport.cpp` / `kortex_cyclic.h`.
 - SI/radians inside; no new unit conversions outside `Transport`.
 - `ExecutorConfig::exit_on_fault` defaults to **false**; `ArmLink` requires it true.
-- Fault confirm: **3** consecutive good exchanges with `fault || !low_level`.
+- Fault confirm: **3** consecutive good exchanges with `fault`; **50** with `!low_level` (implemented as `kFaultConfirmExchanges` / `kLeftLowLevelConfirmExchanges`).
 - Retry period **1 s**; faulted feedback poll **100 Hz**; health poll **every 0.5 s**, **3** consecutive failures = link lost.
 - Every RPC in `release_low_level()` and `arm_in_fault()` is bounded at **500 ms**.
 - Halt reason text: `"halted: arm fault or connection lost"`.
@@ -47,16 +47,16 @@
   - `bool JointFeedback::low_level = true;`: false when the base reports it is not in low-level servoing.
   - `SimTransport` knobs: `void fail_connects(int n)` (next n `connect()` throw `std::runtime_error("sim: arm unreachable")`); `void set_arm_fault(bool)` (feedback `fault` and `arm_in_fault()` both report it; `clear_faults()` resets it unless `set_fault_sticky(true)`); `void set_fault_sticky(bool)`; `void set_low_level_feedback(bool)`; `void throw_on_exchange(std::function<void()>)` (called at the top of each `exchange()`, may throw); `void fail_health(int n)` (next n `arm_in_fault()` throw `TransportTimeout`); counters `int connects, releases, shutdowns, low_level_entries, clears`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
   - `FeedbackTap.ForwardsReleaseAndFaultQuery` and `GripperController.ForwardsReleaseAndFaultQuery`: wrap a `SimTransport`, call `release_low_level()` / `arm_in_fault()` through the decorator, assert `sim.releases == 1` and the fault answer matches `set_arm_fault(true)`.
   - `SimTransport.InjectedFaultShowsInFeedbackAndQuery`: `set_arm_fault(true)`, `exchange` → `fb.fault == true`, `arm_in_fault() == true`; `clear_faults()` → both false.
   - `SimTransport.StickyFaultSurvivesClear`.
   - `SimTransport.FailConnectsThrowsThenSucceeds`: `fail_connects(2)`; two throws, third returns; `connects == 3`.
   - `SimTransport.LowLevelFeedbackKnob`: default `fb.low_level == true`; after `set_low_level_feedback(false)`, false.
-- [ ] **Step 2: Run** `build.sh sim --gtest_filter='SimTransport*:FeedbackTap*:GripperController*'`. Expected: compile failure on the missing members.
-- [ ] **Step 3: Implement.** Add the types and pure virtuals; forward in both decorators; implement in `SimTransport` (`release_low_level` and `safe_shutdown` count; `set_servoing_low_level` counts `low_level_entries`); stub on `DroppingTransport` (`release_low_level` no-op, `arm_in_fault` → false).
-- [ ] **Step 4: Run** the full suite. Expected: all pass (the known `Supervisor.StreamingAPoseIntoPositionModeIsAccepted` flake excepted).
-- [ ] **Step 5: Commit.**
+- [x] **Step 2: Run** `build.sh sim --gtest_filter='SimTransport*:FeedbackTap*:GripperController*'`. Expected: compile failure on the missing members.
+- [x] **Step 3: Implement.** Add the types and pure virtuals; forward in both decorators; implement in `SimTransport` (`release_low_level` and `safe_shutdown` count; `set_servoing_low_level` counts `low_level_entries`); stub on `DroppingTransport` (`release_low_level` no-op, `arm_in_fault` → false).
+- [x] **Step 4: Run** the full suite. Expected: all pass (the known `Supervisor.StreamingAPoseIntoPositionModeIsAccepted` flake excepted).
+- [x] **Step 5: Commit.**
 
 ### Task 2: Executor exits on a confirmed fault (opt-in)
 
@@ -72,17 +72,17 @@
   - `inline constexpr int kFaultConfirmExchanges = 3;`
   - `const ExecutorConfig& RtExecutor::config() const noexcept;`
 
-- [ ] **Step 1: Write failing tests** (extend `DroppingTransport` with an `on_fb` hook that edits `fb` on a successful exchange):
+- [x] **Step 1: Write failing tests** (extend `DroppingTransport` with an `on_fb` hook that edits `fb` on a successful exchange):
   - `RtExecutorFault.ThreeFaultyExchangesThrowArmFault`: `exit_on_fault=true`, fault from call 5 on → `run()` throws `ArmFault`; `calls == 5 + 3` (the seed included in the count as the fake defines it; assert the exact count the fake produces).
   - `RtExecutorFault.TwoFaultyThenHealthyDoesNotThrow`: fault on calls 5,6 only → run returns on stop.
   - `RtExecutorFault.LeftLowLevelCountsAsFault`: `low_level=false` from call 5 → `ArmFault`, message contains `"low-level"`.
   - `RtExecutorFault.OffByDefaultKeepsTodaysBehaviour`: `exit_on_fault=false`, fault forever → returns on stop, sample flag bit 2 set.
   - `RtExecutorFault.ArmRejectedPropagates`: `exchange` throws `ArmRejected` → `run()` throws `ArmRejected`.
   - `RtExecutorFault.RequestedModeSurvivesAcrossRuns`: `request_mode(&m)`; first `run()` throws `ArmFault` before adopting (fault from the seed on, so `misses==0` but the throw comes first) or, simpler, call `request_mode` after a first `run()` returned; a second `run()` adopts it (`m.entered_frame != UINT64_MAX`).
-- [ ] **Step 2: Run** `--gtest_filter='RtExecutor*'`. Expected: FAIL (compile).
-- [ ] **Step 3: Implement.** Counter of consecutive good exchanges with `fb.fault || !fb.low_level`, reset on a healthy good exchange, untouched on a miss; on reaching `kFaultConfirmExchanges` with `exit_on_fault`, `snprintf` a message (`"RtExecutor: arm fault: actuator/base fault"` or `"RtExecutor: arm fault: base left low-level servoing"`), print it to stderr, and throw `ArmFault`. The seed read's fault doesn't count (it belongs to `ArmLink`'s pre-check). No allocation before the throw.
-- [ ] **Step 4: Run** `--gtest_filter='RtExecutor*:RtSafety*'`. Expected: PASS.
-- [ ] **Step 5: Commit.**
+- [x] **Step 2: Run** `--gtest_filter='RtExecutor*'`. Expected: FAIL (compile).
+- [x] **Step 3: Implement.** Counter of consecutive good exchanges with `fb.fault || !fb.low_level`, reset on a healthy good exchange, untouched on a miss; on reaching `kFaultConfirmExchanges` with `exit_on_fault`, `snprintf` a message (`"RtExecutor: arm fault: actuator/base fault"` or `"RtExecutor: arm fault: base left low-level servoing"`), print it to stderr, and throw `ArmFault`. The seed read's fault doesn't count (it belongs to `ArmLink`'s pre-check). No allocation before the throw.
+- [x] **Step 4: Run** `--gtest_filter='RtExecutor*:RtSafety*'`. Expected: PASS.
+- [x] **Step 5: Commit.**
 
 ### Task 3: `ArmLink`
 
@@ -130,7 +130,7 @@ finally: best-effort safe_shutdown()
 ```
 Listener and stderr log fire on each state *change* only. `latch()` bumps `faults` and sets the reason. Connect failures log the first time, on a changed reason, and every 30th attempt. All sleeps are 10 ms slices checking `stop`.
 
-- [ ] **Step 1: Write failing tests** (real `RtExecutor` at 10 kHz, `exit_on_fault=true`, `SimTransport`, a recording listener; tests stop the link from a helper thread when a predicate on `status()` holds, with a 5 s deadline that fails the test):
+- [x] **Step 1: Write failing tests** (real `RtExecutor` at 10 kHz, `exit_on_fault=true`, `SimTransport`, a recording listener; tests stop the link from a helper thread when a predicate on `status()` holds, with a 5 s deadline that fails the test):
   - `ArmLink.RejectsAnExecutorWithoutExitOnFault`.
   - `ArmLink.RetriesConnectUntilTheArmAnswers`: `fail_connects(3)`, `retry_period_s=0.01` → reaches `kRunning`; `connects == 4`; listener saw `[kConnecting, kRunning]`; `reason` while connecting was `"sim: arm unreachable"`.
   - `ArmLink.CommsLossReconnectsWithoutAClear`: running, then `throw_on_exchange` throws `TransportTimeout` repeatedly for a while → state goes `kConnecting` → back to `kRunning` with no `request_clear`; `reconnects == 1`; `shutdowns >= 1`.
@@ -142,10 +142,10 @@ Listener and stderr log fire on each state *change* only. `latch()` bumps `fault
   - `ArmLink.RequestClearIsRefusedUnlessFaulted`.
   - `ArmLink.StopReturnsFromEveryState`: three sub-cases (stop while `fail_connects(1000)`, while faulted, while running); `run` returns within 1 s; `shutdowns >= 1`.
   - `ArmLink.ConfigErrorEscapes`: a transport whose `connect()` throws `std::invalid_argument` → `run` throws `std::invalid_argument`.
-- [ ] **Step 2: Run** `--gtest_filter='ArmLink*'`. Expected: FAIL (missing header).
-- [ ] **Step 3: Implement** `src/arm_link.cpp` per the algorithm.
-- [ ] **Step 4: Run** `--gtest_filter='ArmLink*'` 5× (`--gtest_repeat=5`). Expected: PASS every time.
-- [ ] **Step 5: Commit.**
+- [x] **Step 2: Run** `--gtest_filter='ArmLink*'`. Expected: FAIL (missing header).
+- [x] **Step 3: Implement** `src/arm_link.cpp` per the algorithm.
+- [x] **Step 4: Run** `--gtest_filter='ArmLink*'` 5× (`--gtest_repeat=5`). Expected: PASS every time.
+- [x] **Step 5: Commit.**
 
 ### Task 4: `KortexTransport` classification, release, health
 
@@ -157,9 +157,9 @@ Listener and stderr log fire on each state *change* only. `latch()` bumps `fault
 - Consumes: Task 1 surface.
 - Produces: `KortexTransport::release_low_level()`, `KortexTransport::arm_in_fault()`. Behavioural changes listed below.
 
-- [ ] **Step 1: Write the failing test.** In `kortex_cyclic_test.cpp`, change `KortexCyclic.FailedLocalSendIsARuntimeErrorAndTheRouterStaysUsable` to expect `TransportTimeout` (rename it `FailedLocalSendIsALostFrameAndTheRouterStaysUsable`). If the existing fixture can feed an error frame back, add `KortexCyclic.ErrorFrameIsArmRejected`; if it can't without a fake router server, skip that test and note it.
-- [ ] **Step 2: Run** `build.sh kortex --gtest_filter='Kortex*'`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 1: Write the failing test.** In `kortex_cyclic_test.cpp`, change `KortexCyclic.FailedLocalSendIsARuntimeErrorAndTheRouterStaysUsable` to expect `TransportTimeout` (rename it `FailedLocalSendIsALostFrameAndTheRouterStaysUsable`). If the existing fixture can feed an error frame back, add `KortexCyclic.ErrorFrameIsArmRejected`; if it can't without a fake router server, skip that test and note it.
+- [x] **Step 2: Run** `build.sh kortex --gtest_filter='Kortex*'`. Expected: FAIL.
+- [x] **Step 3: Implement.**
   - `kortex_cyclic_call`: `send()` throwing a non-KORTEX `std::runtime_error` → `TransportTimeout`; `get()` throwing `KDetailedException` → `ArmRejected(what)`.
   - A file-local `template <class F> auto rpc(F&&)` used for every TCP RPC on the run path (`SetControlMode`, `SetServoingMode`, `GetArmState`, `GetActuatorCount`, `ClearFaults`): `KDetailedException` → `ArmRejected`; `std::runtime_error` whose `what()` starts with `"timeout detected"` (KORTEX 2.8.0 RPC timeout text) → `TransportTimeout`.
   - `connect()`: drop the `ClearFaults()` call; actuator-count mismatch throws `std::invalid_argument`.
@@ -167,8 +167,8 @@ Listener and stderr log fire on each state *change* only. `latch()` bumps `fault
   - `arm_in_fault()`: `base->GetArmState({false,0,500})`, `== ARMSTATE_IN_FAULT`.
   - `fill_feedback`: also `fault |= base().fault_bank_a() || base().fault_bank_b() || base().active_state() == ARMSTATE_IN_FAULT`; `fb.low_level = base().active_state() == ARMSTATE_SERVOING_LOW_LEVEL`.
   - `set_servoing_low_level()`: `cmd_.clear_interconnect()` before the seed; after the seed Refresh, `set_actuator_modes(all kPosition)`.
-- [ ] **Step 4: Run** `build.sh kortex` (all tests). Expected: PASS; the KORTEX-enabled apps link.
-- [ ] **Step 5: Commit.**
+- [x] **Step 4: Run** `build.sh kortex` (all tests). Expected: PASS; the KORTEX-enabled apps link.
+- [x] **Step 5: Commit.**
 
 ### Task 5: Supervisor listens to the link
 
@@ -180,22 +180,22 @@ Listener and stderr log fire on each state *change* only. `latch()` bumps `fault
 - Consumes: `LinkListener`, `LinkState` (Task 3).
 - Produces: `class Supervisor : …, public kinova::LinkListener`; `void on_link_state(kinova::LinkState) override;`; `bool arm_ready() const;`. Default ready = true, so a Supervisor without `ArmLink` behaves as today.
 
-- [ ] **Step 1: Write failing tests** (existing fixture):
+- [x] **Step 1: Write failing tests** (existing fixture):
   - `SupervisorLink.GoalsAndStreamsRejectedWhileNotReady`: `on_link_state(kFaulted)` → `on_trajectory_goal` → `kReject`; `on_stream_open` refused with message `"arm not ready"`.
   - `SupervisorLink.LinkDownHaltsTheActiveGoal`: accepted goal running → `on_link_state(kConnecting)` → the backend sees the goal settled with `kHalted`, `"halted: arm fault or connection lost"`.
   - `SupervisorLink.LinkDownClosesTheStream`: open stream → `kFaulted` → `stream_is_open() == false`.
   - `SupervisorLink.ReconnectHoldsWhereTheArmIsNow`: run in impedance with a goal, link down, move `SimTransport`'s q, link back up (`kRunning`) and let the executor run → the active mode is position and its command equals the *new* q.
   - `SupervisorLink.NoStatePublishedWhileConnecting`: count `publish_state` calls on the fake backend over 100 ms in `kConnecting` → 0; in `kFaulted` → > 0.
-- [ ] **Step 2: Run** `--gtest_filter='SupervisorLink*'`. Expected: FAIL.
-- [ ] **Step 3: Implement.** `on_link_state(s)`: `s == kRunning` → `ready_ = true`; otherwise, if it was ready: `ready_ = false`, `active_mode_kind_ = kPosition`, `exec_.request_mode(&pos_)`, `on_halt(kArmUnavailable)`. Store `link_state_` (atomic) for the pump. The goal/stream checks read `ready_`.
-- [ ] **Step 4: Run** the full suite. Expected: PASS.
-- [ ] **Step 5: Commit.**
+- [x] **Step 2: Run** `--gtest_filter='SupervisorLink*'`. Expected: FAIL.
+- [x] **Step 3: Implement.** `on_link_state(s)`: `s == kRunning` → `ready_ = true`; otherwise, if it was ready: `ready_ = false`, `active_mode_kind_ = kPosition`, `exec_.request_mode(&pos_)`, `on_halt(kArmUnavailable)`. Store `link_state_` (atomic) for the pump. The goal/stream checks read `ready_`.
+- [x] **Step 4: Run** the full suite. Expected: PASS.
+- [x] **Step 5: Commit.**
 
 ### Task 6: Driver docs + changelog
 
 **Files:** `docs/reference/api.md` (ArmLink, LinkState, the new Transport methods, `exit_on_fault`, `ArmFault`, `ArmRejected`), `docs/integration-runbook.md` (fault → clear, arm off at boot, cable pull), `CHANGELOG.md` (Unreleased), `docs/superpowers/specs/2026-10-27-never-crash-design.md` status line, this plan's checkboxes.
 
-- [ ] Write; `uv run --with mkdocs --with mkdocs-material mkdocs build --strict` passes; commit.
+- [x] Write; `uv run --with mkdocs --with mkdocs-material mkdocs build --strict` passes; commit.
 
 ### Task 7: ROS node uses `ArmLink`
 

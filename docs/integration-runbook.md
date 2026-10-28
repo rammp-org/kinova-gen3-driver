@@ -203,3 +203,26 @@ These are correct-by-construction in sim but **unvalidated on hardware**:
 
 > **Reminder: the robot is off until we do this together. Never run
 > unattended.**
+
+## 8. Faults, disconnects, and an arm that is off
+
+The driver does not exit on any of these (`ArmLink`, see the
+[API reference](reference/api.md#armlink-arm_linkh)). What to expect, and what to do:
+
+| Situation | Driver | Arm | You |
+|---|---|---|---|
+| Arm off when the driver starts, or link renegotiating | `kConnecting`, retries every 1 s, logs `waiting for the arm` | — | Power the arm on; the driver connects by itself |
+| Cable pulled / link lost while running | goals halted, `kConnecting`, reconnects by itself | holds where it is once back | Nothing; no clear needed |
+| E-stop / protective stop / fault | goals halted, `kFaulted`, arm handed back to the base | base control: the Kinova controller and the web app work | Clear the cause, then clear the fault (`/clear_faults` in ROS) |
+| Something else switches the arm out of low-level (web app) | same as a fault | base control | Clear when done |
+| Arm already in fault at driver start | `kFaulted`; the driver no longer clears it silently | — | Clear explicitly |
+
+To drive the arm by hand with the Kinova controller mid-session: fault it
+(e-stop), release the e-stop, drive with the controller, then clear the fault.
+The clear re-enters low-level and the arm holds where you left it. It never
+resumes an interrupted goal.
+
+Not yet verified on the arm (first attended session): feedback while faulted
+(`/joint_states` may go quiet; the state machine does not depend on it), the
+base's reported state during low-level running, and the clear after an e-stop
+release. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.

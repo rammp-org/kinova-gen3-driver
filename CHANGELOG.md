@@ -14,6 +14,21 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- **The driver no longer dies on arm-side events** (#96, #59, #100). New
+  `ArmLink` (`arm_link.h`) owns the link lifecycle (`kConnecting` /
+  `kRunning` / `kFaulted`) around `RtExecutor::run()`. An unreachable arm is
+  retried every second, forever. A comms loss reconnects with no clear needed.
+  A fault, a rejected command or any unknown exception hands the arm back to
+  its base, is reported, and waits for `request_clear()`. Only an
+  actuator-count mismatch still escapes. The `Supervisor` is its listener
+  (`on_link_state`): goals halt with `"halted: arm fault or connection lost"`
+  (`HaltReason::kArmUnavailable`), work is refused while the arm is down, and
+  after recovery the arm holds where it is now.
+- `Transport::release_low_level()` and `Transport::arm_in_fault()` (pure
+  virtual; implementers must add them). `ArmRejected` for an arm's error reply.
+  `JointFeedback::low_level`. `ExecutorConfig::exit_on_fault` (default off) and
+  `ArmFault`. `RtExecutor::config()`.
+
 - `Dynamics` builds from URDF XML (`UrdfXml`) and reduces any model to the root→EE chain,
   locking other joints at zero, so the articulated description is accepted.
   `Dynamics::joint_names()` returns the arm's joints in chain order.
@@ -69,6 +84,16 @@ that heading to the new version and bumps `package.xml`.
   before. An all-zero token is refused without disturbing the current owner.
 
 ### Changed
+
+- `KortexTransport` classifies KORTEX errors at the boundary: an error reply is
+  `ArmRejected` (was `KDetailedException`), a failed local `sendto` is a
+  survivable `TransportTimeout` (was a fatal `runtime_error`), an RPC timeout is
+  `TransportTimeout`. `connect()` no longer clears faults silently, and an
+  actuator-count mismatch is `std::invalid_argument` (was `runtime_error`).
+  `safe_shutdown()`'s revert bounds each RPC at 500 ms and stops at the first
+  failure (a dead link took ~24 s). Base fault banks and `ARMSTATE_IN_FAULT`
+  now set `JointFeedback::fault`. `set_servoing_low_level()` drops the retained
+  gripper command, so re-entry leaves the gripper uncommanded, as at startup.
 
 - **Breaking for `ArbitrationSink` implementers:** the override is now
   `grant(const std::string&, const std::optional<Token>& = std::nullopt)` (#89).
