@@ -38,6 +38,7 @@ class DroppingTransport : public Transport {
     if (throw_runtime_at == i) throw std::runtime_error("not a timeout");
     if (drop_(i)) throw TransportTimeout("timeout detected: fake");
     fb.frame_id = i;
+    if (on_fb) on_fb(i, fb);
   }
   void send(const JointCommand&) override {}
   void receive(JointFeedback&) override {}
@@ -50,6 +51,7 @@ class DroppingTransport : public Transport {
   uint64_t throw_runtime_at = UINT64_MAX;
   bool modes_timeout = false;
   std::function<void(uint64_t)> on_call;
+  std::function<void(uint64_t, JointFeedback&)> on_fb;  // edits a good exchange's feedback
 
  private:
   std::function<bool(uint64_t)> drop_;
@@ -284,4 +286,139 @@ TEST(RtExecutorMiss, InvalidMissConfigIsRejected) {
     (field == 0 ? c.max_consecutive_misses : field == 1 ? c.max_window_misses : c.miss_window) = 0;
     EXPECT_THROW(RtExecutor(t, ring, c), std::invalid_argument) << "field " << field;
   }
+}
+
+// --- exit_on_fault (never-crash design): a fault confirmed in feedback ends run().
+
+namespace {
+ExecutorConfig fault_cfg() {
+  ExecutorConfig c = cfg(3);
+  c.exit_on_fault = true;
+  return c;
+}
+}  // namespace
+
+TEST(RtExecutorFault, ConfirmedFaultThrowsArmFault) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.on_fb = [](uint64_t i, JointFeedback& fb) { fb.fault = i >= 5; };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&mode);
+  try {
+    ex.run(stop);
+    FAIL() << "expected ArmFault";
+  } catch (const ArmFault& e) {
+    EXPECT_NE(std::string(e.what()).find("fault"), std::string::npos) << e.what();
+  }
+  // Faulty calls 5, 6, 7: the third confirms.
+  EXPECT_EQ(t.calls, 5u + uint64_t(kFaultConfirmExchanges));
+}
+
+TEST(RtExecutorFault, ShortFaultBlipIsSurvived) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 100, stop);
+  t.on_fb = [](uint64_t i, JointFeedback& fb) {
+    fb.fault = i >= 5 && i < 5 + uint64_t(kFaultConfirmExchanges) - 1;
+  };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&mode);
+  EXPECT_NO_THROW(ex.run(stop));
+  EXPECT_EQ(t.calls, 100u);
+}
+
+TEST(RtExecutorFault, LeavingLowLevelIsAFault) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.on_fb = [](uint64_t i, JointFeedback& fb) { fb.low_level = i < 5; };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&mode);
+  try {
+    ex.run(stop);
+    FAIL() << "expected ArmFault";
+  } catch (const ArmFault& e) {
+    EXPECT_NE(std::string(e.what()).find("low-level"), std::string::npos) << e.what();
+  }
+  EXPECT_EQ(t.calls, 5u + uint64_t(kLeftLowLevelConfirmExchanges));
+}
+
+// A miss between faulty frames neither confirms nor resets the count.
+TEST(RtExecutorFault, MissesDoNotCountTowardsTheFault) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t i) { return i == 6; }, 1000, stop);
+  t.on_fb = [](uint64_t i, JointFeedback& fb) { fb.fault = i >= 5; };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&mode);
+  EXPECT_THROW(ex.run(stop), ArmFault);
+  EXPECT_EQ(t.calls, 5u + uint64_t(kFaultConfirmExchanges) + 1u);
+}
+
+TEST(RtExecutorFault, OffByDefaultKeepsTodaysBehaviour) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 100, stop);
+  t.on_fb = [](uint64_t i, JointFeedback& fb) {
+    fb.fault = i >= 5;
+    fb.low_level = i < 5;
+  };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&mode);
+  EXPECT_NO_THROW(ex.run(stop));
+  EXPECT_EQ(t.calls, 100u);
+  CycleSample s;
+  bool flagged = false;
+  while (ring.pop(s)) flagged = flagged || (s.flags & 2u) != 0;
+  EXPECT_TRUE(flagged);
+}
+
+TEST(RtExecutorFault, ArmRejectedPropagates) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.on_call = [](uint64_t i) {
+    if (i == 7) throw ArmRejected("fake: WRONG_SERVOING_MODE");
+  };
+  CountingMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&mode);
+  EXPECT_THROW(ex.run(stop), ArmRejected);
+}
+
+// ArmLink calls run() again after a recovery; a mode requested in between is
+// adopted by the new run.
+TEST(RtExecutorFault, ModeRequestedBetweenRunsIsAdopted) {
+  std::atomic<bool> stop{false};
+  uint64_t stop_at = 20;
+  DroppingTransport t([](uint64_t) { return false; }, 1000, stop);
+  t.on_call = [&](uint64_t i) {
+    if (i >= stop_at) stop.store(true);
+  };
+  CountingMode first, second;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, fault_cfg());
+  ex.request_mode(&first);
+  ex.run(stop);
+  ASSERT_FALSE(first.seen_frames.empty());
+  ex.request_mode(&second);
+  stop_at = 40;
+  stop.store(false);
+  ex.run(stop);
+  EXPECT_NE(second.entered_frame, UINT64_MAX);
+  EXPECT_FALSE(second.seen_frames.empty());
+}
+
+TEST(RtExecutorFault, ConfigIsReadable) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 1, stop);
+  SampleRing ring(16);
+  RtExecutor ex(t, ring, fault_cfg());
+  EXPECT_TRUE(ex.config().exit_on_fault);
 }
