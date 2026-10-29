@@ -61,6 +61,59 @@ bool wait_for(const std::function<bool()>& pred, double timeout_s = 3.0) {
 
 void sleep_ms(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
+// Sits between the sim and the rest of the chain. The sim never moves; once
+// `moved` is set, feedback reports q_moved instead, as if the arm had floated
+// there. Only j1 may differ from the sim's q: base yaw leaves g(q) unchanged on a
+// level base, so the sim's gravity-model tau still matches and the observer reads
+// ~0. While `watch` is set, counts position commands that are not exactly q_moved.
+class Probe : public Transport {
+ public:
+  explicit Probe(SimTransport& s) : sim_(s) {}
+  void connect() override { sim_.connect(); }
+  void set_servoing_low_level() override { sim_.set_servoing_low_level(); }
+  void set_actuator_modes(const ActuatorModes& m) override { sim_.set_actuator_modes(m); }
+  void exchange(const JointCommand& c, JointFeedback& fb) override {
+    if (watch.load() && c.mode == ActuatorMode::kPosition &&
+        (c.position - q_moved).cwiseAbs().maxCoeff() > 1e-6)
+      off_hold.fetch_add(1);
+    sim_.exchange(c, fb);
+    if (moved.load()) fb.q = q_moved;
+  }
+  void send(const JointCommand& c) override { sim_.send(c); }
+  void receive(JointFeedback& fb) override {
+    sim_.receive(fb);
+    if (moved.load()) fb.q = q_moved;
+  }
+  void safe_shutdown() override { sim_.safe_shutdown(); }
+  void release_low_level() override { sim_.release_low_level(); }
+  bool arm_in_fault() override { return sim_.arm_in_fault(); }
+
+  // Feedback q from `moved` on: q with j1 moved by dq1. Call while not moved.
+  void move_j1(const JointVec& q, double dq1) {
+    q_moved = q;
+    q_moved[0] += dq1;
+    moved.store(true);
+  }
+
+  JointVec q_moved = JointVec::Zero();  // written before `moved` is set
+  std::atomic<bool> moved{false}, watch{false};
+  std::atomic<int> off_hold{0};
+
+ private:
+  SimTransport& sim_;
+};
+
+// FakeBackend whose settle() blocks while `gate` is closed: holds the sampler
+// still, mid-drain, for as long as a test needs.
+class GatedBackend : public FakeBackend {
+ public:
+  void settle(const GoalId& id, const TrajectoryResult& r) override {
+    while (closed.load()) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    FakeBackend::settle(id, r);
+  }
+  std::atomic<bool> closed{false};
+};
+
 // SupFix (supervisor_test.cpp) plus contact detection: the sim at rest at q0
 // holding tau = g(q0) under every mode (its gravity model, on its own Dynamics),
 // a ContactMonitor and FloatMode attached to the executor, and the Supervisor
@@ -70,7 +123,8 @@ struct ContactFix {
   Dynamics dyn{URDF_PATH}, pump_dyn{URDF_PATH}, sim_dyn{URDF_PATH};
   JointVec q0 = test_fixtures::Sinusoid().q0;
   SimTransport sim{test_fixtures::at_rest(q0, test_fixtures::gravity(dyn, q0))};
-  GripperController gc{sim};
+  Probe probe{sim};
+  GripperController gc{probe};
   Seqlock<JointFeedback> snap;
   FeedbackTap tap{gc, snap};
   SampleRing ring{1u << 12};
@@ -81,12 +135,14 @@ struct ContactFix {
   FloatMode flt{dyn};
   ContactMonitor mon{dyn, monitor_config()};
   RtExecutor exec{tap, ring, {1000.0, kinova::Pacing::kSleepSpin, {}}};
-  FakeBackend be;
+  GatedBackend be;
+  double mode_settle_s;
   Supervisor sup{deps()};
   std::atomic<bool> stop{false};
   std::thread rt;
 
-  ContactFix() {
+  explicit ContactFix(double settle_s = SupervisorConfig{}.mode_settle_s)
+      : mode_settle_s(settle_s) {
     sim.set_gravity_model([this](const JointVec& q, JointVec& g) { sim_dyn.gravity(q, g); });
     exec.attach_contact(mon, flt);
   }
@@ -109,6 +165,7 @@ struct ContactFix {
     d.grip = &gc;
     d.contact = &mon;
     d.contact_profiles = profiles();
+    d.cfg.mode_settle_s = mode_settle_s;
     return d;
   }
 
@@ -222,7 +279,9 @@ TEST(ContactSupervisor, ClearRequestsPositionHold) {
   sleep_ms(300);
   f.trip();
   sleep_ms(50);
+  f.probe.move_j1(f.q0, 0.3);                   // floated away from the pre-trip pose
   f.sim.set_external_torque(JointVec::Zero());  // the person lets go
+  sleep_ms(20);
   EXPECT_TRUE(f.sup.clear_contact());
   ASSERT_TRUE(wait_for([&] { return !f.mon.latched(); }));
   EXPECT_FALSE(f.sup.clear_contact());  // already clear
@@ -234,7 +293,8 @@ TEST(ContactSupervisor, ClearRequestsPositionHold) {
   // Adopted the position hold at the measured pose, not float or a stale target.
   const JointCommand c = f.sim.last_command();
   EXPECT_EQ(c.mode, ActuatorMode::kPosition);
-  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.position[i], f.q0[i], 1e-6) << "joint " << i;
+  for (int i = 0; i < kNumJoints; ++i)
+    EXPECT_NEAR(c.position[i], f.probe.q_moved[i], 1e-6) << "joint " << i;
 }
 
 // The sampler can be blind for a mode settle (250 ms). A clear landing before it
@@ -254,6 +314,62 @@ TEST(ContactSupervisor, ClearBeforeTheSamplerSawTheLatchStillSettlesTheGoal) {
   f.sup.start();
   ASSERT_TRUE(wait_for([&] { return f.be.result_count() == 1; }));
   EXPECT_EQ(f.be.last_result().error_code, result_code::kContactStop);
+}
+
+// A position goal popped before the trip sits in its mode settle while the arm
+// trips, floats away and is cleared. It must settle -11 without ever driving its
+// first sample (the pre-trip pose) into the position hold.
+TEST(ContactSupervisor, ClearDuringAModeSettleNeverDrivesAPreTripGoal) {
+  ContactFix f(1.0);
+  f.sup.start();
+  f.run_rt();
+  // Into impedance first, so the position goal below switches modes.
+  StreamOpenRequest r;
+  r.control_mode = ControlModeKind::kImpedance;
+  r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_stream_close({});
+  const TrajectoryGoal a = f.ramp_goal();
+  ASSERT_EQ(f.sup.on_trajectory_goal(a), GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id_of(4), a);
+  sleep_ms(100);  // the sampler is asleep in A's 1 s mode settle
+  f.trip();
+  f.probe.move_j1(f.q0, 0.3);
+  f.sim.set_external_torque(JointVec::Zero());
+  sleep_ms(20);
+  ASSERT_TRUE(f.sup.clear_contact());
+  ASSERT_TRUE(wait_for([&] { return !f.mon.latched(); }));
+  f.probe.watch.store(true);  // from here every position command must be the hold
+  ASSERT_TRUE(wait_for([&] { return f.be.result_count() == 1; }));
+  sleep_ms(100);
+  EXPECT_EQ(f.probe.off_hold.load(), 0);
+  EXPECT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result_id()[0], 4);
+  EXPECT_EQ(f.be.last_result().error_code, result_code::kContactStop);
+}
+
+// The sampler is held mid-drain (a blocked settle) across a clear, a stream open
+// and a re-trip, so it never sees the latch go down. The re-trip must still halt:
+// the stream opened in between is closed.
+TEST(ContactSupervisor, RetripTheSamplerNeverSawUnlatchStillHalts) {
+  ContactFix f;
+  f.sup.start();
+  f.run_rt();
+  sleep_ms(300);
+  f.trip();
+  sleep_ms(50);  // the sampler has seen the edge
+  f.be.closed.store(true);
+  f.sup.on_trajectory_accepted(id_of(5), f.ramp_goal());  // settled -11 in the drain: blocks
+  sleep_ms(20);
+  ASSERT_TRUE(f.sup.clear_contact());  // still pushing: re-trips after 5/K
+  ASSERT_TRUE(wait_for([&] { return !f.mon.latched(); }));
+  StreamOpenRequest r;
+  r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  ASSERT_TRUE(wait_for([&] { return f.mon.latched(); }));  // the re-trip
+  f.be.closed.store(false);
+  ASSERT_TRUE(wait_for([&] { return !f.sup.stream_is_open(); }, 0.5));
+  EXPECT_EQ(f.sup.stream_close_cause(), StreamCloseCause::kHalted);
 }
 
 // Review Focus 1: a link outage while latched comes back in float, still latched,

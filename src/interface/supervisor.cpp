@@ -175,6 +175,10 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     last_tick = tick_now;
     // 0-) the RT loop latched a contact stop (and is already floating): one
     //     kContact halt per rising edge, taken by step 0 in this same iteration.
+    //     A clear resets the edge: this thread can miss the unlatched spell (a
+    //     mode settle is longer than the 5/K re-settle), and a re-trip after a
+    //     clear is a new edge even if every sample here read latched.
+    if (contact_cleared_.exchange(false)) was_latched = false;
     const bool latched = contact_latched();
     if (latched && !was_latched) on_halt(HaltReason::kContact);
     was_latched = latched;
@@ -426,6 +430,27 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         std::this_thread::sleep_for(  // let the RT loop adopt + on_enter settle
             std::chrono::duration_cast<clock::duration>(
                 std::chrono::duration<double>(cfg_.mode_settle_s)));
+      }
+      // A halt that landed since this goal was popped (above all during the mode
+      // settle, which can span a whole contact trip and clear) did not mark it.
+      // Settle it with the halt's reason rather than submit it: one tick would
+      // write its first sample into the mode now running, e.g. the post-clear hold
+      // at wherever the arm floated to. Step 0 does the rest next iteration.
+      {
+        bool halted = false;
+        HaltReason why = HaltReason::kOwnershipRevoked;
+        {
+          std::lock_guard<std::mutex> l(q_mtx_);
+          halted = halt_pending_;
+          why = halt_reason_;
+        }
+        if (halted) {
+          TrajectoryResult r;
+          r.error_code = halt_result_code(why);
+          r.error_string = halt_reason_string(why);
+          action_.settle(in.id, r);
+          continue;
+        }
       }
       const SubmitResult sr =
           traj_->submit(in.goal.trajectory, in.goal.control_mode, in.goal.preemption,
@@ -766,6 +791,7 @@ bool Supervisor::clear_contact() {
   if (!contact_->latched()) return false;
   on_halt(HaltReason::kContact);
   contact_->request_clear();
+  contact_cleared_.store(true);
   active_mode_kind_.store(ControlModeKind::kPosition);
   exec_.request_mode(&pos_);
   return true;
