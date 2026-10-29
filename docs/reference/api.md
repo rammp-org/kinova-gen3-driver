@@ -159,6 +159,33 @@ reverts to gravity-compensation hold. **With `tau_ff` never set, this mode
 zero-feedforward path. See the
 [guide](../guide/control-modes.md#gravity-compensation-jointtorquemode).
 
+### `FloatMode` — `float_mode.h`
+
+The contact-stop control law: what the arm switches to when the contact detector
+trips. It yields to any push, slows under joint damping, and stays where it is
+left; a weak spring on a dragged anchor resists only model-error creep.
+
+```cpp
+struct FloatParams {
+  JointVec damping = (JointVec() << 5, 5, 5, 5, 1.5, 1.5, 1.5).finished();          // N·m·s/rad
+  JointVec spring  = (JointVec() << 28.6, 28.6, 28.6, 28.6, 8.6, 8.6, 8.6).finished(); // N·m/rad
+  double drag_band_rad = 2.0 * kDeg2Rad;   // anchor trails q by at most this
+  JointVec torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+};
+FloatMode(Dynamics& dyn, FloatParams p = {});  // throws std::invalid_argument
+const JointVec& anchor() const noexcept;       // current dragged anchor q_a
+```
+
+Law: `tau = gravity(q) − D·q̇ − K_s·(q − q_a)`, clamped per joint to
+`torque_limit`. `on_enter` sets `q_a = fb.q`. Each cycle, per joint, if
+`|q − q_a| > drag_band_rad` the anchor is moved to stay `drag_band_rad` behind
+`q`, so the spring contributes at most `K_s·drag_band_rad` (about 1 N·m on
+joints 1-4, 0.3 N·m on 5-7). `required_modes()` is all torque; `command.position`
+passes `q` through. The constructor throws on non-finite or negative gains, a
+non-positive band, or a non-positive torque limit. The defaults are starting
+values, untuned on the arm. See the
+[guide](../guide/control-modes.md#float-floatmode).
+
 ### `CartesianImpedanceMode` — `cartesian_impedance_mode.h`
 
 ```cpp

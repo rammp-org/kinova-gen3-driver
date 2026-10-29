@@ -9,6 +9,7 @@
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/float_mode.h"
 #include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/supervisor.h"
@@ -31,11 +32,10 @@ using namespace kinova;
 // sees zero NEW major faults. The shared atomics carry the readings back to the
 // test thread for assertions.
 namespace {
-void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
+void expect_mode_steady_state_rt_safe(ControlMode& mode) {
   JointFeedback init;
   init.q.setZero();
   SimTransport t(init);
-  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -91,6 +91,11 @@ void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
   EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
 }
+
+void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
+  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
+  expect_mode_steady_state_rt_safe(mode);
+}
 }  // namespace
 
 TEST(RtSafety, NoMajorFaultsSteadyState) {
@@ -103,6 +108,12 @@ TEST(RtSafety, ReducedTiltedModelNoMajorFaultsSteadyState) {
   Dynamics dyn(UrdfXml{test_fixtures::articulate_gripper(test_fixtures::tilted_fixture())},
                "gen3_end_effector_link");
   expect_grav_comp_steady_state_rt_safe(dyn);
+}
+
+TEST(RtSafety, FloatModeNoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  FloatMode mode(dyn);
+  expect_mode_steady_state_rt_safe(mode);
 }
 
 TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {

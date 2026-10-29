@@ -82,6 +82,32 @@ on a tilted plate applies gravity in the wrong direction.
 
 > **Tilted mount?** The `models/` URDF here is a level fixture; on flatbot/gen_1_5 use the robot's rendered URDF with `--ee-frame arm_end_effector_link` (see the [mount caveat](../integration-runbook.md#mount-caveat)).
 
+## Float — `FloatMode`
+
+The mode the arm drops into when the contact detector trips. The aim is that a
+person who has been hit can push the arm away: it yields to any push, slows
+quickly under joint damping, and stays where it is left rather than springing
+back to the pose it tripped at.
+
+- **Law:** `tau = gravity(q) − D·q̇ − K_s·(q − q_a)`, clamped per joint to
+  `torque_limit`.
+- **Dragged anchor `q_a`:** starts at the measured pose when the mode is entered.
+  Whenever `|q − q_a| > drag_band_rad` on a joint, the anchor is dragged to stay
+  `drag_band_rad` behind `q`. A push therefore never meets more than
+  `K_s·drag_band_rad` of spring, and wherever the arm comes to rest the anchor is
+  within the band, so there is no pull back toward the trip pose. The spring only
+  resists slow creep from gravity-model error.
+- **`damping` (D)** — N·m·s/rad per joint. Chosen to stop the arm from demo
+  speeds in about 0.2 s. Defaults 5 on joints 1-4 and 1.5 on joints 5-7.
+- **`spring` (K_s)** — N·m/rad per joint. With the 2 degree band the defaults
+  give at most about 1 N·m on joints 1-4 and 0.3 N·m on joints 5-7.
+- **`drag_band_rad`** — the most the anchor may trail `q`. Default 2 degrees.
+- **`torque_limit`** — per-joint ceiling on the total output, as for
+  `JointTorqueMode`.
+
+> These defaults are **untuned** on the arm. Because the law includes gravity
+> compensation, the same URDF and mount caveats as for gravity compensation apply.
+
 ## Cartesian Impedance — `CartesianImpedanceMode`
 
 Makes the **tool frame** behave like a 6-DOF spring-damper about a target pose:
@@ -381,6 +407,7 @@ before opening a twist stream with the arm far from `q_rest`.
 | You want… | Mode |
 |---|---|
 | The arm weightless / back-drivable | Gravity compensation |
+| The arm to yield and stay put after a contact stop | Float |
 | A safe, predictable first hardware test | Gravity compensation at `scale 0.5` |
 | The tool to be compliant about a target pose | Cartesian impedance |
 | Online retargeting / regrasping with compliance | Cartesian impedance + `set_target` |

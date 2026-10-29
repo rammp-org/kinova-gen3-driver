@@ -107,6 +107,7 @@ set(KINOVA_LIB_SOURCES
     src/sim_transport.cpp
     src/gripper_controller.cpp
     src/joint_torque_mode.cpp
+    src/float_mode.cpp
     src/cartesian_impedance_mode.cpp
     src/diff_ik.cpp
     src/joint_impedance_mode.cpp
@@ -371,6 +372,7 @@ add_executable(unit_tests
     tests/sim_transport_test.cpp
     tests/gripper_controller_test.cpp
     tests/joint_torque_mode_test.cpp
+    tests/float_mode_test.cpp
     tests/command_watchdog_test.cpp
     tests/rt_safety_test.cpp
     tests/rt_executor_miss_test.cpp
