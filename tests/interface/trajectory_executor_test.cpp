@@ -88,7 +88,7 @@ TEST(ExecutorSubmit, RejectsAnOutOfRangeOrNonFiniteSpeedScale) {
   // submit() without passing on_trajectory_goal, and effective_scale() clamps
   // internally -- a below-floor scale that got this far would silently run the
   // arm FASTER than asked, and a non-finite one at full speed. Refuse, never
-  // clamp, on every path (direct, latest-wins, queued).
+  // clamp, on every path (direct, latest-wins).
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);
   using kinova::interface::ControlModeKind;
@@ -107,12 +107,13 @@ TEST(ExecutorSubmit, RejectsAnOutOfRangeOrNonFiniteSpeedScale) {
         << "scale " << s;
     EXPECT_FALSE(ex.is_active()) << "scale " << s;  // refused before any state change
   }
-  // The queued path must refuse too: a bad scale latent in queued_scale_ would
-  // only surface at promotion, mid-motion.
-  ASSERT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.5),
-            SubmitResult::kAccepted);
-  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0), 0.001),
-            SubmitResult::kRejectedSpeedScale);
+  // Preempting an active goal must refuse too.
+  ASSERT_EQ(
+      ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0), 0.5),
+      SubmitResult::kAccepted);
+  EXPECT_EQ(
+      ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0), 0.001),
+      SubmitResult::kRejectedSpeedScale);
 }
 
 TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
@@ -225,24 +226,6 @@ TEST(ExecutorDivergence, BoundedJointDivergenceIsNotFolded) {
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
 }
 
-TEST(ExecutorDivergence, AbortWithQueuedGoalClearsQueue) {
-  RecordingSink sink;
-  kinova::interface::TrajectoryExecutor ex(sink);
-  using namespace kinova::interface;
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            vec7(0.05));  // active, tight tol
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,
-            vec7(-1.0));                   // queued follow-on
-  ex.tick(0.0, vec7(0.0));                 // start, on-track
-  ExecStatus s = ex.tick(1.0, vec7(0.9));  // active diverges (err 0.4 > 0.05) -> abort whole chain
-  EXPECT_TRUE(s.completed);
-  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
-  EXPECT_FALSE(ex.is_active());                // queued follow-on dropped, not stranded
-  ExecStatus after = ex.tick(2.0, vec7(0.0));  // stays idle — no phantom promotion
-  EXPECT_FALSE(after.active);
-  EXPECT_FALSE(after.completed);
-}
-
 TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);
@@ -257,68 +240,34 @@ TEST(ExecutorPreempt, LatestWinsReplacesAndRestartsClock) {
   EXPECT_NEAR(s.fraction, 0.0, 1e-9);
 }
 
-TEST(ExecutorPreempt, QueueDoesNotClobberActivePathTolerance) {
+TEST(ExecutorPreempt, QueueWhileActiveIsRefusedAndLeavesTheActiveGoalAlone) {
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);
   using namespace kinova::interface;
   // Active trajectory guarded with a tight tolerance.
   ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(0.05));
   ex.tick(0.0, vec7(0.0));  // start, on-track
-  // Queue a second goal with a DISABLED tolerance (-1). It must NOT relax the guard
-  // on the still-running active trajectory (the queued tol only applies once promoted).
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0));
+  // Queueing is disabled (#84): a QUEUE goal behind an active one is refused,
+  // and its DISABLED tolerance (-1) must not relax the running goal's guard.
+  EXPECT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0)),
+            SubmitResult::kRejectedQueueWhileActive);
   ExecStatus s = ex.tick(1.0, vec7(0.9));  // active desired 0.5, meas 0.9 -> err 0.4 > 0.05
   EXPECT_TRUE(s.completed);
   EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
 }
 
-TEST(ExecutorPreempt, QueuePromotesGaplesslyOnCompletion) {
+TEST(ExecutorPreempt, QueueWhileIdleIsAdopted) {
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);
   using namespace kinova::interface;
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0));  // active
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0));       // queued
+  ASSERT_EQ(ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0)),
+            SubmitResult::kAccepted);
+  EXPECT_TRUE(ex.is_active());
   ex.tick(0.0, vec7(0.0));
-  ExecStatus at_end = ex.tick(2.0, vec7(1.0));  // first ramp ends here
-  EXPECT_TRUE(at_end.active);                   // NOT idle — queued promoted
-  EXPECT_FALSE(at_end.completed);               // continuous motion, no completion gap
-  ExecStatus mid = ex.tick(3.0, vec7(0.5));     // 1s into promoted ramp -> desired 0.5
-  EXPECT_NEAR(sink.calls.back()[0], 0.5, 1e-9);
-  EXPECT_TRUE(mid.active);
-}
-
-TEST(ExecutorPreempt, PromotedGoalAdoptsItsOwnPathTolerance) {
-  RecordingSink sink;
-  kinova::interface::TrajectoryExecutor ex(sink);
-  using namespace kinova::interface;
-  // Active guard DISABLED; queued goal carries a TIGHT tolerance that must take
-  // effect only once it is promoted (guards the Task-5 tolerance-isolation fix).
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            vec7(-1.0));  // active, guard off
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue,
-            vec7(0.05));  // queued, tight
-  ex.tick(0.0, vec7(0.0));
-  ex.tick(2.0, vec7(1.0));  // first ramp completes -> promote queued (adopt 0.05)
-  // On the promoted ramp: desired at elapsed=1 is 0.5; meas 0.9 -> err 0.4 > 0.05 -> abort.
-  ExecStatus s = ex.tick(3.0, vec7(0.9));
+  ExecStatus s = ex.tick(2.0, vec7(1.0));
   EXPECT_TRUE(s.completed);
-  EXPECT_EQ(s.error_code, ExecStatus::kPathToleranceViolated);
-}
-
-TEST(ExecutorPreempt, PromotionRaisesPromotedFlagExactlyOnce) {
-  RecordingSink sink;
-  kinova::interface::TrajectoryExecutor ex(sink);
-  using namespace kinova::interface;
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0));  // active
-  ex.submit(ramp(2.0), ControlModeKind::kPosition, Preemption::kQueue, vec7(-1.0));       // queued
-  ex.tick(0.0, vec7(0.0));
-  ExecStatus mid = ex.tick(1.0, vec7(0.5));
-  EXPECT_FALSE(mid.promoted);
-  ExecStatus at_end = ex.tick(2.0, vec7(1.0));  // first ramp ends -> promote queued
-  EXPECT_TRUE(at_end.promoted);
-  EXPECT_TRUE(at_end.active);
-  ExecStatus after = ex.tick(3.0, vec7(0.5));
-  EXPECT_FALSE(after.promoted);
+  EXPECT_EQ(s.error_code, ExecStatus::kOk);
+  EXPECT_FALSE(ex.is_active());
 }
 
 // ---------------------------------------------------------------------------
@@ -516,78 +465,6 @@ TEST(ExecutorSpeedScale, FullScaleIsIdenticalToBeforeTheFeature) {
   ExecStatus mid = ex.tick(11.0, vec7(0.0));
   EXPECT_NEAR(mid.fraction, 0.5, 1e-9);
   EXPECT_NEAR(sink.last[0], 0.5, 1e-9);
-}
-
-TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
-  RecordingSink sink;
-  TrajectoryExecutor ex(sink);
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 1.0);
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 0.5);
-
-  ex.tick(0.0, vec7(0.0));
-  ExecStatus p = ex.tick(1.0, vec7(1.0));  // first finishes, second promoted
-  ASSERT_TRUE(p.promoted);
-  EXPECT_NEAR(p.fraction, 0.0, 1e-9) << "the promoted goal starts at zero";
-
-  ExecStatus mid = ex.tick(2.0, vec7(0.0));  // 1 s wall at scale 0.5
-  EXPECT_NEAR(mid.fraction, 0.5, 1e-9)
-      << "the promoted goal must run at ITS scale, not the finished goal's";
-}
-
-// Gapless promotion (tick()) constructs the new Active with started=true
-// directly, so it never passes through the !a.started latch that a fresh
-// submit() uses. Tick spacing here must be small enough that a slew from the
-// wrong starting value cannot cover the whole gap in one step (dt_wall *
-// kScaleSlewPerSec must be well under the scale gap) — a 1 s step, as used
-// above, covers the entire 0..1 range and would hide the bug.
-TEST(ExecutorSpeedScale, PromotionLatchesToThePromotedGoalsScaleImmediately) {
-  RecordingSink sink;
-  TrajectoryExecutor ex(sink);
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 1.0);  // A: fast
-  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 0.1);  // B: much slower
-
-  double t = 0.0;
-  ex.tick(t, vec7(0.0));  // start A
-  ExecStatus s{};
-  bool promoted = false;
-  for (int i = 0; i < 1000 && !promoted; ++i) {
-    t += 0.01;
-    s = ex.tick(t, vec7(0.0));
-    promoted = s.promoted;
-  }
-  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
-  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-9)
-      << "the promoted goal must start at ITS OWN scale, not ramp down from "
-         "the outgoing goal's";
-}
-
-// The reverse direction: promoting into a FASTER scale must also latch
-// immediately, not ramp up from the outgoing (slower) goal's scale.
-TEST(ExecutorSpeedScale, PromotionLatchesToAFasterPromotedScaleTooNotRampingUp) {
-  RecordingSink sink;
-  TrajectoryExecutor ex(sink);
-  ex.submit(ramp(1.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 0.1);  // A: slow
-  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kQueue,
-            kinova::JointVec::Constant(-1.0), 1.0);  // B: much faster
-
-  double t = 0.0;
-  ex.tick(t, vec7(0.0));  // start A, latches applied_ to 0.1 immediately
-  ExecStatus s{};
-  bool promoted = false;
-  for (int i = 0; i < 2000 && !promoted; ++i) {
-    t += 0.01;
-    s = ex.tick(t, vec7(0.0));
-    promoted = s.promoted;
-  }
-  ASSERT_TRUE(promoted) << "B must be promoted before testing the latch";
-  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9)
-      << "the promoted goal must start at its own (faster) scale, not ramp "
-         "up from the outgoing goal's";
 }
 
 TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {

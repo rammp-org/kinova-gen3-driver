@@ -92,6 +92,16 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
+- **Behaviour change:** a `Preemption::kQueue` trajectory goal sent while
+  another goal is active is now refused (#84): it settles `kInvalidGoal` with
+  "queueing is disabled: …", before any mode switch, and the active goal runs
+  on untouched. Queued goals jerked the arm at the handover, and a planner can
+  now plan through all waypoints in one goal. A `kQueue` goal sent to an idle
+  arm runs exactly as before, so callers that send `preemption = 0` one goal
+  at a time are unaffected. `kQueue` stays in the enum and on the wire.
+  `TrajectoryExecutor::submit` returns the new
+  `SubmitResult::kRejectedQueueWhileActive`, and `ExecStatus::promoted` is gone.
+
 - `KortexTransport` classifies KORTEX errors at the boundary: an error reply is
   `ArmRejected` (was `KDetailedException`), a failed local `sendto` is a
   survivable `TransportTimeout` (was a fatal `runtime_error`), an RPC timeout is

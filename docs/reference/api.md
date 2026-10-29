@@ -649,6 +649,21 @@ at `on_trajectory_goal` (`GoalResponse::kReject`) and again by
 accepting a below-floor request and silently running it at the floor would be
 *faster* than asked for, not slower.
 
+### `TrajectoryGoal::preemption` — `interface/trajectory_executor.h`
+
+`Preemption` says what a goal does to a goal that is already running:
+
+- `kLatestWins` (the driver's default): the running goal settles
+  `kPreempted` and the new one takes over at the next sampler tick, its clock
+  starting at zero.
+- `kQueue` (`preemption = 0` on the ROS action): **queueing is disabled**
+  (#84). Sent to an idle arm, it runs exactly like `kLatestWins`. Sent while
+  another goal is active, it is refused: it settles `kInvalidGoal` ("queueing
+  is disabled: …") before any mode switch, and the active goal runs on
+  untouched. To chain motions, wait for the active goal to finish, preempt it,
+  or plan one goal through all the waypoints. `TrajectoryExecutor::submit`
+  refuses the same case with `SubmitResult::kRejectedQueueWhileActive`.
+
 ### `CommandSink::on_set_speed_override(const SpeedOverrideRequest&)` / `Supervisor::set_speed_override(double)`
 
 A runtime override an operator can use to slow every in-flight goal down,
@@ -700,7 +715,7 @@ satisfies this by construction: it latches a flag and clears a deque.
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
-every queued goal with `result_code::kHalted`, then holds the active mode's
+every goal still waiting in its inbox with `result_code::kHalted`, then holds the active mode's
 target at the last-good **measured** q.
 
 `HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
