@@ -36,7 +36,7 @@ std::string arm_route_problem(const std::string& ip) {
   ifaddrs* ifs = nullptr;
   if (getifaddrs(&ifs) != 0)
     return std::string("route check: no interface list: ") + std::strerror(errno);
-  // Stays "" if the source address is on no interface (a NetworkManager race): connect() tries.
+  // Stays "" if the source address is on no interface (it changed meanwhile): connect() tries.
   std::string problem;
   for (const ifaddrs* a = ifs; a; a = a->ifa_next) {
     if (!a->ifa_addr || a->ifa_addr->sa_family != AF_INET || !a->ifa_netmask) continue;

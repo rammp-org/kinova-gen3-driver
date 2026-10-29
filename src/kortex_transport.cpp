@@ -273,7 +273,7 @@ KortexTransport::~KortexTransport() {
 void KortexTransport::connect() {
   auto& I = *impl_;
   // With no direct route, connect() leaves by the default route and blocks ~127 s in TCP SYN
-  // retries (abra, 2026-10-28). Fail the attempt at once instead, saying why.
+  // retries. Fail the attempt at once instead, saying why.
   if (const std::string p = arm_route_problem(I.ip); !p.empty())
     throw std::runtime_error("KortexTransport: " + p);
   I.tcp = std::make_unique<k_api::TransportClientTcp>();
@@ -336,7 +336,7 @@ void KortexTransport::connect() {
   }
   // The count can arrive before every actuator has registered: right after a boot the
   // base accepted low-level servoing, then refused SetControlMode on device 1
-  // (INVALID_DEVICE; abra, 2026-10-29). A read on each actuator is refused the same way
+  // (INVALID_DEVICE). A read on each actuator is refused the same way
   // until it is up, and a failure here is retried (ArmLink), not latched.
   for (int id = 1; id <= I.n_; ++id) {
     try {
