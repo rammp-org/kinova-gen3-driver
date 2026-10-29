@@ -62,6 +62,7 @@ for whoever is at the arm; they live in the repo rather than in this site's nav.
 |---|---|
 | Build it and run a controller | [Getting Started](getting-started.md) |
 | Understand the control modes conceptually | [Control Modes guide](guide/control-modes.md) |
+| Tune unexpected-contact thresholds | [Contact Detection guide](guide/contact-detection.md) |
 | Look up an exact type or signature | [API Reference](reference/api.md) |
 | Understand the impedance math & RT design | [Deep Dive: Impedance](deep-dive/impedance.md) |
 | Bring up a real robot (attended) | [Integration Runbook](integration-runbook.md) |
