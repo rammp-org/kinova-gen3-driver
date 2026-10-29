@@ -115,10 +115,16 @@ void SimTransport::report_wrapped(JointFeedback& fb) {
 // commanded, so feedback tau echoes it -- the command convention
 // JointFeedback::tau documents. This is what makes the gravity residual
 // (tau - g) and ArmState::ee_wrench read ~zero in sim under grav comp /
-// impedance instead of a phantom +g image. Other modes leave tau at its
-// seeded value: the sim has no motor model to derive a torque from.
+// impedance instead of a phantom +g image. Other modes report the gravity model's
+// g(q) when one is set (the torque holding the arm at rest); without one they leave
+// tau at the last commanded torque (the initial feedback's until a kTorque
+// command, such as RtExecutor's zero-torque seed, replaces it).
 void SimTransport::step_torque(const JointCommand& cmd) {
-  if (cmd.mode == ActuatorMode::kTorque) state_.tau = cmd.torque;
+  if (cmd.mode == ActuatorMode::kTorque) {
+    state_.tau = cmd.torque;
+  } else if (gravity_) {
+    gravity_(state_.q, state_.tau);
+  }
 }
 
 void SimTransport::exchange(const JointCommand& cmd, JointFeedback& fb) {

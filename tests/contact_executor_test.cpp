@@ -46,18 +46,9 @@ ActuatorModes all(ActuatorMode m) {
 // Forwards to a SimTransport. Records every command sent and every actuator-mode
 // switch, runs on_call(i) on the RT thread at the top of exchange call i, and
 // stops the loop itself once stop_at calls have been made: no wall-clock timing.
-//
-// A real arm under position (or velocity) control reports the torque holding it,
-// g(q) at rest. The sim instead keeps the last commanded torque: the seed's
-// benign zero-torque hold, which the observer would read as an external g(q). So
-// the sim is handed a torque command of `hold` in place of a non-torque command;
-// `sent` records what the executor actually sent.
 class Bench : public Transport {
  public:
-  Bench(SimTransport& sim, std::atomic<bool>& stop, const JointVec& hold)
-      : sim_(sim), stop_(stop), hold_(hold) {
-    sent.reserve(8192);
-  }
+  Bench(SimTransport& sim, std::atomic<bool>& stop) : sim_(sim), stop_(stop) { sent.reserve(8192); }
   void connect() override { sim_.connect(); }
   void set_servoing_low_level() override { sim_.set_servoing_low_level(); }
   void set_actuator_modes(const ActuatorModes& m) override {
@@ -69,14 +60,7 @@ class Bench : public Transport {
     sent.push_back(c);
     if (on_call) on_call(i);
     if (calls >= stop_at) stop_.store(true);
-    if (c.mode == ActuatorMode::kTorque) {
-      sim_.exchange(c, fb);
-    } else {
-      JointCommand held = c;
-      held.mode = ActuatorMode::kTorque;
-      held.torque = hold_;
-      sim_.exchange(held, fb);
-    }
+    sim_.exchange(c, fb);
   }
   void send(const JointCommand& c) override { sim_.send(c); }
   void receive(JointFeedback& fb) override { sim_.receive(fb); }
@@ -92,7 +76,6 @@ class Bench : public Transport {
  private:
   SimTransport& sim_;
   std::atomic<bool>& stop_;
-  const JointVec hold_;
 };
 
 JointVec gravity(Dynamics& dyn, const JointVec& q) {
@@ -109,20 +92,27 @@ JointFeedback at_rest(const JointVec& q, const JointVec& g) {
   return fb;
 }
 
-// One arm: the sim at rest at q0 holding tau = g(q0), the executor, and the modes,
-// all on one Dynamics (the RT thread is its only user while run() runs).
+// One arm: the sim at rest at q0 holding tau = g(q0) (its gravity model reports
+// that under position control too), the executor, and the modes, all on one
+// Dynamics (the RT thread is its only user while run() runs). The sim's gravity
+// model has its own.
 struct World {
   Dynamics dyn{URDF_PATH};
+  Dynamics sim_dyn{URDF_PATH};
   JointVec q0 = test_fixtures::Sinusoid().q0;
   JointVec g0 = gravity(dyn, q0);
   SimTransport sim{at_rest(q0, g0)};
   std::atomic<bool> stop{false};
-  Bench bench{sim, stop, g0};
+  Bench bench{sim, stop};
   SampleRing ring{8192};
   RtExecutor ex{bench, ring, {1000.0, Pacing::kSleepSpin, {0, -1, false, false}}};
   FloatMode flt{dyn};
   JointPositionMode pos{dyn};
   std::unique_ptr<ContactMonitor> mon;
+
+  World() {
+    sim.set_gravity_model([this](const JointVec& q, JointVec& tau) { sim_dyn.gravity(q, tau); });
+  }
 
   void attach(ContactDetection d = ContactDetection::kEnforce) {
     ContactMonitorConfig c;
@@ -273,18 +263,9 @@ TEST(ContactExecutor, RequestWhileLatchedDeferredUntilClear) {
 
 // Review Focus 1: a run ending while latched (comms loss, an ArmLink fault) comes
 // back in float, still latched, not in the Supervisor's position hold.
-TEST(ContactExecutor, LatchSurvivesRunRestart) {
-  World w;
-  w.attach();
-  w.bench.on_call = [&](uint64_t i) {
-    if (i == kPushAt) w.sim.set_external_torque(push_j2(6.0));
-  };
-  w.ex.request_mode(&w.pos);
-  w.run_until(kPushAt + 100);
-  ASSERT_TRUE(w.mon->latched());
-  ASSERT_GE(w.status().last.cycle + 1, kPushAt);
-
-  // The push is gone; the Supervisor re-requests its hold between runs.
+// Run 2 of a latched World: the push gone and the Supervisor's hold re-requested
+// between runs, the new run comes back in float only, still latched.
+void expect_restart_in_float(World& w) {
   w.sim.set_external_torque(JointVec::Zero());
   const size_t switches_before = w.bench.switches.size();
   const uint64_t first_call = w.bench.calls;
@@ -300,6 +281,38 @@ TEST(ContactExecutor, LatchSurvivesRunRestart) {
   // command; from cycle 0's compute on, every command is float's.
   for (uint64_t i = first_call + 2; i < w.bench.sent.size(); ++i)
     ASSERT_TRUE(w.is_float(w.bench.sent[i])) << "call " << i;
+}
+
+TEST(ContactExecutor, LatchSurvivesRunRestart) {
+  World w;
+  w.attach();
+  w.bench.on_call = [&](uint64_t i) {
+    if (i == kPushAt) w.sim.set_external_torque(push_j2(6.0));
+  };
+  w.ex.request_mode(&w.pos);
+  w.run_until(kPushAt + 100);
+  ASSERT_TRUE(w.mon->latched());
+  ASSERT_GE(w.status().last.cycle + 1, kPushAt);
+  expect_restart_in_float(w);
+}
+
+// Review Focus 1 the way it happens: run 1 ends by a throw (three exchange
+// timeouts in a row: CommsLost), as ArmLink sees a comms loss.
+TEST(ContactExecutor, LatchSurvivesRunRestartAfterCommsLost) {
+  World w;
+  w.attach();
+  constexpr uint64_t kLossAt = kPushAt + 100;
+  w.bench.on_call = [&](uint64_t i) {
+    if (i == kPushAt) w.sim.set_external_torque(push_j2(6.0));
+    if (i >= kLossAt) throw TransportTimeout("timeout detected: sim");
+  };
+  w.ex.request_mode(&w.pos);
+  EXPECT_THROW(w.run_until(UINT64_MAX), CommsLost);
+  ASSERT_EQ(w.bench.calls, kLossAt + 3);  // max_consecutive_misses
+  ASSERT_TRUE(w.mon->latched());
+  ASSERT_GE(w.status().last.cycle + 1, kPushAt);
+  w.bench.on_call = nullptr;  // the link is back
+  expect_restart_in_float(w);
 }
 
 TEST(ContactExecutor, ObserveNeverChangesCommand) {
