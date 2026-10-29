@@ -203,7 +203,9 @@ watch it, at two different rates, and each owns a different job:
 - **`CommandWatchdog` (RT thread, 1 kHz)**, armed by `set_command_timeout` with
   the same `timeout_s`, owns making the *output* safe every single cycle in
   between. It is pure staleness **detection** — a lock-free counter bumped by
-  every setter and ticked once per RT cycle, no clock call, no allocation. The
+  every setter and ticked once per RT cycle, no clock call, no allocation. It
+  adds up the `dt` the executor hands `compute()`, which is wall time, so a
+  lost frame's ~20 ms counts towards the timeout too. The
   **response** to staleness belongs to the mode, not the watchdog:
 
   | Mode | On staleness |

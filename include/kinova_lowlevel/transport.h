@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cstdint>
 #include <stdexcept>
 
 #include "kinova_lowlevel/joint_types.h"
@@ -27,6 +28,9 @@ class ArmRejected : public std::runtime_error {
 // default 20 ms). ExecutorConfig::max_consecutive_misses defaults to it; the
 // pumps in KortexTransport::set_actuator_modes() always use it.
 inline constexpr int kMaxConsecutiveTimeouts = 3;
+// KortexTransport's default bound on one cyclic round-trip, in ms. RtExecutor
+// caps the dt it hands compute() at max_consecutive_misses of these.
+inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 using ActuatorModes = std::array<ActuatorMode, kNumJoints>;
 class Transport {
  public:

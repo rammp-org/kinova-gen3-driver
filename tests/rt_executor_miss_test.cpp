@@ -2,11 +2,15 @@
 #include <sched.h>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "kinova_lowlevel/control_mode.h"
+#include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/joint_torque_mode.h"
 #include "kinova_lowlevel/rt_executor.h"
 #include "kinova_lowlevel/telemetry.h"
 #include "kinova_lowlevel/telemetry_consumers.h"
@@ -29,6 +33,7 @@ class DroppingTransport : public Transport {
   void connect() override {}
   void set_servoing_low_level() override {}
   void set_actuator_modes(const ActuatorModes&) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(modes_delay_ms));
     if (modes_timeout) throw TransportTimeout("timeout detected: fake pump");
   }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
@@ -51,6 +56,7 @@ class DroppingTransport : public Transport {
   std::vector<JointCommand> sent;
   uint64_t throw_runtime_at = UINT64_MAX;
   bool modes_timeout = false;
+  int modes_delay_ms = 0;  // how long set_actuator_modes() takes
   std::function<void(uint64_t)> on_call;
   std::function<void(uint64_t, JointFeedback&)> on_fb;  // edits a good exchange's feedback
 
@@ -453,4 +459,121 @@ TEST(RtExecutorFault, RunRestoresTheThreadsSchedulingOnExit) {
   CPU_ZERO(&after);
   ASSERT_EQ(sched_getaffinity(0, sizeof(after), &after), 0);
   EXPECT_TRUE(CPU_EQUAL(&before, &after)) << "CPUs after run: " << CPU_COUNT(&after);
+}
+
+// --- the dt passed to compute() (#103): wall time since the previous compute().
+
+namespace {
+// Records the dt of every compute() call.
+class DtMode : public ControlMode {
+ public:
+  ActuatorModes required_modes() const override {
+    ActuatorModes m;
+    m.fill(ActuatorMode::kTorque);
+    return m;
+  }
+  void on_enter(const JointFeedback&) override {}
+  void compute(const JointFeedback&, double dt_s, JointCommand& out) override {
+    dts.push_back(dt_s);
+    out.mode = ActuatorMode::kTorque;
+  }
+  void on_exit() override {}
+
+  std::vector<double> dts;
+};
+
+// Drops on `drops`, each blocking 25 ms first like a real cyclic timeout.
+std::function<bool(uint64_t)> slow_drops(std::vector<uint64_t> drops) {
+  return [drops](uint64_t i) {
+    if (!in(drops, i)) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+    return true;
+  };
+}
+
+constexpr double kNominalDt = 1.0 / 10000.0;  // cfg()'s rate
+}  // namespace
+
+// A stream whose sender went quiet goes stale on wall time, misses included. The
+// misses take 125 ms, well past the 100 ms cmd_timeout_s, while the good cycles
+// in between add up to about 1 ms.
+TEST(RtExecutorDt, StreamGoesStaleOnWallTimeThroughMisses) {
+  Dynamics dyn(URDF_PATH);
+  JointTorqueParams p;
+  p.scale = 0.0;  // output = tau_ff alone
+  p.cmd_timeout_s = 0.1;
+  p.cmd_decay_s = 0.0;  // stale = zero at once
+  JointTorqueMode mode(dyn, p);
+
+  std::atomic<bool> stop{false};
+  DroppingTransport t(slow_drops({3, 5, 7, 9, 11}), 14, stop);
+  t.on_call = [&](uint64_t i) {
+    if (i == 1) mode.set_torque(JointVec::Constant(1.0));  // the only command sent
+  };
+  SampleRing ring(1024);
+  ExecutorConfig c = cfg(3);
+  c.max_window_misses = 10;
+  RtExecutor ex(t, ring, c);
+  ex.request_mode(&mode);
+
+  ASSERT_NO_THROW(ex.run(stop));
+  ASSERT_EQ(t.sent.size(), 14u);
+  EXPECT_DOUBLE_EQ(t.sent[2].torque[0], 1.0);  // the stream was live
+  // The last command out, computed after all five misses.
+  EXPECT_DOUBLE_EQ(t.sent.back().torque[0], 0.0) << "the stream did not go stale";
+}
+
+// The compute after a miss gets the time the miss took.
+TEST(RtExecutorDt, ComputeAfterAMissGetsTheElapsedTime) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t(slow_drops({5}), 10, stop);
+  DtMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&mode);
+
+  ASSERT_NO_THROW(ex.run(stop));
+  ASSERT_EQ(mode.dts.size(), 8u);  // good calls 1-4 and 6-9
+  EXPECT_GE(mode.dts[4], 0.025);   // call 6's compute, after the miss
+  EXPECT_LT(mode.dts[4], 0.060);
+}
+
+// A gap longer than max_consecutive_misses cyclic timeouts (3 x KortexTransport's
+// 20 ms by default) is a stalled loop, not a miss burst a run survives: it is
+// passed on capped.
+TEST(RtExecutorDt, DtIsCappedAtTheConsecutiveMissSpan) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 10, stop);
+  t.on_call = [](uint64_t i) {
+    if (i == 5) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  };
+  DtMode mode;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&mode);
+
+  ASSERT_NO_THROW(ex.run(stop));
+  ASSERT_EQ(mode.dts.size(), 9u);
+  EXPECT_DOUBLE_EQ(mode.dts[4], 0.060);  // call 5's compute, after the stall
+}
+
+// The first compute() in a mode, after run() starts or a switch, gets the nominal
+// dt: the switch's set_actuator_modes() pumps are not time the mode lived through.
+TEST(RtExecutorDt, FirstComputeInAModeGetsTheNominalDt) {
+  std::atomic<bool> stop{false};
+  DroppingTransport t([](uint64_t) { return false; }, 30, stop);
+  t.modes_delay_ms = 30;
+  DtMode first, second;
+  SampleRing ring(1024);
+  RtExecutor ex(t, ring, cfg(3));
+  ex.request_mode(&first);
+  t.on_call = [&](uint64_t i) {
+    if (i == 10) ex.request_mode(&second);
+  };
+
+  ASSERT_NO_THROW(ex.run(stop));
+  ASSERT_FALSE(first.dts.empty());
+  ASSERT_FALSE(second.dts.empty());
+  EXPECT_DOUBLE_EQ(first.dts.front(), kNominalDt);
+  EXPECT_DOUBLE_EQ(second.dts.front(), kNominalDt);
 }

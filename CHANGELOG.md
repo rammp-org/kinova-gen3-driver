@@ -167,6 +167,16 @@ that heading to the new version and bumps `package.xml`.
 
 ### Fixed
 
+- **Mode timers now count the time lost to missed exchanges** (#103).
+  `RtExecutor` passed `compute()` a fixed `1 / rate_hz`, so each ~20 ms miss
+  went uncounted and a 100 ms `cmd_timeout_s` could stretch to ~180 ms before
+  the miss budget declared comms lost. `compute()` now gets the wall time since
+  the mode's previous `compute()`, capped at `max_consecutive_misses` x the new
+  `kDefaultCyclicTimeoutMs` (60 ms by default). The first `compute()` in a
+  mode still gets `1 / rate_hz`. The command watchdogs, gain ramps,
+  `ik_fault_s`, the torque feedforward decay, the reference rate limiters and
+  `JointVelocityMode`'s reference integration all follow wall time, so after a
+  miss the rate-limited reference takes one step of up to ~21 ms worth.
 - A single lost KORTEX UDP frame no longer kills the driver. `KortexTransport`
   bounds every cyclic call on the RT path (`exchange`, `send`, `receive`, and the
   pumps during a mode switch) at `cyclic_timeout_ms` (new constructor argument,

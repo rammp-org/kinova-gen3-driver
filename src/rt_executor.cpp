@@ -5,6 +5,7 @@
 #include <sched.h>
 #include <time.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <stdexcept>
@@ -95,6 +96,14 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   const double rate_hz = cfg_.rate_hz > 0.0 ? cfg_.rate_hz : 1000.0;
   const int64_t period_ns = int64_t(1e9 / rate_hz);
   const double dt_s = 1.0 / rate_hz;
+  // compute() gets the wall time since the previous compute() (#103), so the
+  // time a miss blocked counts on the modes' watchdogs, ramps and integrators.
+  // Capped at max_consecutive_misses default cyclic timeouts: a run survives no
+  // longer burst of misses, so a longer gap is a stalled loop, and that is not
+  // handed to the modes as one step.
+  const double max_dt_s =
+      std::max(dt_s, cfg_.max_consecutive_misses * kDefaultCyclicTimeoutMs * 1e-3);
+  int64_t last_compute_ns = -1;  // < 0: no compute yet in this mode, use dt_s
 
   ControlMode* active = nullptr;
 
@@ -195,6 +204,7 @@ void RtExecutor::run(std::atomic<bool>& stop) {
       }
       req->on_enter(fb);
       active = req;
+      last_compute_ns = -1;  // the pumps are not time the new mode lived through
     }
 
     // 4. comm round-trip. On a miss fb still holds the last good feedback.
@@ -211,7 +221,12 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     //    next cycle re-sends this cycle's command unchanged: compute() on stale fb
     //    would still advance its integrators (JointVelocityMode's q_ref += qd*dt,
     //    the reference rate limiters, watchdogs) with the arm unobserved.
-    if (active && !missed) active->compute(fb, dt_s, cmd);
+    if (active && !missed) {
+      const double dt =
+          last_compute_ns < 0 ? dt_s : std::min(double(t1 - last_compute_ns) * 1e-9, max_dt_s);
+      last_compute_ns = t1;
+      active->compute(fb, dt, cmd);
+    }
     const int64_t t2 = ns_now();
     const uint32_t compute_ns = clamp_u32(t2 - t1);
 

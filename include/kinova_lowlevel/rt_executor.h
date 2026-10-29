@@ -66,7 +66,10 @@ class RtExecutor {
   // Blocks on the calling thread and runs the RT loop. A TransportTimeout from
   // exchange() is survived: the cycle keeps the last good feedback, skips
   // compute() so the previous command is re-sent unchanged, and is flagged
-  // (CycleSample bit2). Throws CommsLost on comms loss (see ExecutorConfig);
+  // (CycleSample bit2). compute() gets the wall time since the mode's previous
+  // compute(), so the miss counts on its timers: the nominal 1/rate_hz on a
+  // mode's first compute(), capped at max_consecutive_misses x
+  // kDefaultCyclicTimeoutMs. Throws CommsLost on comms loss (see ExecutorConfig);
   // any other exception propagates as before. With exit_on_fault, throws
   // ArmFault on a confirmed fault. May be called again after it returns or throws:
   // a mode requested in between is adopted by the new run.
