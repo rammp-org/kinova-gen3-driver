@@ -296,3 +296,62 @@ TEST(DynamicsMount, TiltIsReadFromTheModel) {
   EXPECT_NEAR(Dynamics(URDF_PATH).mount_tilt_deg(), 0.0, 1e-2);
   EXPECT_NEAR(Dynamics(UrdfXml{tilted_fixture()}, kEe).mount_tilt_deg(), 30.0, 1e-2);
 }
+
+namespace {
+// Same (cos, sin) packing as Dynamics, for tests that drive Pinocchio directly.
+Eigen::VectorXd pack_cfg(const pinocchio::Model& m, const JointVec& q) {
+  Eigen::VectorXd cfg = pinocchio::neutral(m);
+  for (int i = 0; i < m.nv; ++i) {
+    const auto jid = m.getJointId(m.names[i + 1]);
+    const int k = m.idx_qs[jid];
+    if (m.nqs[jid] == 2) {
+      cfg[k] = std::cos(q[i]);
+      cfg[k + 1] = std::sin(q[i]);
+    } else {
+      cfg[k] = q[i];
+    }
+  }
+  return cfg;
+}
+}  // namespace
+
+TEST(Dynamics, CoriolisTimesQdMatchesNonlinearMinusGravity) {
+  // C(q,qd) qd == rnea(q,qd,0) - g(q), against Pinocchio driven directly.
+  Dynamics dyn(URDF_PATH);
+  pinocchio::Model model;
+  pinocchio::urdf::buildModel(URDF_PATH, model);
+  pinocchio::Data data(model);
+  for (int k = 0; k < 20; ++k) {
+    const JointVec q = JointVec::Random();
+    const JointVec qd = 1.5 * JointVec::Random();
+    const Eigen::VectorXd cfg = pack_cfg(model, q);
+    const Eigen::VectorXd nle = pinocchio::nonLinearEffects(model, data, cfg, qd);
+    const Eigen::VectorXd g = pinocchio::computeGeneralizedGravity(model, data, cfg);
+    JointMat C;
+    dyn.coriolis(q, qd, C);
+    EXPECT_LT((C * qd - (nle - g)).cwiseAbs().maxCoeff(), 1e-9);
+  }
+}
+
+TEST(Dynamics, CoriolisIsZeroAtRest) {
+  Dynamics dyn(URDF_PATH);
+  JointMat C;
+  dyn.coriolis(JointVec::Random(), JointVec::Zero(), C);
+  EXPECT_EQ(C.cwiseAbs().maxCoeff(), 0.0);
+}
+
+TEST(Dynamics, MdotMinusTwoCIsSkewSymmetric) {
+  Dynamics dyn(URDF_PATH);
+  constexpr double h = 1e-6;
+  for (int k = 0; k < 10; ++k) {
+    const JointVec q = JointVec::Random();
+    const JointVec qd = 1.5 * JointVec::Random();
+    const JointVec x = JointVec::Random();
+    JointMat Mp, Mm, C;
+    dyn.mass_matrix(JointVec(q + h * qd), Mp);
+    dyn.mass_matrix(JointVec(q - h * qd), Mm);
+    dyn.coriolis(q, qd, C);
+    const JointMat Mdot = (Mp - Mm) / (2 * h);
+    EXPECT_NEAR(x.dot((Mdot - 2 * C) * x), 0.0, 1e-5);
+  }
+}
