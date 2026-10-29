@@ -106,6 +106,7 @@ set(KINOVA_LIB_SOURCES
     src/velocity_reference.cpp
     src/rt_executor.cpp
     src/arm_link.cpp
+    src/arm_route.cpp
     src/interface/trajectory_executor.cpp
     src/interface/supervisor.cpp
     src/interface/arbiter.cpp
@@ -364,6 +365,7 @@ add_executable(unit_tests
     tests/rt_safety_test.cpp
     tests/rt_executor_miss_test.cpp
     tests/arm_link_test.cpp
+    tests/arm_route_test.cpp
     tests/cartesian_test.cpp
     tests/cartesian_impedance_mode_test.cpp
     tests/diff_ik_test.cpp

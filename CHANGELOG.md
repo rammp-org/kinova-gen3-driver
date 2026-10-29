@@ -22,7 +22,11 @@ that heading to the new version and bumps `package.xml`.
   loss while commanding hands the arm back to its base, is reported, and waits
   for `request_clear()`: after a power-cutting e-stop the arm comes back under
   its base, and the Kinova controller keeps it until the clear. Only an
-  actuator-count mismatch still escapes. The `Supervisor` is its listener
+  actuator-count mismatch still escapes. With no direct route to the arm (the
+  arm NIC without an address or a link), each connect attempt fails at once,
+  naming the interface, instead of blocking ~127 s in TCP retries out the
+  default route (`arm_route.h`). An arm address that isn't IPv4 is now a
+  startup error. The `Supervisor` is its listener
   (`on_link_state`): goals halt with `"halted: arm fault or connection lost"`
   (`HaltReason::kArmUnavailable`), work is refused while the arm is down, and
   after recovery the arm holds where it is now.

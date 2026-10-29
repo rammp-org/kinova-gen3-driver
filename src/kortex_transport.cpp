@@ -17,6 +17,7 @@
 #include <string>
 #include <thread>
 
+#include "kinova_lowlevel/arm_route.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/units.h"
 #include "kortex_cyclic.h"
@@ -271,6 +272,10 @@ KortexTransport::~KortexTransport() {
 
 void KortexTransport::connect() {
   auto& I = *impl_;
+  // With no direct route, connect() leaves by the default route and blocks ~127 s in TCP SYN
+  // retries (abra, 2026-10-28). Fail the attempt at once instead, saying why.
+  if (const std::string p = arm_route_problem(I.ip); !p.empty())
+    throw std::runtime_error("KortexTransport: " + p);
   I.tcp = std::make_unique<k_api::TransportClientTcp>();
   I.udp = std::make_unique<k_api::TransportClientUdp>();
   I.tcp->connect(I.ip, kTcpPort);

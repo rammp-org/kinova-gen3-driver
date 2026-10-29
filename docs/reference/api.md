@@ -368,7 +368,7 @@ class ArmLink {
 
 | Event | What `ArmLink` does | Next state |
 |---|---|---|
-| `connect()` fails (arm off or still booting, link renegotiating, RPC timeout) | `safe_shutdown()`, retry every `retry_period_s`, forever | `kConnecting` |
+| `connect()` fails (arm off or still booting, link renegotiating, no direct route to the arm, RPC timeout) | `safe_shutdown()`, retry every `retry_period_s`, forever | `kConnecting` |
 | connected, base reports `ARMSTATE_IN_FAULT` | hand the arm back to the base (`release_low_level`) | `kFaulted` |
 | connected, no fault | `set_servoing_low_level()`, every actuator to POSITION, `exec.run()` | `kRunning` |
 | `CommsLost` or `TransportTimeout` out of the loop | latch `"connection lost: …"`, `safe_shutdown()`, reconnect | `kConnecting` → `kFaulted` |
@@ -376,7 +376,7 @@ class ArmLink {
 | `ArmFault`, `ArmRejected`, any other exception | latch the fault, `release_low_level()` | `kFaulted` |
 | `request_clear()` | `clear_faults()`; still in fault after `clear_settle_s` → stays, reason `"fault persists after clear"` | `kRunning` |
 | arm stops answering while faulted (`health_max_failures`) | `safe_shutdown()`, reconnect; **the fault stays latched** | `kConnecting` → `kFaulted` |
-| `std::logic_error` from `connect()` (actuator-count mismatch) | `safe_shutdown()`, rethrow | — |
+| `std::logic_error` from `connect()` (actuator-count mismatch, an arm address that isn't IPv4) | `safe_shutdown()`, rethrow | — |
 
 `ArmLink` never clears a fault on its own initiative. The listener (the
 `Supervisor`) is told every state change before it takes effect on the arm; see
@@ -449,7 +449,12 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   `fail_health`, `set_joint_positions`, and call counters.
 - **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
-  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` moves the SDK's
+  Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` first checks the
+  route to the arm (`arm_route_problem`, `arm_route.h`): the arm's address must be on
+  the network of the interface the kernel would send through, and that interface
+  must have a link. If not, it throws `std::runtime_error` naming the interface at
+  once, rather than letting KORTEX's TCP connect leave by the default route and block
+  ~127 s; an address that isn't IPv4 is `std::invalid_argument`. It then moves the SDK's
   UDP receive thread — the one every `exchange()` waits on — to `SCHED_FIFO`
   `rx_priority` pinned to `rx_cpu` (via `raise_thread`, see
   [rt_system](#real-time-system-rt_systemh)); pass one below the executor's priority and its CPU.

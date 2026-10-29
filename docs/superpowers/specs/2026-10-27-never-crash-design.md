@@ -300,7 +300,8 @@ My calls (flagged to Swapnil 2026-10-27, to confirm):
 8. Re-entry leaves the gripper uncommanded, as at startup.
 9. #96 item 7 (dt catch-up) deferred: done right it widens `ControlMode`.
 10. No bounded reachability probe before `connect()`; a slow stop while the
-    arm is off is accepted.
+    arm is off is accepted. Superseded in part (2026-10-29): `connect()` now
+    checks the route first (below), which needs no probe.
 6. Connect retry is a fixed 1 s, not exponential: the arm is on a dedicated
    link, and a short fixed period gets back fastest after a 4 s renegotiation.
 
@@ -335,9 +336,17 @@ Found, and fixed on this branch:
   found the arm not answering, and `kConnecting` is now reported before the
   teardown.
 
-Seen, not fixed: with no route to the arm (abra's `eno1` lost its static
+Seen, then fixed (2026-10-29): with no route to the arm (abra's `eno1` lost its static
 address and traffic went out over wifi), one `connect()` blocks ~127 s in TCP
 SYN retries with an empty reason. On the direct link an off arm fails at once.
+`KortexTransport::connect()` now checks the route first (`arm_route_problem`):
+the arm's address must be on the network of the interface the kernel would send
+through, and that interface must have a link. The kernel picks the route for an
+unsent UDP `connect()`; nothing goes on the wire. A failed check is an ordinary
+connect failure, retried at 1 s, with the interface named in the reason. It
+matters most on a direct cable to the arm (flatbot): an arm without power drops
+the carrier, NetworkManager removes the static address, and every attempt would
+otherwise leave by the default route. Not yet seen on the arm.
 
 ## Not verified (needs the arm)
 
