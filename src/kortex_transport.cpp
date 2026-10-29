@@ -334,6 +334,18 @@ void KortexTransport::connect() {
         "KortexTransport: robot reports " + std::to_string(I.n_) +
         " actuators but this build expects kNumJoints=" + std::to_string(kNumJoints));
   }
+  // The count can arrive before every actuator has registered: right after a boot the
+  // base accepted low-level servoing, then refused SetControlMode on device 1
+  // (INVALID_DEVICE; abra, 2026-10-29). A read on each actuator is refused the same way
+  // until it is up, and a failure here is retried (ArmLink), not latched.
+  for (int id = 1; id <= I.n_; ++id) {
+    try {
+      rpc([&] { return I.act_cfg->GetControlMode(id); });
+    } catch (const ArmRejected& e) {
+      throw std::runtime_error("KortexTransport: actuator " + std::to_string(id) +
+                               " not registered yet (still booting?): " + e.what());
+    }
+  }
   I.connected_ = true;
 }
 

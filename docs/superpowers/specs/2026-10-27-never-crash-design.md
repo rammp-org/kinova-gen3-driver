@@ -336,6 +336,13 @@ Found, and fixed on this branch:
   found the arm not answering, and `kConnecting` is now reported before the
   teardown.
 
+Found 2026-10-29, fixed on this branch: right after a power-on the base
+reported 7 actuators and accepted low-level servoing, then refused
+`SetControlMode` on actuator 1 (`INVALID_DEVICE`: not registered yet). The
+refusal came after `connect()`, so it latched as a fault instead of retrying.
+`connect()` now reads every actuator's control mode first; a refusal there is
+a retryable connect failure.
+
 Seen, then fixed (2026-10-29): with no route to the arm (abra's `eno1` lost its static
 address and traffic went out over wifi), one `connect()` blocks ~127 s in TCP
 SYN retries with an empty reason. On the direct link an off arm fails at once.

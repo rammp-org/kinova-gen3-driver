@@ -470,6 +470,9 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   error reply from the arm (`KDetailedException`) is `ArmRejected`; a failed
   local send (`sendto`) is a lost frame, `TransportTimeout`; a TCP RPC timeout
   (KORTEX's `"timeout detected"` `runtime_error`) is `TransportTimeout`.
+  After the actuator count, `connect()` reads each actuator's control mode: a booting
+  arm answers on its base before its actuators register, and that refusal is a plain
+  `std::runtime_error` (retried), not an `ArmRejected`.
   `connect()` does not clear faults; an actuator-count mismatch is
   `std::invalid_argument`. `release_low_level()` and `arm_in_fault()` bound each
   RPC at 500 ms; the revert moves past a refusal and stops at the first RPC that goes unanswered. `fill_feedback`
