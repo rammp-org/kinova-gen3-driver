@@ -230,3 +230,29 @@ TEST(SimTransport, ThrowOnExchangeHookRuns) {
   t.throw_on_exchange(nullptr);
   EXPECT_NO_THROW(t.exchange(c, fb));
 }
+
+TEST(SimTransport, ExternalTorqueSubtractsFromReportedTau) {
+  JointFeedback init;
+  init.tau.setConstant(3.0);
+  SimTransport t(init);
+  JointVec ext = JointVec::Zero();
+  ext[1] = 6.0;
+  t.set_external_torque(ext);
+
+  JointCommand pos;
+  pos.mode = ActuatorMode::kPosition;
+  JointFeedback fb;
+  t.exchange(pos, fb);  // position mode keeps the seeded tau
+  EXPECT_DOUBLE_EQ(fb.tau[0], 3.0);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 3.0 - 6.0);
+
+  JointCommand trq;  // kTorque: tau echoes the command
+  trq.torque.setConstant(1.0);
+  t.exchange(trq, fb);
+  EXPECT_DOUBLE_EQ(fb.tau[0], 1.0);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 1.0 - 6.0);
+
+  t.set_external_torque(JointVec::Zero());
+  t.receive(fb);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 1.0);
+}

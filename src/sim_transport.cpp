@@ -28,6 +28,7 @@ SimTransport::SimTransport(const JointFeedback& initial, int latency_us)
   // interconnect gripper attached, which is exactly the mis-mapping `present`
   // was added to kill.
   state_.gripper.present = true;
+  tau_ext_.store(JointVec::Zero());
 }
 
 void SimTransport::connect() {
@@ -100,8 +101,11 @@ void SimTransport::step_gripper(const GripperCommand& g) {
 // the whole suite would run in a representation where a continuous joint's wrap can
 // never occur. That is how #52 reached the arm: the bug was structurally unreachable
 // from CI. Kinematically a no-op for the bounded joints, whose limits are inside +/-pi.
-void SimTransport::report_wrapped(JointFeedback& fb) const {
+void SimTransport::report_wrapped(JointFeedback& fb) {
   fb = state_;
+  JointVec ext;
+  if (tau_ext_.load(ext)) tau_ext_seen_ = ext;
+  fb.tau -= tau_ext_seen_;
   fb.fault = state_.fault || arm_fault_;
   fb.low_level = low_level_fb_;
   for (int i = 0; i < kNumJoints; ++i) fb.q[i] = wrap_to_pi(fb.q[i]);

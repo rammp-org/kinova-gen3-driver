@@ -336,6 +336,7 @@ class RtExecutor {
  public:
   RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit or miss_window < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
+  void attach_contact(ContactMonitor& monitor, ControlMode& on_contact) noexcept;  // before run()
   void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread; may be called again
   const ExecutorConfig& config() const noexcept;
 };
@@ -363,6 +364,26 @@ class RtExecutor {
   requested in between is adopted by the new run (from a fresh seed read).
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
+- **Contact stop (`attach_contact`):** optional; call it before `run`, and keep
+  `monitor` and `on_contact` (a `FloatMode`) alive as long as the executor. With
+  none attached the loop is unchanged. Attached, `run` calls
+  `monitor.on_run_start()` once at its start (the observer re-settles; the latch
+  is kept) and `monitor.step(fb, dt, missed)` every cycle right after the
+  exchange, a missed one included. The monitor shares the modes' `Dynamics`: it
+  only runs on the RT thread. While `monitor.latched()`, `on_contact` is the only
+  mode the loop runs:
+  - **Trip cycle.** If `on_contact`'s actuator modes match the active mode's
+    (every torque-controlled mode), the loop switches in that cycle and computes
+    `on_contact`. Otherwise it sends a freeze that cycle (the active mode's
+    actuator modes, `position` = measured `q`, zero `velocity`, no `compute`) and
+    adopts `on_contact` at the next boundary through `set_actuator_modes`.
+  - **Requests.** A `request_mode` made while latched, or racing the trip, is left
+    pending, not dropped: the latest one is adopted at the first boundary after
+    the clear (`ContactMonitor::request_clear`, consumed by the next `step`).
+  - **Re-running.** A `run` that starts latched (after comms loss or an arm
+    fault) adopts `on_contact` at its first boundary, not the pending request.
+  - Each latched cycle sets `CycleSample` bit3. In `observe` the monitor never
+    latches, so the commands are never changed.
 
 ---
 
@@ -474,6 +495,9 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   hardware. Test knobs for the link lifecycle: `fail_connects`, `set_arm_fault`,
   `set_fault_sticky`, `set_low_level_feedback`, `throw_on_exchange`,
   `fail_health`, `set_joint_positions`, and call counters.
+  `set_external_torque(tau_ext)` simulates a push: feedback `tau` reports what it
+  otherwise would minus `tau_ext`, so the contact observer reads `+tau_ext` (the
+  arm does not move). Lock-free; safe to call while the loop runs.
 - **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
   Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` first checks the
@@ -526,7 +550,7 @@ same shape, forward everything, and hook the one call each cares about:
 struct CycleSample {
   uint64_t cycle_index;
   uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;
-  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout
+  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout, bit3 contact latched
 };
 
 class SampleRing {                       // lock-free SPSC, drop-don't-block

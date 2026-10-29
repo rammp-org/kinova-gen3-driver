@@ -2,6 +2,7 @@
 #include <atomic>
 #include <functional>
 
+#include "kinova_lowlevel/feedback_tap.h"  // Seqlock
 #include "kinova_lowlevel/transport.h"
 namespace kinova {
 // Fake robot for tests/benchmarks with no hardware. Echoes state, advances a
@@ -43,6 +44,11 @@ class SimTransport : public Transport {
   // it unless it is sticky.
   void set_arm_fault(bool f) { arm_fault_ = f; }
   void set_fault_sticky(bool s) { fault_sticky_ = s; }
+  // A push on the arm: feedback tau reports (what it would otherwise) - tau_ext,
+  // the command-convention sign, so the contact observer reads +tau_ext. The arm
+  // does not move: the sim has no dynamics. Lock-free (a Seqlock); one test thread
+  // may call it while the loop runs.
+  void set_external_torque(const JointVec& tau_ext) { tau_ext_.store(tau_ext); }
   // After a clear_faults() that ends the fault, arm_in_fault() still reports it n
   // more times: the real arm takes a moment to leave IN_FAULT.
   void set_clear_lag(int n) { clear_lag_ = n; }
@@ -61,7 +67,7 @@ class SimTransport : public Transport {
  private:
   void step_torque(const JointCommand&);
   void step_gripper(const GripperCommand&);
-  void report_wrapped(JointFeedback& fb) const;
+  void report_wrapped(JointFeedback& fb);
   JointFeedback state_;
   JointCommand last_cmd_;
   int latency_us_ = 0;
@@ -71,5 +77,7 @@ class SimTransport : public Transport {
   std::atomic<int> fail_connects_{0}, fail_health_{0}, clear_lag_{0}, lag_left_{0};
   std::atomic<bool> arm_fault_{false}, fault_sticky_{false}, low_level_fb_{true};
   std::function<void()> on_exchange_;
+  Seqlock<JointVec> tau_ext_;
+  JointVec tau_ext_seen_ = JointVec::Zero();  // last whole read: a torn one keeps it
 };
 }  // namespace kinova

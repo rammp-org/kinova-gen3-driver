@@ -370,6 +370,7 @@ add_executable(unit_tests
     tests/command_watchdog_test.cpp
     tests/rt_safety_test.cpp
     tests/rt_executor_miss_test.cpp
+    tests/contact_executor_test.cpp
     tests/arm_link_test.cpp
     tests/arm_route_test.cpp
     tests/cartesian_test.cpp
