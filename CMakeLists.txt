@@ -99,6 +99,7 @@ find_package(Eigen3 REQUIRED)
 # (pimpl keeps KORTEX headers out of the public interface).
 set(KINOVA_LIB_SOURCES
     src/dynamics.cpp
+    src/momentum_observer.cpp
     src/cartesian.cpp
     src/telemetry.cpp
     src/telemetry_consumers.cpp
@@ -364,6 +365,7 @@ add_executable(unit_tests
     tests/cartesian_types_test.cpp
     tests/joint_types_test.cpp
     tests/dynamics_test.cpp
+    tests/momentum_observer_test.cpp
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
