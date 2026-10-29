@@ -9,6 +9,9 @@
 #include <sstream>
 #include <string>
 
+#include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/joint_types.h"
+
 namespace kinova::test_fixtures {
 
 inline std::string read_file(const std::string& path) {
@@ -55,6 +58,31 @@ inline std::string articulate_gripper(std::string xml) {
 
 inline Eigen::Matrix3d Ry(double a) {
   return Eigen::AngleAxisd(a, Eigen::Vector3d::UnitY()).toRotationMatrix();
+}
+
+// q(t) = q0 + A sin(w t): amplitude 0.4 rad on j1-j4, 0.6 on j5-j7, w = 2 rad/s.
+// Zero A for a pose held at rest.
+struct Sinusoid {
+  JointVec q0, A;
+  double w = 2.0;
+  Sinusoid() {
+    q0 << 0.1, 0.8, 0.0, 1.2, 0.0, 0.9, 0.0;
+    A << 0.4, 0.4, 0.4, 0.4, 0.6, 0.6, 0.6;
+  }
+  JointVec q(double t) const { return q0 + A * std::sin(w * t); }
+  JointVec qd(double t) const { return A * (w * std::cos(w * t)); }
+  JointVec qdd(double t) const { return A * (-w * w * std::sin(w * t)); }
+};
+
+// tau = M qdd + C qd + g - tau_e, the measured (command-convention) torque that
+// produces the sinusoid under the external torque tau_e.
+inline JointVec synth_tau(Dynamics& dyn, const Sinusoid& s, double t, const JointVec& tau_e) {
+  JointMat M, C;
+  JointVec g;
+  dyn.mass_matrix(s.q(t), M);
+  dyn.coriolis(s.q(t), s.qd(t), C);
+  dyn.gravity(s.q(t), g);
+  return M * s.qdd(t) + C * s.qd(t) + g - tau_e;
 }
 
 }  // namespace kinova::test_fixtures

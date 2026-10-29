@@ -7,33 +7,12 @@
 
 #include "fixtures.h"
 using namespace kinova;
+using test_fixtures::Sinusoid;
+using test_fixtures::synth_tau;
 
 namespace {
 constexpr double kDt = 1e-3;
 constexpr double kGain = 25.0;
-
-// q(t) = q0 + A sin(w t): amplitude 0.4 rad on j1-j4, 0.6 on j5-j7, w = 2 rad/s.
-struct Sinusoid {
-  JointVec q0, A;
-  double w = 2.0;
-  Sinusoid() {
-    q0 << 0.1, 0.8, 0.0, 1.2, 0.0, 0.9, 0.0;
-    A << 0.4, 0.4, 0.4, 0.4, 0.6, 0.6, 0.6;
-  }
-  JointVec q(double t) const { return q0 + A * std::sin(w * t); }
-  JointVec qd(double t) const { return A * (w * std::cos(w * t)); }
-  JointVec qdd(double t) const { return A * (-w * w * std::sin(w * t)); }
-};
-
-// tau = M qdd + C qd + g - tau_e, the torque that produces the sinusoid under tau_e.
-JointVec synth_tau(Dynamics& dyn, const Sinusoid& s, double t, const JointVec& tau_e) {
-  JointMat M, C;
-  JointVec g;
-  dyn.mass_matrix(s.q(t), M);
-  dyn.coriolis(s.q(t), s.qd(t), C);
-  dyn.gravity(s.q(t), g);
-  return M * s.qdd(t) + C * s.qd(t) + g - tau_e;
-}
 }  // namespace
 
 TEST(MomentumObserver, RestConvergesToInjectedTorque) {
