@@ -128,8 +128,9 @@ Implement this to add a control law. `compute()` must be RT-safe.
 
 ```cpp
 struct JointTorqueParams {
+  static constexpr double kMaxDamping = 50.0;  // ceiling for damping / set_damping
   double scale         = 1.0;   // fraction of gravity to apply (0.5 = gentle sag)
-  double damping       = 0.0;   // joint-velocity damping (N·m·s/rad)
+  double damping       = 0.0;   // joint-velocity damping (N·m·s/rad); live: set_damping
   // Per-joint ceiling on the TOTAL output. Joints 5-7 have a URDF effort limit
   // of 9 N·m; a scalar sized for the proximal joints would overrun the wrist
   // by 4x. Mirrors JointImpedanceParams::torque_limit.
@@ -147,6 +148,13 @@ void set_torque(const JointVec& tau_ff) noexcept;
 // Non-RT: re-arm the staleness watchdog. s >= 0 arms with s; s < 0 restores
 // this mode's own configured default (cmd_timeout_s) -- see Streaming below.
 void set_command_timeout(double s) noexcept;
+
+// Non-RT, any time (also while active): damping for the NEXT compute(). One
+// lock-free atomic; RtSafety pins it under a 1 ms retune loop. Throws
+// std::invalid_argument and keeps the old value unless finite and in
+// [0, kMaxDamping]; the constructor checks params.damping the same way.
+void set_damping(double d);
+double damping() const noexcept;
 ```
 
 Law: `tau = scale·gravity(q) − damping·q̇ + tau_ff`, clamped per joint. Sets
