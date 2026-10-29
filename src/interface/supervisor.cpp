@@ -173,8 +173,9 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         action_.settle(queued_id, r);  // ACCEPTed already; dropping it orphans the client
       // A goal this thread promoted while the link was dropping may have requested
       // its own mode after on_link_state lined position up. The next run must
-      // still adopt position, so line it up again.
-      if (hr == HaltReason::kArmUnavailable && !ready_.load()) {
+      // still adopt position, so line it up again. Keyed on readiness, not on hr:
+      // a second halt (an e-stop) arriving first overwrites the reason.
+      if (!ready_.load()) {
         exec_.request_mode(&pos_);
         active_mode_kind_.store(ControlModeKind::kPosition);
       }
@@ -812,13 +813,13 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   // close and lined position up for the next run, which the switch above may have
   // overridden. Refuse, and line position up again. Checked under the lock: a drop
   // after this point finds the session open and closes it.
-  if (!ready_.load() || active_mode_kind_.load() != want) {
-    if (!ready_.load()) {
-      active_mode_kind_.store(ControlModeKind::kPosition);
-      exec_.request_mode(&pos_);
-    }
+  if (!ready_.load()) {
+    active_mode_kind_.store(ControlModeKind::kPosition);
+    exec_.request_mode(&pos_);
     return {false, result_code::kStreamRejected, "arm not ready"};
   }
+  if (active_mode_kind_.load() != want)  // a goal or another open switched it meanwhile
+    return {false, result_code::kStreamRejected, "the mode changed during the open; retry"};
   // One deadline, pushed into the mode so it can make the OUTPUT safe at 1 kHz
   // while the session handles lifecycle at sampler rate. set_command_timeout is
   // CommandWatchdog::arm under the hood -- see Task 4.

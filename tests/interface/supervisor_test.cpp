@@ -2235,8 +2235,9 @@ TEST(SupervisorLink, LinkDownClosesTheStream) {
 }
 
 // A link that drops while a stream open sits in its mode-settle sleep: the open
-// must be refused, and the next run must still adopt position, not the stream's
-// mode (which the halt has already moved away from).
+// must be refused, and the next run adopts position. (Here the open's mode
+// request lands before the halt's, so position wins without the re-request
+// too; the opposite order is a race this test can't stage.)
 TEST(SupervisorLink, LinkDownDuringStreamOpenRefusesIt) {
   SupFix f;
   f.sup.start();

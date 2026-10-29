@@ -228,7 +228,8 @@ class Supervisor : public CommandSink,
   // so a setpoint that has already passed admit() can never interleave with the
   // teardown's write into the same single-writer double buffer. It ALSO serialises
   // close_stream() against on_stream_open()'s tail, so a close still in flight
-  // cannot disarm the watchdog a re-open has just armed. Backend/sampler threads
+  // cannot disarm the watchdog a re-open has just armed, and serialises the
+  // gripper's set_target() against on_halt's release(). Backend/sampler threads
   // only -- never taken on the RT path, and never held across the mode settle.
   std::mutex stream_mtx_;
   JointVec stream_hold_q_ = JointVec::Zero();   // last-good measured q for the teardown hold
