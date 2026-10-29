@@ -4,6 +4,7 @@
 #include <string>
 
 #include "kinova_lowlevel/cartesian_types.h"
+#include "kinova_lowlevel/contact_monitor.h"  // ContactStatus
 #include "kinova_lowlevel/gripper_types.h"
 #include "kinova_lowlevel/interface/trajectory_executor.h"  // Trajectory, Preemption, ControlModeKind
 #include "kinova_lowlevel/joint_types.h"
@@ -16,7 +17,15 @@ enum class ArbitrationMode { kEnforced, kDisabled };
 // The caller declares WHY the arm must stop; the supervisor decides HOW.
 // kArmUnavailable: the link to the arm went down (fault or connection lost; see
 // ArmLink). Raised by the Supervisor itself, never by a caller.
-enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest, kArmUnavailable };
+// kContact: the contact monitor latched (unexpected contact). Raised by the
+// Supervisor itself; settles goals with result_code::kContactStop.
+enum class HaltReason {
+  kOwnershipRevoked,
+  kEmergencyStop,
+  kOperatorRequest,
+  kArmUnavailable,
+  kContact
+};
 // Why the last streaming session ended. A client that was streaming happily and
 // suddenly has its setpoints refused needs to tell "you went quiet" apart from
 // "the driver could not solve for the pose you asked for" -- the second is a
@@ -193,6 +202,29 @@ struct SpeedResult {
   bool accepted = false;
   std::string message;
 };
+// Contact-detection thresholds. Named profiles are per-joint vectors from startup
+// config (see interface/contact.h); kCustom carries exact values. Every value must
+// be finite, > 0 and <= the per-joint ceiling: refused otherwise, never clamped.
+enum class ContactProfile { kSensitive, kDefault, kLoose, kCustom };
+struct ContactThresholdsRequest {
+  ContactProfile profile = ContactProfile::kDefault;
+  JointVec custom = JointVec::Zero();  // N·m, read iff profile == kCustom
+  Token token{};
+};
+// Accepted or not, profile and theta are what is active after the call (zero
+// theta when no monitor is attached).
+struct ContactThresholdsResult {
+  bool accepted = false;
+  std::string message;
+  ContactProfile profile = ContactProfile::kDefault;
+  JointVec theta = JointVec::Zero();
+};
+struct ContactState {
+  bool enabled = false;                               // a ContactMonitor is attached
+  ContactProfile profile = ContactProfile::kDefault;  // the last accepted profile
+  ContactStatus status{};
+};
+
 // Cancel had no struct to carry a token; it needs one, or any stranger can stop your motion.
 struct CancelRequest {
   GoalId id{};
@@ -230,6 +262,7 @@ enum class CancelResponse { kAccept, kReject };
 namespace result_code {
 constexpr int kSuccessful = 0, kInvalidGoal = -1, kPathToleranceViolated = -4,
               kGoalToleranceViolated = -5, kPreempted = -6, kPlanningFailed = -7,
-              kNotAuthorized = -8, kHalted = -9, kStreamRejected = -10;
+              kNotAuthorized = -8, kHalted = -9, kStreamRejected = -10,
+              kContactStop = -11;  // stopped on unexpected contact; needs a clear
 }
 }  // namespace kinova::interface

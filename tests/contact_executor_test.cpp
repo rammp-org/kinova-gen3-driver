@@ -78,20 +78,6 @@ class Bench : public Transport {
   std::atomic<bool>& stop_;
 };
 
-JointVec gravity(Dynamics& dyn, const JointVec& q) {
-  JointVec g;
-  dyn.gravity(q, g);
-  return g;
-}
-
-JointFeedback at_rest(const JointVec& q, const JointVec& g) {
-  JointFeedback fb;
-  fb.q = q;
-  fb.qd.setZero();
-  fb.tau = g;  // the observer reads ~0 at rest
-  return fb;
-}
-
 // One arm: the sim at rest at q0 holding tau = g(q0) (its gravity model reports
 // that under position control too), the executor, and the modes, all on one
 // Dynamics (the RT thread is its only user while run() runs). The sim's gravity
@@ -100,8 +86,8 @@ struct World {
   Dynamics dyn{URDF_PATH};
   Dynamics sim_dyn{URDF_PATH};
   JointVec q0 = test_fixtures::Sinusoid().q0;
-  JointVec g0 = gravity(dyn, q0);
-  SimTransport sim{at_rest(q0, g0)};
+  JointVec g0 = test_fixtures::gravity(dyn, q0);
+  SimTransport sim{test_fixtures::at_rest(q0, g0)};
   std::atomic<bool> stop{false};
   Bench bench{sim, stop};
   SampleRing ring{8192};

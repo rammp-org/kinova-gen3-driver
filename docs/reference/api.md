@@ -600,7 +600,8 @@ any coupling to control code. See the
 using Token = std::array<uint8_t, 16>;   // 128-bit capability token
 
 enum class ArbitrationMode { kEnforced, kDisabled };
-enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
+enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest,
+                             kArmUnavailable, kContact };  // the last two: raised by the Supervisor
 
 Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
         uint64_t seed = 0);
@@ -724,7 +725,9 @@ of a moving arm, so an unauthenticated caller must not be able to do it.
 
 The general "stop the arm now" primitive — used by ownership revocation and
 `/estop` alike. The caller declares **why**; the `Supervisor` decides **how**.
-In v1 every reason produces the same action: cancel and hold.
+Every reason cancels and holds; every reason but `kContact` settles with
+`result_code::kHalted` (−9), and `kContact` with `result_code::kContactStop`
+(−11) — see [Contact stop](#contact-stop-haltreasonkcontact) below.
 
 `on_halt` **must be idempotent**: `estop()` delivers it twice — once immediately,
 before it contends for the arbiter's lock (so the arm stops without waiting on a
@@ -749,10 +752,65 @@ after the drop is settled `kHalted` rather than run. Entering `kRunning`
 re-admits work. A `Supervisor` never told stays ready.
 
 A halt (any reason) settles goals still waiting in the inbox with `kHalted`
-rather than dropping them. The pump publishes `ArmState` only when the feedback
+(`kContactStop` for `kContact`) rather than dropping them. The pump publishes `ArmState` only when the feedback
 snapshot is new since its last publish (`Seqlock::version()`), so a frozen
 snapshot (link reconnecting, faulted polls unanswered, nothing read yet) is
 never republished as live.
+
+### Contact stop: `HaltReason::kContact`
+
+With a `ContactMonitor` in `SupervisorDeps::contact` (attached to the executor
+with `RtExecutor::attach_contact`), the RT loop latches a contact stop and
+floats the arm itself; the `Supervisor` reacts at sampler rate.
+
+- **Halt.** The sampler calls `on_halt(HaltReason::kContact)` once per rising
+  edge of `ContactMonitor::latched()`. The active and queued goals settle
+  `result_code::kContactStop = -11` with `"halted: unexpected contact"`. A
+  second halt landing before the sampler takes a pending contact halt (an
+  ArmLink drop, an e-stop) keeps the contact reason.
+- **While latched.** `on_trajectory_goal` rejects; `on_trajectory_accepted`
+  settles −11; `on_stream_open` returns `{false, kContactStop, "stopped on
+  unexpected contact; call /clear_faults"}`; gripper setpoints are dropped.
+  `on_set_contact_thresholds` and `on_query_contact` still work. The latch
+  survives everything but a clear: `on_link_state(kRunning)` does not unlatch,
+  work stays refused, and the next executor run adopts float, not the position
+  hold.
+- **Clear.** `bool Supervisor::clear_contact()` (any thread; the node's
+  `/clear_faults`) returns false and does nothing if nothing is latched.
+  Otherwise it halts with `kContact` (a no-op repeat, unless the sampler has not
+  seen this latch yet, for example during a 250 ms mode settle: then it is what
+  settles a goal accepted before the trip), calls `request_clear()`, and
+  requests position mode. The executor adopts only a pending request after a
+  clear, and `JointPositionMode::on_enter` holds at the measured q. Pressing
+  still when clearing re-trips after the observer settles (5/K).
+
+Thresholds, from `interface/contact.h` and `interface/value_types.h`:
+
+```cpp
+enum class ContactProfile { kSensitive, kDefault, kLoose, kCustom };
+struct ContactProfiles { JointVec sensitive, normal, loose, ceiling; };  // N·m; all NaN by default
+ThresholdCheck validate_profiles(const ContactProfiles&);   // ceiling, then each named profile
+ThresholdCheck resolve_contact(const ContactThresholdsRequest&, const ContactProfiles&,
+                               JointVec& theta_out);        // unknown -> refused; then vs ceiling
+struct ContactThresholdsRequest { ContactProfile profile = kDefault; JointVec custom; Token token; };
+struct ContactThresholdsResult  { bool accepted; std::string message; ContactProfile profile; JointVec theta; };
+struct ContactState { bool enabled; ContactProfile profile; ContactStatus status; };
+
+virtual ContactThresholdsResult CommandSink::on_set_contact_thresholds(const ContactThresholdsRequest&);
+virtual ContactState CommandSink::on_query_contact();
+```
+
+`on_set_contact_thresholds` refuses an unknown profile, resolves a named one
+from `SupervisorDeps::contact_profiles` (`normal` is `kDefault`) or takes
+`custom`, then refuses anything non-finite, ≤ 0 or above the ceiling, naming the
+joint (1-based) and the limit. Nothing is clamped. A refusal leaves the active
+thresholds as they were; accepted or not, `profile` and `theta` in the result
+are what is active. An accepted set reaches the monitor within one RT cycle.
+The `CommandSink` defaults (no monitor) are `{false, "contact detection not
+available"}` and `ContactState{}` (`enabled = false`). `on_query_contact`
+reports `enabled` (a monitor is attached), the last accepted `profile`
+(`kDefault` at start: the constructor applies `contact_profiles.normal`), and
+the monitor's `ContactStatus` (left default on a torn read).
 
 ### Gating
 
@@ -767,10 +825,13 @@ lowering-a-speed-override reasoning: gating it would mean the arm could not be
 stopped by whoever does not currently hold the token. `on_trajectory_accepted()`
 re-checks the token on the goal rather than trusting that a matching
 `on_trajectory_goal()` preceded it. `CancelRequest` exists so that cancel
-carries a token too.
+carries a token too. `on_set_contact_thresholds()` is gated like `on_set_gains()`
+(retuning the detector is a command); `on_query_contact()` is a read and is
+not.
 
 Rejections return `GoalResponse::kRejectUnauthorized` (goals),
-`CancelResponse::kReject` (cancel), or `{accepted=false}` (gains), and increment
+`CancelResponse::kReject` (cancel), or `{accepted=false, "not authorized"}`
+(gains, contact thresholds), and increment
 `ArbitrationStatus::rejected_count`. `result_code::kNotAuthorized = -8` is the
 constant for backends that produce a result message.
 
@@ -990,6 +1051,8 @@ struct SupervisorDeps {
   StreamPort*             stream   = nullptr;
   ActionServerPort*       action   = nullptr;
   GripperController*      grip     = nullptr;   // OPTIONAL — null on a robot with no gripper
+  ContactMonitor*         contact  = nullptr;   // OPTIONAL — null: contact detection off
+  ContactProfiles         contact_profiles{};   // read iff contact is set
   SupervisorConfig        cfg{};
 };
 ```
@@ -1001,3 +1064,11 @@ is the one field that is legitimately absent: `GripperFeedback::present`
 already exists for a robot with no interconnect gripper attached, so a null
 `grip` makes gripper commands no-ops and `on_query_gripper()` report
 `present = false` rather than being a construction error.
+
+`contact` is optional too: null means no contact stop, with
+`on_set_contact_thresholds` refused and `on_query_contact().enabled == false`.
+When it is set, the constructor throws `std::invalid_argument` unless
+`validate_profiles(contact_profiles)` passes (the message names the profile,
+the joint and the limit) and `contact_profiles.ceiling` equals
+`contact->ceiling()`. It then applies the `kDefault` profile
+(`contact_profiles.normal`). Attach the same monitor to the executor.

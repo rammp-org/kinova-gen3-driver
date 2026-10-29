@@ -114,7 +114,8 @@ set(KINOVA_LIB_SOURCES
     src/interface/supervisor.cpp
     src/interface/arbiter.cpp
     src/interface/streaming_session.cpp
-    src/interface/gains.cpp)
+    src/interface/gains.cpp
+    src/interface/contact.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -387,7 +388,8 @@ add_executable(unit_tests
     tests/interface/supervisor_test.cpp
     tests/interface/arbiter_test.cpp
     tests/interface/streaming_session_test.cpp
-    tests/interface/gains_test.cpp)
+    tests/interface/gains_test.cpp
+    tests/interface/contact_supervisor_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 if(KINOVA_ENABLE_KORTEX)

@@ -12,10 +12,11 @@ namespace kinova::interface {
 //
 // Decorates a CommandSink: every inbound command carries a Token; the Arbiter
 // compares it against the live grant and either delegates downstream or rejects.
-// It includes nothing from controls -- no ControlMode, no RtExecutor, no Dynamics,
-// no Transport -- so the safety-critical admission logic is unit-testable against a
-// fake sink with no robot, no URDF and no threads. Same idiom as FeedbackTap
-// decorating Transport.
+// It uses nothing from controls -- no ControlMode, no RtExecutor, no Dynamics, no
+// Transport (value_types.h declares Dynamics only because ContactStatus comes from
+// contact_monitor.h) -- so the safety-critical admission logic is unit-testable
+// against a fake sink with no robot, no URDF and no threads. Same idiom as
+// FeedbackTap decorating Transport.
 //
 // Lock discipline (spec: "Thread safety"): the mutex IS held across command
 // delegation, so admit-and-deliver is atomic against revoke()/estop() -- otherwise a
@@ -48,7 +49,10 @@ class Arbiter : public CommandSink, public StreamSink, public GripperSink, publi
   // against its own atomic -- see arbiter.cpp.
   SpeedResult on_set_speed_override(const SpeedOverrideRequest&) override;
   ArmState on_query_state() override;  // never gated -- reads are always open
-  void on_halt(HaltReason) override;   // pass-through
+  // Gated: retuning the detector is a command like any other.
+  ContactThresholdsResult on_set_contact_thresholds(const ContactThresholdsRequest&) override;
+  ContactState on_query_contact() override;  // never gated -- reads are always open
+  void on_halt(HaltReason) override;         // pass-through
 
   // StreamSink
   StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
