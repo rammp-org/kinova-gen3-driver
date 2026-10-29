@@ -68,6 +68,21 @@ ReplayInput load_replay_csv(const std::string& path, double tau_sign) {
   return in;
 }
 
+double median_dt(const std::vector<double>& t) {
+  if (t.size() < 2) return 0.0;
+  std::vector<double> d(t.size() - 1);
+  for (size_t k = 1; k < t.size(); ++k) d[k - 1] = t[k] - t[k - 1];
+  std::nth_element(d.begin(), d.begin() + d.size() / 2, d.end());
+  return d[d.size() / 2];
+}
+
+int debounce_rows_from_ms(const std::vector<double>& t, double ms) {
+  const double dt = median_dt(t);
+  if (!(dt > 0.0) || !(ms > 0.0))
+    throw std::invalid_argument("debounce_rows_from_ms: need dt > 0 and ms > 0");
+  return std::max(1, static_cast<int>(std::lround(ms / 1000.0 / dt)));
+}
+
 ReplayStats replay(const ReplayInput& in, const ReplayOptions& opt) {
   const size_t n = in.t.size();
   if (in.q.size() != n || in.qd.size() != n || in.tau.size() != n)

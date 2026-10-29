@@ -30,8 +30,13 @@ built with the other apps (`cmake --build <dir> --target contact_replay`).
 ```
 contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
     --csv tour.csv --out r.csv \
-    [--gain 25] [--debounce 5] [--thresholds 8,8,6,6,2,2,2] [--tau-sign -1]
+    [--gain 25] [--debounce 5 | --debounce-ms 5] [--thresholds 8,8,6,6,2,2,2] \
+    [--tau-sign -1]
 ```
+
+`--ee-frame` is the end-effector link in the model you pass: the rendered
+`robot_description` names it `arm_end_effector_link`, the repo's test URDF
+(`models/gen3_7dof_2f85.urdf`) `gen3_end_effector_link`.
 
 - **Input:** a CSV with a header naming `t, q1..q7, qd1..qd7, tau1..tau7` (extra
   columns are ignored). `tau` must be in command convention, where a still arm
@@ -42,9 +47,14 @@ contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
   0.02 rad/s, after the `5/gain` settle), the first would-be trip, and the total
   `would_trips`.
 
-The debounce counts rows, not milliseconds: at the 1 kHz RT rate `--debounce 5` is
-5 ms, but a 50 Hz recording makes it 100 ms. Scale `--debounce` to the recording
-rate, or expect fewer trips offline than on the arm.
+!!! warning "Debounce is counted in rows"
+    The RT monitor debounces 5 cycles at 1 kHz, which is 5 ms. `--debounce N`
+    counts recording rows, so on a 50 Hz recording it means 100 ms and
+    `would_trips` is silently undercounted. Use `--debounce-ms 5`: it converts to
+    rows from the median row spacing (at least 1 row, so 1 row on a 50 Hz
+    recording). The tool prints the effective debounce in rows and ms, and warns
+    when the median dt exceeds 2 ms, since a slow recording cannot reproduce the
+    arm's timing exactly. `--debounce` and `--debounce-ms` are mutually exclusive.
 
 ### Parity with the Python reference
 
@@ -54,7 +64,7 @@ differs by more than 0.05 N·m after the first `5/gain` seconds.
 
 ```
 uv run -q --no-project --with pin --with numpy python -I tools/contact/parity.py \
-    --observer-py observer.py --csv tour.csv --urdf arm.urdf --cpp r.csv [--gain 25]
+    --observer-py observer.py --csv tour.csv --urdf arm.urdf --cpp r.csv [--gain 25] [--tau-sign -1]
 ```
 
 ## On-arm bench steps
@@ -64,7 +74,8 @@ Each motion batch is confirmed with Swapnil before it runs.
 1. `observe`, no motion, 60 s: the still floor per joint.
 2. `observe`, the tour at speed 0.6, then 1.0, nobody touching: motion RMS and
    peak per joint, plus `would_trips`. Set `default` to about 3x the peak, rerun,
-   and expect `would_trips == 0`.
+   and expect `would_trips == 0`. When replaying a 50 Hz recording, pass
+   `--debounce-ms 5`.
 3. `observe`, still arm, slow hand pushes on the forearm and the tool: record `r`
    against the `/ee_state` wrench, which is exact at rest. This maps `θ` to force.
 4. `enforce`, slow move, hand push: trip, float, latch, `-11` on the goal,
