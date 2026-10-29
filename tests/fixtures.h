@@ -85,4 +85,19 @@ inline JointVec synth_tau(Dynamics& dyn, const Sinusoid& s, double t, const Join
   return M * s.qdd(t) + C * s.qd(t) + g - tau_e;
 }
 
+inline JointVec gravity(Dynamics& dyn, const JointVec& q) {
+  JointVec g;
+  dyn.gravity(q, g);
+  return g;
+}
+
+// Feedback of an arm at rest at q holding tau = g: the contact observer reads ~0.
+inline JointFeedback at_rest(const JointVec& q, const JointVec& g) {
+  JointFeedback fb;
+  fb.q = q;
+  fb.qd.setZero();
+  fb.tau = g;
+  return fb;
+}
+
 }  // namespace kinova::test_fixtures

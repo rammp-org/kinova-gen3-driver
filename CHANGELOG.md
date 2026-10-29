@@ -14,6 +14,23 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- **Contact stop in the Supervisor.** With a `ContactMonitor` in
+  `SupervisorDeps::contact`, a latch halts with the new
+  `HaltReason::kContact`: goals settle with the new
+  `result_code::kContactStop = -11` (`"halted: unexpected contact"`), and
+  while latched goals, stream opens (`kContactStop`, `"stopped on unexpected
+  contact; call /clear_faults"`) and gripper setpoints are refused. The latch
+  survives link outages. `Supervisor::clear_contact()` clears it and returns
+  the arm to the position hold at the measured pose. Threshold profiles
+  (`ContactProfile` `kSensitive` / `kDefault` / `kLoose` / `kCustom`,
+  `interface/contact.h`) are set through the token-gated
+  `CommandSink::on_set_contact_thresholds`. Anything non-finite, ≤ 0 or above
+  the ceiling is refused, naming the joint and the limit. State is read through
+  the ungated `on_query_contact`. Bad profiles in startup config throw from the
+  `Supervisor` constructor. **Breaking for exhaustive `switch`es on
+  `HaltReason`:** new `kContact`. The new `CommandSink` methods have defaults,
+  so existing sinks keep compiling.
+
 - **The driver no longer dies on arm-side events** (#96, #59, #100). New
   `ArmLink` (`arm_link.h`) owns the link lifecycle (`kConnecting` / `kRunning`
   / `kFaulted`) around `RtExecutor::run()`. An unreachable arm is retried
