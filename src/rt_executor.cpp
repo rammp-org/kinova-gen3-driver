@@ -1,6 +1,8 @@
 #include "kinova_lowlevel/rt_executor.h"
 
 #include <errno.h>
+#include <pthread.h>
+#include <sched.h>
 #include <time.h>
 
 #include <cstdint>
@@ -64,6 +66,28 @@ void RtExecutor::request_mode(ControlMode* m) noexcept {
 }
 
 void RtExecutor::run(std::atomic<bool>& stop) {
+  // Put this thread's scheduling back as it was when run() returns or throws.
+  // The caller may reuse the thread (ArmLink reconnects from it), and every
+  // thread created from it inherits its policy and affinity: KORTEX's TCP
+  // receive and keepalive threads would otherwise start at SCHED_FIFO on the RT
+  // core. mlockall and the cpu_dma_latency pin stay: they are process-wide.
+  struct RestoreScheduling {
+    int policy = SCHED_OTHER;
+    sched_param param{};
+    cpu_set_t cpus;
+    bool ok = false;
+    RestoreScheduling() {
+      CPU_ZERO(&cpus);
+      ok = pthread_getschedparam(pthread_self(), &policy, &param) == 0 &&
+           sched_getaffinity(0, sizeof(cpus), &cpus) == 0;
+    }
+    ~RestoreScheduling() {
+      if (!ok) return;
+      pthread_setschedparam(pthread_self(), policy, &param);
+      sched_setaffinity(0, sizeof(cpus), &cpus);
+    }
+  } restore_scheduling;
+
   // Best-effort RT setup (mlockall + SCHED_FIFO + affinity). Never throws; if it
   // fails (e.g. EPERM under non-sudo) the loop still runs at SCHED_OTHER.
   enable_rt(cfg_.rt);
@@ -113,6 +137,21 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     return true;
   };
 
+  // Consecutive good exchanges reporting a fault / not in low-level (exit_on_fault).
+  int faulty = 0, not_low_level = 0;
+  auto check_fault = [&]() {
+    faulty = fb.fault ? faulty + 1 : 0;
+    not_low_level = fb.low_level ? 0 : not_low_level + 1;
+    const char* why = nullptr;
+    if (faulty >= kFaultConfirmExchanges) why = "the arm reports a fault";
+    if (not_low_level >= kLeftLowLevelConfirmExchanges) why = "the base left low-level servoing";
+    if (!why) return;
+    char msg[160];
+    std::snprintf(msg, sizeof(msg), "RtExecutor: arm fault: %s", why);
+    std::fprintf(stderr, "%s\n", msg);
+    throw ArmFault(msg);
+  };
+
   // Seed one feedback read with the benign hold command so fb is populated and
   // the first control compute sees real joint state. A lost frame is retried:
   // no mode may see fb before one real read.
@@ -160,6 +199,8 @@ void RtExecutor::run(std::atomic<bool>& stop) {
 
     // 4. comm round-trip. On a miss fb still holds the last good feedback.
     const bool missed = !exchange_ok();
+    // A miss neither confirms nor clears a fault: fb is the last good feedback.
+    if (cfg_.exit_on_fault && !missed) check_fault();
     const int64_t t1 = ns_now();
     const uint32_t comm_ns = clamp_u32(t1 - t0);
 

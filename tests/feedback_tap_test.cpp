@@ -23,6 +23,10 @@ struct FakeTransport : Transport {
   void send(const JointCommand& c) override { last_cmd = c; }
   void receive(JointFeedback& fb) override { fb = to_return; }
   void safe_shutdown() override {}
+  void release_low_level() override { ++releases; }
+  bool arm_in_fault() override { return in_fault; }
+  int releases = 0;
+  bool in_fault = false;
 };
 
 JointFeedback fb_with_q(double v) {
@@ -87,4 +91,14 @@ TEST(FeedbackTap, ForwardsCommandsAndCallsToInner) {
   JointFeedback fb;
   tap.exchange(cmd, fb);
   EXPECT_NEAR(inner.last_cmd.torque[0], 3.0, 1e-12);  // reached the wrapped transport
+}
+
+TEST(FeedbackTap, ForwardsReleaseAndFaultQuery) {
+  FakeTransport inner;
+  Seqlock<JointFeedback> snap;
+  FeedbackTap tap(inner, snap);
+  tap.release_low_level();
+  EXPECT_EQ(inner.releases, 1);
+  inner.in_fault = true;
+  EXPECT_TRUE(tap.arm_in_fault());
 }

@@ -58,6 +58,8 @@ class GripperController : public Transport {
   void send(const JointCommand& c) override { inner_.send(stamp(c)); }
   void receive(JointFeedback& fb) override { inner_.receive(fb); }
   void safe_shutdown() override { inner_.safe_shutdown(); }
+  void release_low_level() override { inner_.release_low_level(); }
+  bool arm_in_fault() override { return inner_.arm_in_fault(); }
   void clear_faults() override { inner_.clear_faults(); }
 
  private:

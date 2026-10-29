@@ -24,6 +24,26 @@ struct ExecutorConfig {
   // isolated misses never add up.
   int max_window_misses = 5;
   int miss_window = 1000;  // exchanges
+  // End run() with ArmFault when feedback confirms the arm is no longer ours to
+  // command: JointFeedback::fault on kFaultConfirmExchanges good exchanges in a
+  // row, or !low_level on kLeftLowLevelConfirmExchanges. Off by default, so a
+  // caller that clears faults in place while the loop keeps running (the teleop
+  // app) keeps today's behaviour; ArmLink requires it.
+  bool exit_on_fault = false;
+};
+// Good exchanges in a row reporting a fault before run() gives up the arm: one
+// garbled frame must not drop it, a latched fault must, within a few ms.
+inline constexpr int kFaultConfirmExchanges = 3;
+// Good exchanges in a row with the base not reporting low-level servoing. Longer
+// than for a fault: the base's reported state may trail the switch into
+// low-level by a few frames (unmeasured), and a base that really left low-level
+// rejects the cyclic commands anyway (ArmRejected).
+inline constexpr int kLeftLowLevelConfirmExchanges = 50;
+// Thrown by RtExecutor::run() under exit_on_fault when feedback confirms a fault
+// or that the base left low-level servoing. The loop has stopped commanding.
+class ArmFault : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
 };
 // Thrown by RtExecutor::run() on comms loss: max_consecutive_misses exchange
 // timeouts in a row, max_window_misses within miss_window exchanges, or a mode
@@ -47,8 +67,11 @@ class RtExecutor {
   // exchange() is survived: the cycle keeps the last good feedback, skips
   // compute() so the previous command is re-sent unchanged, and is flagged
   // (CycleSample bit2). Throws CommsLost on comms loss (see ExecutorConfig);
-  // any other exception propagates as before.
+  // any other exception propagates as before. With exit_on_fault, throws
+  // ArmFault on a confirmed fault. May be called again after it returns or throws:
+  // a mode requested in between is adopted by the new run.
   void run(std::atomic<bool>& stop);
+  const ExecutorConfig& config() const noexcept { return cfg_; }
 
  private:
   Transport& t_;

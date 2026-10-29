@@ -3,6 +3,7 @@
 #include <ActuatorConfigClientRpc.h>
 #include <BaseClientRpc.h>
 #include <BaseCyclicClientRpc.h>
+#include <KDetailedException.h>
 #include <RouterClient.h>
 #include <SessionManager.h>
 #include <TransportClientTcp.h>
@@ -16,6 +17,7 @@
 #include <string>
 #include <thread>
 
+#include "kinova_lowlevel/arm_route.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/units.h"
 #include "kortex_cyclic.h"
@@ -53,6 +55,29 @@ k_api::ActuatorConfig::ControlMode to_kortex_mode(ActuatorMode m) {
 // and the first replies after entering low-level servoing are unmeasured, so it
 // keeps KORTEX's own default.
 constexpr std::chrono::milliseconds kSetupTimeout{3000};
+
+// Bound for the control-channel RPCs that hand the arm back or ask its state
+// (release_low_level(), arm_in_fault()). KORTEX's default is 3000 ms; a revert
+// over a dead TCP link (8 RPCs) would then block ~24 s.
+const k_api::RouterClientSendOptions kShortRpc{false, 0, 500};
+
+// One control-channel (TCP) RPC, with KORTEX's errors classified at the
+// boundary so no KORTEX type escapes: an error reply from the arm is
+// ArmRejected, an RPC timeout is TransportTimeout. KORTEX 2.8.0 reports an RPC
+// timeout only as a std::runtime_error whose text starts "timeout detected"
+// (e.g. "timeout detected: BaseClient::SetServoingMode", #59) -- the text is all
+// that tells it apart. Anything else propagates unchanged.
+template <class F>
+auto rpc(F&& f) -> decltype(f()) {
+  try {
+    return f();
+  } catch (const k_api::KDetailedException& e) {
+    throw ArmRejected(std::string("KortexTransport: arm rejected the request: ") + e.what());
+  } catch (const std::runtime_error& e) {
+    if (std::string(e.what()).rfind("timeout detected", 0) == 0) throw TransportTimeout(e.what());
+    throw;
+  }
+}
 }  // namespace
 
 struct KortexTransport::Impl {
@@ -79,6 +104,7 @@ struct KortexTransport::Impl {
   int n_ = 0;
   uint16_t frame_id_ = 0;
   bool connected_ = false;
+  bool unanswered_ = false;  // the last revert hit an RPC the arm never answered
   bool low_level_ = false;
 
   explicit Impl(std::string ip_in, std::string user_in, std::string password_in, int rx_prio,
@@ -138,7 +164,15 @@ struct KortexTransport::Impl {
         fault = true;
       }
     }
+    // The base's own fault banks and state too: an e-stop or a protective stop
+    // can fault the base with every actuator bank clear.
+    const auto& base = fb_.base();
+    if (base.fault_bank_a() != 0u || base.fault_bank_b() != 0u ||
+        base.active_state() == k_api::Common::ARMSTATE_IN_FAULT) {
+      fault = true;
+    }
     fb.fault = fault;
+    fb.low_level = base.active_state() == k_api::Common::ARMSTATE_SERVOING_LOW_LEVEL;
     // Gripper feedback from the interconnect. A robot with no interconnect gripper
     // reports zero motors -- record that as ABSENT rather than leaving position at 0,
     // which is indistinguishable from an attached, fully-open gripper.
@@ -238,6 +272,10 @@ KortexTransport::~KortexTransport() {
 
 void KortexTransport::connect() {
   auto& I = *impl_;
+  // With no direct route, connect() leaves by the default route and blocks ~127 s in TCP SYN
+  // retries. Fail the attempt at once instead, saying why.
+  if (const std::string p = arm_route_problem(I.ip); !p.empty())
+    throw std::runtime_error("KortexTransport: " + p);
   I.tcp = std::make_unique<k_api::TransportClientTcp>();
   I.udp = std::make_unique<k_api::TransportClientUdp>();
   I.tcp->connect(I.ip, kTcpPort);
@@ -279,19 +317,34 @@ void KortexTransport::connect() {
   I.base_cyclic = std::make_unique<k_api::BaseCyclic::BaseCyclicClient>(I.udp_router.get());
   I.act_cfg = std::make_unique<k_api::ActuatorConfig::ActuatorConfigClient>(I.tcp_router.get());
 
-  try {
-    I.base->ClearFaults();
-  } catch (...) {
-  }
-
-  I.n_ = I.base->GetActuatorCount().count();
+  // No ClearFaults() here: an arm that is faulted at connect stays faulted until
+  // someone clears it explicitly (ArmLink waits for that).
+  I.n_ = rpc([&] { return I.base->GetActuatorCount().count(); });
+  // A booting arm answers on its base before its actuators are up, and reports
+  // none: not ready yet (ArmLink retries), unlike a wrong count.
+  if (I.n_ == 0)
+    throw std::runtime_error("KortexTransport: the arm reports no actuators yet (still booting?)");
   // Guard the fixed-size JointVec: this build is compiled for kNumJoints DOF.
   // A robot reporting a different count would otherwise index out of bounds in
   // fill_feedback/write_command. Hard throw (see no-silent-footgun principle).
   if (I.n_ != kNumJoints) {
-    throw std::runtime_error(
+    // invalid_argument (a logic_error): a configuration error, not an arm event,
+    // so ArmLink lets it escape instead of retrying forever.
+    throw std::invalid_argument(
         "KortexTransport: robot reports " + std::to_string(I.n_) +
         " actuators but this build expects kNumJoints=" + std::to_string(kNumJoints));
+  }
+  // The count can arrive before every actuator has registered: right after a boot the
+  // base accepted low-level servoing, then refused SetControlMode on device 1
+  // (INVALID_DEVICE). A read on each actuator is refused the same way
+  // until it is up, and a failure here is retried (ArmLink), not latched.
+  for (int id = 1; id <= I.n_; ++id) {
+    try {
+      rpc([&] { return I.act_cfg->GetControlMode(id); });
+    } catch (const ArmRejected& e) {
+      throw std::runtime_error("KortexTransport: actuator " + std::to_string(id) +
+                               " not registered yet (still booting?): " + e.what());
+    }
   }
   I.connected_ = true;
 }
@@ -300,16 +353,31 @@ void KortexTransport::set_servoing_low_level() {
   auto& I = *impl_;
   k_api::Base::ServoingModeInformation sm;
   sm.set_servoing_mode(k_api::Base::ServoingMode::LOW_LEVEL_SERVOING);
-  I.base->SetServoingMode(sm);
+  rpc([&] { I.base->SetServoingMode(sm); });
+  // Set now, not after the seed: if the seed fails the base is already in
+  // low-level, and release_low_level() must still hand it back.
+  I.low_level_ = true;
 
   // Seed: read feedback, build a command echoing current positions, one Refresh.
   I.parse_feedback(I.cyclic_call(k_api::BaseCyclic::eUidRefreshFeedback, "", kSetupTimeout));
   I.cmd_.clear_actuators();
+  // Re-entry (after a reconnect or a cleared fault) must not resend the gripper
+  // target from before the outage: the operator may have moved it since. Clearing
+  // the submessage leaves the gripper uncommanded, as at first startup, until the
+  // next gripper command. (Cost: write_command's one-time allocation of that
+  // submessage now happens once per re-entry rather than once per process.)
+  I.cmd_.clear_interconnect();
+  // Seed torque with the measured torque (reaction-signed, so negated) rather
+  // than 0: after a link loss the revert may never have reached the arm, and an
+  // actuator still in TORQUE mode would take this seed as "apply nothing" and
+  // drop. In POSITION mode the field is ignored. The pumps that follow during a
+  // mode switch still send 0 (#92).
   for (int i = 0; i < I.n_; ++i) {
-    I.cmd_.add_actuators()->set_position(I.fb_.actuators(i).position());
+    auto* a = I.cmd_.add_actuators();
+    a->set_position(I.fb_.actuators(i).position());
+    a->set_torque_joint(-I.fb_.actuators(i).torque());
   }
   I.refresh(kSetupTimeout);
-  I.low_level_ = true;
 }
 
 void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
@@ -330,7 +398,7 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   for (int idx = 1; idx <= I.n_; ++idx) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
-    I.act_cfg->SetControlMode(cm_msg, idx);
+    rpc([&] { I.act_cfg->SetControlMode(cm_msg, idx); });
     pump();
   }
   for (int k = 0; k < 10; ++k) pump();
@@ -356,50 +424,72 @@ void KortexTransport::receive(JointFeedback& fb) {
   I.fill_feedback(fb);
 }
 
+void KortexTransport::release_low_level() {
+  auto& I = *impl_;
+  // Revert the robot only if we actually put it in low-level servoing / changed
+  // actuator control modes. Each RPC is bounded at kShortRpc. A refusal (an error
+  // reply: the link is up, that one request was rejected, e.g. a faulted
+  // actuator) moves on to the next; anything else (a timeout) stops the revert:
+  // a link that did not answer one will not answer the rest, and each would
+  // otherwise block for its own timeout.
+  if (!I.low_level_) return;
+  I.low_level_ = false;
+  bool ok = true;
+  auto attempt = [&](auto&& call) {
+    try {
+      call();
+    } catch (const k_api::KDetailedException&) {
+    } catch (...) {
+      ok = false;
+    }
+  };
+  if (I.act_cfg && I.n_ > 0) {
+    k_api::ActuatorConfig::ControlModeInformation cm_msg;
+    cm_msg.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
+    for (int idx = 1; ok && idx <= I.n_; ++idx)
+      attempt([&] { I.act_cfg->SetControlMode(cm_msg, idx, kShortRpc); });
+  }
+  if (ok && I.base) {
+    k_api::Base::ServoingModeInformation sm;
+    sm.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
+    attempt([&] { I.base->SetServoingMode(sm, 0, kShortRpc); });
+  }
+  // Let the mode/servoing revert settle before anything else talks to the arm
+  // (mirrors the validated prototype; avoids closing mid-transition). Skipped
+  // when the arm stopped answering: there is no transition to wait for.
+  if (ok) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  I.unanswered_ = !ok;
+}
+
+bool KortexTransport::arm_in_fault() {
+  auto& I = *impl_;
+  if (!I.base) throw TransportTimeout("KortexTransport: not connected");
+  const auto st = rpc([&] { return I.base->GetArmState(0, kShortRpc); });
+  return st.active_state() == k_api::Common::ARMSTATE_IN_FAULT;
+}
+
 void KortexTransport::safe_shutdown() {
   auto& I = *impl_;
   // NOTE: we do NOT early-return on !connected_. A connect() that threw partway
-  // leaves some network objects alive; they must still be torn down. We only
-  // skip the robot-STATE revert (below) when we never entered low-level mode.
+  // leaves some network objects alive; they must still be torn down.
+  release_low_level();
 
-  // Revert the robot to a safe state only if we actually put it in low-level
-  // servoing / changed actuator control modes.
-  if (I.low_level_) {
-    if (I.act_cfg && I.n_ > 0) {
-      k_api::ActuatorConfig::ControlModeInformation cm_msg;
-      cm_msg.set_control_mode(k_api::ActuatorConfig::ControlMode::POSITION);
-      for (int idx = 1; idx <= I.n_; ++idx) {
-        try {
-          I.act_cfg->SetControlMode(cm_msg, idx);
-        } catch (...) {
-        }
-      }
-    }
-    if (I.base) {
-      k_api::Base::ServoingModeInformation sm;
-      sm.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
-      try {
-        I.base->SetServoingMode(sm);
-      } catch (...) {
-      }
-    }
-    // Let the mode/servoing revert settle before tearing the session down
-    // (mirrors the validated prototype; avoids closing mid-transition).
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  }
-
-  if (I.tcp_sess) {
+  // CloseSession() takes no send options and waits KORTEX's default 3 s for a
+  // reply. Skip it when the revert found the arm not answering: the arm drops the
+  // session itself after the 2 s connection inactivity timeout set at connect.
+  if (I.tcp_sess && !I.unanswered_) {
     try {
       I.tcp_sess->CloseSession();
     } catch (...) {
     }
   }
-  if (I.udp_sess) {
+  if (I.udp_sess && !I.unanswered_) {
     try {
       I.udp_sess->CloseSession();
     } catch (...) {
     }
   }
+  I.unanswered_ = false;
   if (I.tcp_router) I.tcp_router->SetActivationStatus(false);
   if (I.udp_router) I.udp_router->SetActivationStatus(false);
   if (I.tcp) {
@@ -427,7 +517,6 @@ void KortexTransport::safe_shutdown() {
   I.udp.reset();
 
   I.connected_ = false;
-  I.low_level_ = false;
 }
 
 void KortexTransport::clear_faults() {

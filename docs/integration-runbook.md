@@ -203,3 +203,30 @@ These are correct-by-construction in sim but **unvalidated on hardware**:
 
 > **Reminder: the robot is off until we do this together. Never run
 > unattended.**
+
+## 8. Faults, disconnects, and an arm that is off
+
+The driver does not exit on any of these (`ArmLink`, see the
+[API reference](reference/api.md#armlink-arm_linkh)). What to expect, and what to do:
+
+| Situation | Driver | Arm | You |
+|---|---|---|---|
+| Arm off when the driver starts, or link renegotiating | `kConnecting`, retries every 1 s, logs `waiting for the arm` | — | Power the arm on; the driver connects by itself |
+| No direct route to the arm (the arm NIC has no address or no link) | `kConnecting`; each attempt fails at once with `no direct route to 192.168.1.10: it would leave via …` or `no link on …` | — | Fix the arm NIC (`nmcli connection up <profile>`); the driver connects by itself. An arm reached through a gateway (routed, NAT'd) is refused the same way: it must be on a local network |
+| Cable pulled, power lost (the red e-stop on this cell), link lost while running | goals halted, `kConnecting`, reconnects, then `kFaulted` (`connection lost: …`) | base control once back: the Kinova controller works | Clear the fault (`/clear_faults` in ROS) when you want the driver back |
+| E-stop / protective stop / fault | goals halted, `kFaulted`, arm handed back to the base | base control: the Kinova controller and the web app work | Clear the cause, then clear the fault (`/clear_faults` in ROS) |
+| Something else switches the arm out of low-level (web app) | same as a fault | base control | Clear when done |
+| Arm already in fault at driver start | `kFaulted`; the driver no longer clears it silently | — | Clear explicitly |
+
+To drive the arm by hand with the Kinova controller mid-session: fault it
+(web-app e-stop, or the red e-stop where it cuts power and the arm reboots),
+clear the arm's own fault and drive with the controller, then clear the
+driver's fault.
+The clear re-enters low-level and the arm holds where you left it. It never
+resumes an interrupted goal.
+
+Validated on the arm 2026-10-28 and 2026-10-29: start with the arm off then
+powered on, cable pull, web-app e-stop, another client switching the arm out of
+low-level, the red e-stop power cycle with the Kinova controller, and the arm
+NIC losing its address; feedback keeps flowing while faulted, and one clear
+recovers each. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.

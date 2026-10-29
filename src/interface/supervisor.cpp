@@ -20,6 +20,8 @@ static const char* halt_reason_string(HaltReason r) {
       return "halted: emergency stop";
     case HaltReason::kOperatorRequest:
       return "halted: operator request";
+    case HaltReason::kArmUnavailable:
+      return "halted: arm fault or connection lost";
   }
   return "halted";
 }
@@ -86,9 +88,16 @@ void Supervisor::stop() {
 void Supervisor::pump_loop() {
   const auto period = std::chrono::duration<double>(1.0 / cfg_.pump_hz);
   const auto t0 = clock::now();
+  uint32_t published_version = 0;  // the snapshot version last published
   while (running_.load(std::memory_order_acquire)) {
     JointFeedback fb;
-    if (snap_.load(fb)) {
+    // Only feedback new since the last publish. While the link reconnects
+    // nothing refreshes the snapshot, and while faulted ArmLink's polls may get
+    // no answer: republishing the last state with a fresh stamp would present a
+    // frozen pose as live. (Version 0: never written, the default JointFeedback.)
+    const uint32_t version = snap_.version();
+    if (version != published_version && snap_.load(fb)) {
+      published_version = version;
       ArmState s;
       s.q = fb.q;
       s.qd = fb.qd;
@@ -162,6 +171,14 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       if (have_active) action_.settle(active_id, r);
       if (have_queued)
         action_.settle(queued_id, r);  // ACCEPTed already; dropping it orphans the client
+      // A goal this thread promoted while the link was dropping may have requested
+      // its own mode after on_link_state lined position up. The next run must
+      // still adopt position, so line it up again. Keyed on readiness, not on hr:
+      // a second halt (an e-stop) arriving first overwrites the reason.
+      if (!ready_.load()) {
+        exec_.request_mode(&pos_);
+        active_mode_kind_.store(ControlModeKind::kPosition);
+      }
       // ONE load of the running mode: a backend on_stream_open landing between two
       // reads would bind traj_ to one sink and record the OTHER kind, which is the
       // silent mis-mapping traj_bound_kind_ exists to prevent.
@@ -274,6 +291,13 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         if (inbox_.empty()) break;
         in = inbox_.front();
         inbox_.pop_front();
+      }
+      if (in.halted) {
+        TrajectoryResult r;
+        r.error_code = result_code::kHalted;
+        r.error_string = halt_reason_string(in.why);
+        action_.settle(in.id, r);
+        continue;
       }
       if (in.cancel) {
         // Abort the whole chain and reset the executor to idle; the mode keeps
@@ -487,6 +511,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 
 // on_trajectory_goal (backend thread): fast pre-check only, no executor mutation.
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
+  if (!ready_.load()) return GoalResponse::kReject;               // faulted or reconnecting
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
   // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
@@ -520,13 +545,39 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
 }
 void Supervisor::on_trajectory_accepted(const GoalId& id, const TrajectoryGoal& g) {
   std::lock_guard<std::mutex> l(q_mtx_);
-  inbox_.push_back({id, g, false});
+  // The goal and accepted callbacks are separate, and the link can drop between
+  // them. on_link_state stores ready_ = false before on_halt takes q_mtx_, so
+  // either this push lands first and on_halt marks it halted, or this sees the
+  // link down. Either way the client gets a result and the arm never runs it.
+  if (!ready_.load())
+    inbox_.push_back({id, g, false, true, HaltReason::kArmUnavailable});
+  else
+    inbox_.push_back({id, g, false});
 }
 CancelResponse Supervisor::on_trajectory_cancel(const CancelRequest& c) {
   std::lock_guard<std::mutex> l(q_mtx_);
   inbox_.push_back({c.id, {}, true});
   return CancelResponse::kAccept;
 }
+// on_link_state (ArmLink's thread). Leaving kRunning: ArmLink's executor run has
+// already returned, so nothing is commanding. Refuse new work FIRST, then halt:
+// settle the goals, close the stream, stop stamping the gripper. Then line the
+// next run up to adopt position mode -- on_enter seeds it from fresh feedback and
+// drops every old target, which is what makes the arm hold where it IS after the
+// outage rather than where it was. Entering kRunning only re-admits work.
+void Supervisor::on_link_state(kinova::LinkState s) {
+  if (s == kinova::LinkState::kRunning) {
+    ready_.store(true);
+    return;
+  }
+  if (!ready_.exchange(false)) return;  // already down: one halt per outage
+  // Halt BEFORE recording the switch to position: close_stream() tears down the
+  // stream's own (still recorded) mode -- its hold, its watchdog.
+  on_halt(HaltReason::kArmUnavailable);
+  active_mode_kind_.store(ControlModeKind::kPosition);
+  exec_.request_mode(&pos_);
+}
+
 // on_halt (backend thread): latch + flush the queue, nothing else. The sampler owns
 // traj_ and settle(), so the control action happens there -- which keeps
 // settle-exactly-once true by construction rather than by careful reasoning.
@@ -536,9 +587,27 @@ void Supervisor::on_halt(HaltReason r) {
   // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
   // grip. Deliberately not a "safe" open -- anything held stays held rather than
   // being dropped from wherever the arm happened to be.
-  if (grip_) grip_->release();
+  if (grip_) {
+    // Under stream_mtx_, as on_gripper_setpoint's set_target is: a setpoint
+    // racing the halt then lands either before the release or not at all.
+    std::lock_guard<std::mutex> gl(stream_mtx_);
+    grip_->release();
+  }
   std::lock_guard<std::mutex> l(q_mtx_);
-  inbox_.clear();  // a halt must never sit behind queued trajectories
+  // A halt must never sit behind queued trajectories, but they were ACCEPTed:
+  // settle them (the sampler, after the halt) rather than drop them, or their
+  // clients wait for a result forever. Queued cancels have nothing left to do.
+  for (auto it = inbox_.begin(); it != inbox_.end();) {
+    if (it->cancel) {
+      it = inbox_.erase(it);
+    } else {
+      if (!it->halted) {
+        it->halted = true;
+        it->why = r;
+      }
+      ++it;
+    }
+  }
   halt_reason_ = r;
   halt_pending_ = true;
 }
@@ -645,10 +714,13 @@ void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
   // of Supervisor guarantees that today -- an Arbiter happens to serialise via its
   // own mutex, but two of the three in-tree wirings have no Arbiter, and a
   // multi-threaded ROS2 executor could call in from two callback threads at once.
-  // stream_mtx_ is reused rather than adding a second lock; on_halt's grip_->release()
-  // is a single relaxed-enough atomic store with no lock of its own (see supervisor.h),
-  // so this does not change its relationship to on_halt or introduce any new nesting.
+  // stream_mtx_ is reused rather than adding a second lock. on_halt releases the
+  // gripper under it too, so this never nests with another lock.
   std::lock_guard<std::mutex> l(stream_mtx_);
+  // While the arm is down, a setpoint would re-arm stamping that the halt
+  // released, and the gripper would move on its own at recovery. Dropped. Checked
+  // under the lock: on_link_state clears ready_ before on_halt's release.
+  if (!ready_.load()) return;
   grip_->set_target(s.command);
 }
 
@@ -684,6 +756,7 @@ StreamStatus Supervisor::on_query_stream() {
 }
 
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
+  if (!ready_.load()) return {false, result_code::kStreamRejected, "arm not ready"};
   if (in_flight_.load())
     return {false, result_code::kStreamRejected, "a trajectory goal is in flight"};
   // The next three checks are DELIBERATELY duplicated in StreamingSession::open.
@@ -736,6 +809,17 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   // would otherwise land its set_command_timeout(-1.0) on the FRESHLY opened
   // session, silently downgrading its watchdog to the mode default.
   std::lock_guard<std::mutex> l(stream_mtx_);
+  // The link may have dropped during the settle sleep. Its halt found no stream to
+  // close and lined position up for the next run, which the switch above may have
+  // overridden. Refuse, and line position up again. Checked under the lock: a drop
+  // after this point finds the session open and closes it.
+  if (!ready_.load()) {
+    active_mode_kind_.store(ControlModeKind::kPosition);
+    exec_.request_mode(&pos_);
+    return {false, result_code::kStreamRejected, "arm not ready"};
+  }
+  if (active_mode_kind_.load() != want)  // a goal or another open switched it meanwhile
+    return {false, result_code::kStreamRejected, "the mode changed during the open; retry"};
   // One deadline, pushed into the mode so it can make the OUTPUT safe at 1 kHz
   // while the session handles lifecycle at sampler rate. set_command_timeout is
   // CommandWatchdog::arm under the hood -- see Task 4.

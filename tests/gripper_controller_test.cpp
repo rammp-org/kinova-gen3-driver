@@ -179,3 +179,12 @@ TEST(GripperController, SetTargetClampsOutOfRangeFieldsToZeroOne) {
   EXPECT_NEAR(sim.last_command().gripper.speed, 0.0f, 1e-6f);
   EXPECT_NEAR(sim.last_command().gripper.force, 1.0f, 1e-6f);
 }
+
+TEST(GripperController, ForwardsReleaseAndFaultQuery) {
+  SimTransport sim(JointFeedback{});
+  GripperController gc(sim);
+  gc.release_low_level();
+  EXPECT_EQ(sim.releases.load(), 1);
+  sim.set_arm_fault(true);
+  EXPECT_TRUE(gc.arm_in_fault());
+}

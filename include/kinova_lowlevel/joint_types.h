@@ -25,6 +25,10 @@ struct JointFeedback {
   JointVec current = JointVec::Zero();
   uint64_t frame_id = 0;
   bool fault = false;
+  // False when the base reports it is not in low-level servoing: something (a
+  // protective stop, the web app, another client) took the arm back. Defaults to
+  // true so a transport with no notion of servoing modes reads as healthy.
+  bool low_level = true;
   GripperFeedback gripper{};
 };
 

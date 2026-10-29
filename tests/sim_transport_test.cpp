@@ -174,3 +174,59 @@ TEST(SimTransport, ReportsTheGripperAsPresent) {
   t.exchange(c, fb);
   EXPECT_TRUE(fb.gripper.present);  // the sim always has one
 }
+
+// Fault-injection knobs ArmLink's tests drive (never-crash design).
+TEST(SimTransport, InjectedFaultShowsInFeedbackAndQuery) {
+  SimTransport t(JointFeedback{});
+  JointCommand c;
+  JointFeedback fb;
+  t.set_arm_fault(true);
+  t.exchange(c, fb);
+  EXPECT_TRUE(fb.fault);
+  EXPECT_TRUE(t.arm_in_fault());
+  t.clear_faults();
+  t.exchange(c, fb);
+  EXPECT_FALSE(fb.fault);
+  EXPECT_FALSE(t.arm_in_fault());
+  EXPECT_EQ(t.clears.load(), 1);
+}
+TEST(SimTransport, StickyFaultSurvivesClear) {
+  SimTransport t(JointFeedback{});
+  t.set_arm_fault(true);
+  t.set_fault_sticky(true);
+  t.clear_faults();
+  EXPECT_TRUE(t.arm_in_fault());
+}
+TEST(SimTransport, FailConnectsThrowsThenSucceeds) {
+  SimTransport t(JointFeedback{});
+  t.fail_connects(2);
+  EXPECT_THROW(t.connect(), std::runtime_error);
+  EXPECT_THROW(t.connect(), std::runtime_error);
+  EXPECT_NO_THROW(t.connect());
+  EXPECT_EQ(t.connects.load(), 3);
+}
+TEST(SimTransport, LowLevelFeedbackKnob) {
+  SimTransport t(JointFeedback{});
+  JointCommand c;
+  JointFeedback fb;
+  t.exchange(c, fb);
+  EXPECT_TRUE(fb.low_level);
+  t.set_low_level_feedback(false);
+  t.exchange(c, fb);
+  EXPECT_FALSE(fb.low_level);
+}
+TEST(SimTransport, FailHealthThrowsTimeouts) {
+  SimTransport t(JointFeedback{});
+  t.fail_health(1);
+  EXPECT_THROW(t.arm_in_fault(), TransportTimeout);
+  EXPECT_FALSE(t.arm_in_fault());
+}
+TEST(SimTransport, ThrowOnExchangeHookRuns) {
+  SimTransport t(JointFeedback{});
+  t.throw_on_exchange([] { throw ArmRejected("sim: rejected"); });
+  JointCommand c;
+  JointFeedback fb;
+  EXPECT_THROW(t.exchange(c, fb), ArmRejected);
+  t.throw_on_exchange(nullptr);
+  EXPECT_NO_THROW(t.exchange(c, fb));
+}

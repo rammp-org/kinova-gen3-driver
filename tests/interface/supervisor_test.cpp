@@ -2174,3 +2174,216 @@ TEST(SupervisorGains, GainsAtOpenApplyToACompliantVelocityStream) {
   EXPECT_TRUE(f.imp.params().Kq.isApprox(want.Kq));
   EXPECT_DOUBLE_EQ(f.imp.params().max_tracking_error, want.max_tracking_error);
 }
+
+// --- Link state (never-crash design): the Supervisor as ArmLink's listener.
+
+TEST(SupervisorLink, GoalsAndStreamsRejectedWhileNotReady) {
+  SupFix f;
+  f.sup.start();
+  EXPECT_TRUE(f.sup.arm_ready());
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  EXPECT_FALSE(f.sup.arm_ready());
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+  interface::StreamOpenRequest r;
+  r.timeout_s = 1.0;
+  const interface::StreamOpenResult res = f.sup.on_stream_open(r);
+  EXPECT_FALSE(res.accepted);
+  EXPECT_EQ(res.message, "arm not ready");
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  EXPECT_TRUE(f.sup.arm_ready());
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.stop();
+}
+
+TEST(SupervisorLink, LinkDownHaltsTheActiveGoal) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 3;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_EQ(f.be.last_result().error_string, "halted: arm fault or connection lost");
+}
+
+TEST(SupervisorLink, LinkDownClosesTheStream) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kPosition;
+  r.timeout_s = 1.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  EXPECT_FALSE(f.sup.stream_is_open());
+  f.sup.stop();
+  f.teardown();
+}
+
+// A link that drops while a stream open sits in its mode-settle sleep: the open
+// must be refused, and the next run adopts position. (Here the open's mode
+// request lands before the halt's, so position wins without the re-request
+// too; the opposite order is a race this test can't stage.)
+TEST(SupervisorLink, LinkDownDuringStreamOpenRefusesIt) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  interface::StreamOpenResult res;
+  std::thread opener([&] { res = f.sup.on_stream_open(r); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));  // inside the settle sleep
+  f.teardown();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  opener.join();
+  EXPECT_FALSE(res.accepted);
+  EXPECT_FALSE(f.sup.stream_is_open());
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  f.stop = false;
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop();
+  f.teardown();
+  EXPECT_EQ(f.sim.last_command().mode, ActuatorMode::kPosition);
+}
+
+// The anti-goal: after an outage the arm holds where it IS, never drives back
+// toward a target from before it (the operator may have moved it meanwhile).
+TEST(SupervisorLink, ReconnectHoldsWhereTheArmIsNow) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 4;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  // The link drops: ArmLink's run() has returned before it tells the listener.
+  f.teardown();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sim.set_joint_positions(JointVec::Constant(-0.3));  // moved by hand meanwhile
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  f.stop = false;
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  f.sup.stop();
+  f.teardown();
+  const JointCommand c = f.sim.last_command();
+  EXPECT_EQ(c.mode, ActuatorMode::kPosition);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.position[i], -0.3, 1e-6) << "joint " << i;
+}
+
+// The pump publishes only feedback that is new since its last publish. While
+// reconnecting nothing refreshes the snapshot (the executor has stopped); while
+// faulted, ArmLink's polling does -- and if that polling gets no answer, the
+// frozen pose must not keep going out with fresh stamps either.
+TEST(SupervisorLink, OnlyFreshFeedbackIsPublished) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ASSERT_GT(f.be.state_count(), 0u);
+  f.teardown();  // the link went down: nothing exchanges any more
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));  // drain an in-flight publish
+  const size_t before = f.be.state_count();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_EQ(f.be.state_count(), before);
+  // Faulted, with ArmLink polling feedback through the tap: published again.
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  for (int i = 0; i < 10; ++i) {
+    JointFeedback fb;
+    f.tap.receive(fb);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_GT(f.be.state_count(), before);
+  // Still faulted, but the polls stop getting answers: the frozen pose stops too.
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  const size_t frozen = f.be.state_count();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  EXPECT_EQ(f.be.state_count(), frozen);
+  f.sup.stop();
+}
+
+// Never-commanded gripper, link down, a gripper setpoint arrives: dropped, so the
+// first frames after recovery leave the gripper uncommanded (review finding).
+TEST(SupervisorLink, GripperSetpointWhileDownIsDropped) {
+  SupFix f;
+  f.sup.start();
+  f.sup.on_link_state(kinova::LinkState::kFaulted);
+  interface::GripperSetpoint gs;
+  gs.command.position = 1.0f;
+  f.sup.on_gripper_setpoint(gs);
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.stop();
+  f.teardown();
+  EXPECT_FALSE(f.sim.last_command().gripper.active);
+}
+
+// A goal ACCEPTed (on_trajectory_accepted) after the link went down -- the
+// backend's goal and accepted callbacks are separate, and the link can drop
+// between them -- is settled HALTED, never driven after recovery.
+TEST(SupervisorLink, GoalAcceptedWhileDownIsSettledHalted) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.5, 2.0);
+  g.control_mode = interface::ControlModeKind::kImpedance;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 5;
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_EQ(f.be.last_result().error_string, "halted: arm fault or connection lost");
+  EXPECT_EQ(f.sim.last_command().mode, ActuatorMode::kPosition);  // never switched to impedance
+}
+
+// A halt settles goals still waiting in the inbox instead of dropping them: an
+// ACCEPTed goal dropped without a result leaves its client waiting forever.
+TEST(SupervisorLink, HaltSettlesGoalsStillInTheInbox) {
+  SupFix f;  // sampler not started: the goal stays in the inbox
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  interface::GoalId id{};
+  id[0] = 6;
+  f.sup.on_trajectory_accepted(id, g);
+  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
+  f.sup.start();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  f.sup.stop();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
+  EXPECT_EQ(f.be.last_result().error_string, "halted: emergency stop");
+}

@@ -14,7 +14,9 @@ using Token = std::array<uint8_t, 16>;   // 128-bit capability token; POD, alloc
 
 enum class ArbitrationMode { kEnforced, kDisabled };
 // The caller declares WHY the arm must stop; the supervisor decides HOW.
-enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
+// kArmUnavailable: the link to the arm went down (fault or connection lost; see
+// ArmLink). Raised by the Supervisor itself, never by a caller.
+enum class HaltReason { kOwnershipRevoked, kEmergencyStop, kOperatorRequest, kArmUnavailable };
 // Why the last streaming session ended. A client that was streaming happily and
 // suddenly has its setpoints refused needs to tell "you went quiet" apart from
 // "the driver could not solve for the pose you asked for" -- the second is a

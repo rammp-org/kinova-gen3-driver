@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <thread>
 
+#include "kinova_lowlevel/arm_link.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
@@ -82,7 +83,10 @@ struct SupervisorDeps {
   SupervisorConfig cfg{};
 };
 
-class Supervisor : public CommandSink, public StreamSink, public GripperSink {
+class Supervisor : public CommandSink,
+                   public StreamSink,
+                   public GripperSink,
+                   public kinova::LinkListener {
  public:
   explicit Supervisor(const SupervisorDeps& deps);
   ~Supervisor();
@@ -107,6 +111,13 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   void on_setpoint_pose(const PoseSetpoint&) override;
   void on_setpoint_twist(const TwistSetpoint&) override;
   StreamStatus on_query_stream() override;
+
+  // LinkListener (called on ArmLink's thread). Not kRunning: halt everything,
+  // refuse goals and streams, and have the next executor run adopt position mode
+  // seeded from fresh feedback. kRunning: accept work again. A Supervisor that
+  // is never told (no ArmLink) stays ready, as before.
+  void on_link_state(kinova::LinkState s) override;
+  bool arm_ready() const { return ready_.load(); }
 
   // GripperSink (called on the backend thread):
   void on_gripper_setpoint(const GripperSetpoint&) override;
@@ -136,6 +147,10 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
     GoalId id;
     TrajectoryGoal goal;
     bool cancel = false;
+    // ACCEPTed but overtaken by a halt (or accepted while the arm is down): the
+    // sampler settles it kHalted with `why` instead of running it.
+    bool halted = false;
+    HaltReason why = HaltReason::kOwnershipRevoked;
   };
   void sampler_loop();
   void pump_loop();
@@ -213,7 +228,8 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   // so a setpoint that has already passed admit() can never interleave with the
   // teardown's write into the same single-writer double buffer. It ALSO serialises
   // close_stream() against on_stream_open()'s tail, so a close still in flight
-  // cannot disarm the watchdog a re-open has just armed. Backend/sampler threads
+  // cannot disarm the watchdog a re-open has just armed, and serialises the
+  // gripper's set_target() against on_halt's release(). Backend/sampler threads
   // only -- never taken on the RT path, and never held across the mode settle.
   std::mutex stream_mtx_;
   JointVec stream_hold_q_ = JointVec::Zero();   // last-good measured q for the teardown hold
@@ -254,6 +270,9 @@ class Supervisor : public CommandSink, public StreamSink, public GripperSink {
   bool halt_pending_ = false;                               // guarded by q_mtx_
   HaltReason halt_reason_ = HaltReason::kOwnershipRevoked;  // guarded by q_mtx_
   Seqlock<ArmState> state_snap_;                            // pump -> query_state
+
+  // Written by on_link_state; read by the goal/stream/gripper pre-checks.
+  std::atomic<bool> ready_{true};
 
   std::atomic<bool> running_{false};
   std::thread sampler_, pump_;
