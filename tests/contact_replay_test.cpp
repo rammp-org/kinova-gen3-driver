@@ -47,3 +47,20 @@ TEST(ContactReplay, MissingFileThrows) {
   EXPECT_THROW(load_replay_csv(std::string(TEST_DATA_DIR) + "/nonexistent.csv"),
                std::runtime_error);
 }
+
+// 100 Hz input: 5 ms is under one row, so the time debounce is 1 row.
+TEST(ContactReplay, DebounceMsConvertsToRows) {
+  ReplayInput in = load_replay_csv(kCsv);
+  EXPECT_NEAR(median_dt(in.t), 0.01, 1e-9);
+  EXPECT_EQ(debounce_rows_from_ms(in.t, 5.0), 1);
+  EXPECT_EQ(debounce_rows_from_ms(in.t, 40.0), 4);
+  EXPECT_THROW(debounce_rows_from_ms(in.t, 0.0), std::invalid_argument);
+
+  // A one-row torque glitch on joint 1 puts r1 over theta for a single row. The row
+  // debounce of 5 misses it; the 5 ms debounce (1 row here) counts it.
+  in.tau[150][0] -= 20.0;
+  ReplayOptions o = options();
+  EXPECT_FALSE(replay(in, o).first_trip[0].valid);
+  o.debounce_cycles = debounce_rows_from_ms(in.t, 5.0);
+  EXPECT_TRUE(replay(in, o).first_trip[0].valid);
+}

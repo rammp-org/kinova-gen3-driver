@@ -19,6 +19,12 @@ struct ReplayInput {
 // Throws std::runtime_error on an unreadable file, a missing column or a malformed row.
 ReplayInput load_replay_csv(const std::string& path, double tau_sign = 1.0);
 
+// Median row spacing [s] (0 for fewer than two rows), and a time debounce as whole rows:
+// round(ms / median dt), at least 1. The RT monitor debounces cycles at 1 kHz, so a
+// slower recording needs this to count the same crossings.
+double median_dt(const std::vector<double>& t);
+int debounce_rows_from_ms(const std::vector<double>& t, double ms);
+
 struct ReplayOptions {
   std::string urdf_path;
   std::string ee_frame;

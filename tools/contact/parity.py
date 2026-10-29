@@ -5,10 +5,11 @@ largest |r_cpp - r_py| after the first 5/gain seconds. Exits 1 if any joint exce
 --tol (default 0.05 N·m).
 
     uv run -q --no-project --with pin --with numpy python -I tools/contact/parity.py \
-        --observer-py path/to/observer.py --csv in.csv --urdf arm.urdf --cpp r.csv [--gain 25]
+        --observer-py path/to/observer.py --csv in.csv --urdf arm.urdf --cpp r.csv [--gain 25] [--tau-sign -1]
 
 in.csv is the recording contact_replay read (columns t, q1..q7, qd1..qd7, tau1..tau7,
-tau already in command convention); r.csv is contact_replay's --out.
+tau in command convention, or raw core v1.2.0 with --tau-sign -1,
+matching contact_replay); r.csv is contact_replay's --out.
 """
 
 import argparse
@@ -37,6 +38,7 @@ def main():
     ap.add_argument("--urdf", required=True)
     ap.add_argument("--cpp", required=True)
     ap.add_argument("--gain", type=float, default=25.0)
+    ap.add_argument("--tau-sign", type=float, default=1.0)
     ap.add_argument("--tol", type=float, default=0.05)
     a = ap.parse_args()
 
@@ -48,7 +50,7 @@ def main():
 
     t = rec["t"]
     r_py = obs.run_observer(
-        obs.ArmModel(a.urdf), t, columns(rec, "q"), columns(rec, "qd"), columns(rec, "tau"), a.gain
+        obs.ArmModel(a.urdf), t, columns(rec, "q"), columns(rec, "qd"), a.tau_sign * columns(rec, "tau"), a.gain
     )
     r_cpp = columns(cpp, "r")
 
