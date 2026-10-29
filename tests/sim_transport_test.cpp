@@ -256,3 +256,28 @@ TEST(SimTransport, ExternalTorqueSubtractsFromReportedTau) {
   t.receive(fb);
   EXPECT_DOUBLE_EQ(fb.tau[1], 1.0);
 }
+
+TEST(SimTransport, GravityModelReportsGravityInPositionMode) {
+  JointFeedback init;
+  init.q << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7;
+  SimTransport t(init);
+  t.set_gravity_model([](const JointVec& q, JointVec& tau) { tau = 10.0 * q; });
+  JointFeedback fb;
+
+  JointCommand seed;  // kTorque, zero torque: echoed as before
+  t.exchange(seed, fb);
+  EXPECT_TRUE(fb.tau.isZero());
+
+  JointCommand pos;
+  pos.mode = ActuatorMode::kPosition;
+  t.exchange(pos, fb);
+  EXPECT_TRUE(fb.tau.isApprox(10.0 * init.q));
+
+  JointCommand vel;
+  vel.mode = ActuatorMode::kVelocity;
+  JointVec ext = JointVec::Zero();
+  ext[1] = 6.0;
+  t.set_external_torque(ext);
+  t.exchange(vel, fb);
+  EXPECT_TRUE(fb.tau.isApprox(10.0 * init.q - ext));
+}

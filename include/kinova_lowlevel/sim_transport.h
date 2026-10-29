@@ -49,6 +49,14 @@ class SimTransport : public Transport {
   // does not move: the sim has no dynamics. Lock-free (a Seqlock); one test thread
   // may call it while the loop runs.
   void set_external_torque(const JointVec& tau_ext) { tau_ext_.store(tau_ext); }
+  // The torque an arm under position/velocity control reports at rest: with a model
+  // set, a non-kTorque command sets tau = g(q) (then minus the external torque).
+  // Unset, such a command leaves tau at the last commanded torque. Set it before
+  // running; g is called on the exchanging thread and must not allocate, so pass a
+  // lambda over a Dynamics no other thread uses.
+  void set_gravity_model(std::function<void(const JointVec& q, JointVec& tau_out)> g) {
+    gravity_ = std::move(g);
+  }
   // After a clear_faults() that ends the fault, arm_in_fault() still reports it n
   // more times: the real arm takes a moment to leave IN_FAULT.
   void set_clear_lag(int n) { clear_lag_ = n; }
@@ -77,6 +85,7 @@ class SimTransport : public Transport {
   std::atomic<int> fail_connects_{0}, fail_health_{0}, clear_lag_{0}, lag_left_{0};
   std::atomic<bool> arm_fault_{false}, fault_sticky_{false}, low_level_fb_{true};
   std::function<void()> on_exchange_;
+  std::function<void(const JointVec&, JointVec&)> gravity_;
   Seqlock<JointVec> tau_ext_;
   JointVec tau_ext_seen_ = JointVec::Zero();  // last whole read: a torn one keeps it
 };

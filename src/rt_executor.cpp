@@ -231,6 +231,9 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     //     freeze this cycle and step 3 adopts it at the next boundary.
     const bool latched = contact_ && contact_->step(fb, dt_s, missed);
     bool frozen = false;
+    // !missed: never on stale fb. Only reachable latched-and-not-in-float after two
+    // misses in a row (step 3 deferred); the command is re-sent and the next good
+    // boundary adopts on_contact_.
     if (latched && active != on_contact_ && !missed) {
       if (active && active->required_modes() == on_contact_->required_modes()) {
         active->on_exit();

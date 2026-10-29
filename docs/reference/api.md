@@ -498,6 +498,11 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   `set_external_torque(tau_ext)` simulates a push: feedback `tau` reports what it
   otherwise would minus `tau_ext`, so the contact observer reads `+tau_ext` (the
   arm does not move). Lock-free; safe to call while the loop runs.
+  `set_gravity_model(g)` (before running): under a non-torque command, `tau`
+  reports `g(q)`, the torque holding the arm at rest, instead of the last
+  commanded torque (RtExecutor's seed sends zero torque, which a contact monitor
+  would read as an external `g(q)`). `g` must not allocate; give it its own
+  `Dynamics`. A kTorque command still echoes the commanded torque.
 - **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
   Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` first checks the
@@ -549,7 +554,7 @@ same shape, forward everything, and hook the one call each cares about:
 ```cpp
 struct CycleSample {
   uint64_t cycle_index;
-  uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;
+  uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;  // compute_ns includes the contact monitor's step
   uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout, bit3 contact latched
 };
 
