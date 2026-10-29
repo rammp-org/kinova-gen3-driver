@@ -354,6 +354,9 @@ void KortexTransport::set_servoing_low_level() {
   k_api::Base::ServoingModeInformation sm;
   sm.set_servoing_mode(k_api::Base::ServoingMode::LOW_LEVEL_SERVOING);
   rpc([&] { I.base->SetServoingMode(sm); });
+  // Set now, not after the seed: if the seed fails the base is already in
+  // low-level, and release_low_level() must still hand it back.
+  I.low_level_ = true;
 
   // Seed: read feedback, build a command echoing current positions, one Refresh.
   I.parse_feedback(I.cyclic_call(k_api::BaseCyclic::eUidRefreshFeedback, "", kSetupTimeout));
@@ -375,7 +378,6 @@ void KortexTransport::set_servoing_low_level() {
     a->set_torque_joint(-I.fb_.actuators(i).torque());
   }
   I.refresh(kSetupTimeout);
-  I.low_level_ = true;
 }
 
 void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {

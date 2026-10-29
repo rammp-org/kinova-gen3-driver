@@ -47,13 +47,16 @@ void ArmLink::set_state(LinkState s, const std::string& reason, bool announce) {
     changed = announce || st_.state != s;
     st_.state = s;
     st_.reason = reason;
-    if (clearing_) {
+    // A clear asked for in one faulted episode must not fire in the next. One
+    // accepted but not yet taken (the link dropped first) resolves here, to this
+    // state, so a caller waiting on clears_done still gets an answer. Under m_,
+    // as request_clear() is, so a request lands either before this or not at all.
+    const bool dropped = s != LinkState::kFaulted && clear_requested_.exchange(false);
+    if (clearing_ || dropped) {
       ++st_.clears_done;
       clearing_ = false;
     }
   }
-  // A clear asked for in one faulted episode must not fire in the next.
-  if (s != LinkState::kFaulted) clear_requested_.store(false);
   if (!changed) return;
   if (reason.empty())
     std::fprintf(stderr, "ArmLink: %s\n", to_string(s));

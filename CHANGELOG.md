@@ -30,8 +30,9 @@ that heading to the new version and bumps `package.xml`.
   (`on_link_state`): goals halt with `"halted: arm fault or connection lost"`
   (`HaltReason::kArmUnavailable`), work is refused while the arm is down, and
   after recovery the arm holds where it is now.
-- `Transport::release_low_level()` and `Transport::arm_in_fault()` (pure
-  virtual; implementers must add them). `ArmRejected` for an arm's error reply.
+- **Breaking for `Transport` implementers:** `Transport::release_low_level()`
+  and `Transport::arm_in_fault()` are pure virtual. **Breaking for exhaustive
+  `switch`es on `HaltReason`:** new `kArmUnavailable`. `ArmRejected` for an arm's error reply.
   `JointFeedback::low_level`. `ExecutorConfig::exit_on_fault` (default off) and
   `ArmFault`. `RtExecutor::config()`.
 
@@ -100,6 +101,9 @@ that heading to the new version and bumps `package.xml`.
   unanswered one (a dead link took ~24 s); a refused one moves on. Base fault banks and `ARMSTATE_IN_FAULT`
   now set `JointFeedback::fault`. `set_servoing_low_level()` drops the retained
   gripper command, so re-entry leaves the gripper uncommanded, as at startup.
+  So the standalone apps (benchmarks, checks) started on a faulted arm now stop
+  with `ArmRejected` instead of clearing it: clear it from the web app first.
+  They also get the route check.
 
 - **Breaking for `ArbitrationSink` implementers:** the override is now
   `grant(const std::string&, const std::optional<Token>& = std::nullopt)` (#89).

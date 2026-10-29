@@ -685,10 +685,10 @@ target at the last-good **measured** q.
 `HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
 raised by the `Supervisor` itself, never by a caller, from
 `Supervisor::on_link_state` (it is `ArmLink`'s `LinkListener`). Leaving
-`kRunning`, it refuses new goals and stream opens (`"arm not ready"`), requests
-position mode for the next executor run (seeded from fresh feedback, every old
-target dropped, so the arm holds where it is *now* after the outage), then
-halts. Gripper setpoints are dropped while the arm is down, and a goal ACCEPTed
+`kRunning`, it refuses new goals and stream opens (`"arm not ready"`), halts,
+then requests position mode for the next executor run (seeded from fresh
+feedback, every old target dropped, so the arm holds where it is *now* after the
+outage). Gripper setpoints are dropped while the arm is down, and a goal ACCEPTed
 after the drop is settled `kHalted` rather than run. Entering `kRunning`
 re-admits work. A `Supervisor` never told stays ready.
 

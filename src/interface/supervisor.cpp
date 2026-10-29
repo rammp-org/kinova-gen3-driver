@@ -171,6 +171,13 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       if (have_active) action_.settle(active_id, r);
       if (have_queued)
         action_.settle(queued_id, r);  // ACCEPTed already; dropping it orphans the client
+      // A goal this thread promoted while the link was dropping may have requested
+      // its own mode after on_link_state lined position up. The next run must
+      // still adopt position, so line it up again.
+      if (hr == HaltReason::kArmUnavailable && !ready_.load()) {
+        exec_.request_mode(&pos_);
+        active_mode_kind_.store(ControlModeKind::kPosition);
+      }
       // ONE load of the running mode: a backend on_stream_open landing between two
       // reads would bind traj_ to one sink and record the OTHER kind, which is the
       // silent mis-mapping traj_bound_kind_ exists to prevent.
@@ -579,7 +586,12 @@ void Supervisor::on_halt(HaltReason r) {
   // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
   // grip. Deliberately not a "safe" open -- anything held stays held rather than
   // being dropped from wherever the arm happened to be.
-  if (grip_) grip_->release();
+  if (grip_) {
+    // Under stream_mtx_, as on_gripper_setpoint's set_target is: a setpoint
+    // racing the halt then lands either before the release or not at all.
+    std::lock_guard<std::mutex> gl(stream_mtx_);
+    grip_->release();
+  }
   std::lock_guard<std::mutex> l(q_mtx_);
   // A halt must never sit behind queued trajectories, but they were ACCEPTed:
   // settle them (the sampler, after the halt) rather than drop them, or their
@@ -695,19 +707,19 @@ ArmState Supervisor::on_query_state() {
 
 void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
   if (!grip_) return;  // no gripper on this robot: a no-op, not an error
-  // While the arm is down, a setpoint would re-arm stamping that the halt
-  // released, and the gripper would move on its own at recovery. Dropped.
-  if (!ready_.load()) return;
   // Matches the six arm-setpoint siblings: GripperController::set_target is
   // documented as belonging to ONE non-RT thread (its double-buffer write is not
   // itself thread-safe against a second concurrent writer), and nothing upstream
   // of Supervisor guarantees that today -- an Arbiter happens to serialise via its
   // own mutex, but two of the three in-tree wirings have no Arbiter, and a
   // multi-threaded ROS2 executor could call in from two callback threads at once.
-  // stream_mtx_ is reused rather than adding a second lock; on_halt's grip_->release()
-  // is a single relaxed-enough atomic store with no lock of its own (see supervisor.h),
-  // so this does not change its relationship to on_halt or introduce any new nesting.
+  // stream_mtx_ is reused rather than adding a second lock. on_halt releases the
+  // gripper under it too, so this never nests with another lock.
   std::lock_guard<std::mutex> l(stream_mtx_);
+  // While the arm is down, a setpoint would re-arm stamping that the halt
+  // released, and the gripper would move on its own at recovery. Dropped. Checked
+  // under the lock: on_link_state clears ready_ before on_halt's release.
+  if (!ready_.load()) return;
   grip_->set_target(s.command);
 }
 
@@ -796,6 +808,17 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   // would otherwise land its set_command_timeout(-1.0) on the FRESHLY opened
   // session, silently downgrading its watchdog to the mode default.
   std::lock_guard<std::mutex> l(stream_mtx_);
+  // The link may have dropped during the settle sleep. Its halt found no stream to
+  // close and lined position up for the next run, which the switch above may have
+  // overridden. Refuse, and line position up again. Checked under the lock: a drop
+  // after this point finds the session open and closes it.
+  if (!ready_.load() || active_mode_kind_.load() != want) {
+    if (!ready_.load()) {
+      active_mode_kind_.store(ControlModeKind::kPosition);
+      exec_.request_mode(&pos_);
+    }
+    return {false, result_code::kStreamRejected, "arm not ready"};
+  }
   // One deadline, pushed into the mode so it can make the OUTPUT safe at 1 kHz
   // while the session handles lifecycle at sampler rate. set_command_timeout is
   // CommandWatchdog::arm under the hood -- see Task 4.

@@ -2234,6 +2234,34 @@ TEST(SupervisorLink, LinkDownClosesTheStream) {
   f.teardown();
 }
 
+// A link that drops while a stream open sits in its mode-settle sleep: the open
+// must be refused, and the next run must still adopt position, not the stream's
+// mode (which the halt has already moved away from).
+TEST(SupervisorLink, LinkDownDuringStreamOpenRefusesIt) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::StreamOpenRequest r;
+  r.kind = interface::SetpointKind::kJointPosition;
+  r.control_mode = interface::ControlModeKind::kImpedance;
+  r.timeout_s = 1.0;
+  interface::StreamOpenResult res;
+  std::thread opener([&] { res = f.sup.on_stream_open(r); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));  // inside the settle sleep
+  f.teardown();
+  f.sup.on_link_state(kinova::LinkState::kConnecting);
+  opener.join();
+  EXPECT_FALSE(res.accepted);
+  EXPECT_FALSE(f.sup.stream_is_open());
+  f.sup.on_link_state(kinova::LinkState::kRunning);
+  f.stop = false;
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  f.sup.stop();
+  f.teardown();
+  EXPECT_EQ(f.sim.last_command().mode, ActuatorMode::kPosition);
+}
+
 // The anti-goal: after an outage the arm holds where it IS, never drives back
 // toward a target from before it (the operator may have moved it meanwhile).
 TEST(SupervisorLink, ReconnectHoldsWhereTheArmIsNow) {

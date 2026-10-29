@@ -1,6 +1,6 @@
 # The driver never crashes — design
 
-Status: implemented 2026-10-27 on `feat/96-never-crash` (sim-tested; on-arm validation pending). Tracks #96 (items 4–7), #59, and option 1 of #100.
+Status: implemented 2026-10-27 on `feat/96-never-crash` (validated on the arm 2026-10-28 and 2026-10-29; see "On the arm"). Tracks #96 (items 4–7), #59, and option 1 of #100.
 
 ## Why
 
@@ -200,8 +200,8 @@ first timeout. A dead link doesn't answer the next six either. Decorators
 (`FeedbackTap`, `GripperController`) forward it. `SimTransport` implements it.
 
 **`KortexTransport::connect()`** stops calling `ClearFaults()`. Clearing is now
-explicit only. **`set_servoing_low_level()`** ends by setting all 7 actuators to
-POSITION (pumped, via `set_actuator_modes`). After a cable pull the actuators
+explicit only. **Re-entry** (`ArmLink`, right after `set_servoing_low_level()`)
+sets all 7 actuators to POSITION (pumped, via `set_actuator_modes`). After a cable pull the actuators
 may still be in TORQUE mode, and the first commands of a new run carry zero
 torque. On the first start this is redundant but harmless.
 
@@ -224,9 +224,11 @@ cost joint state, never the state machine: liveness comes from the
 
 **Supervisor** implements `LinkListener`:
 
-- leaving `kRunning`: store `active_mode_kind_ = kPosition`,
-  `exec_.request_mode(&pos_)`, then `on_halt(HaltReason::kArmUnavailable)`
-  (new enum value), and mark the arm not ready;
+- leaving `kRunning`: mark the arm not ready, `on_halt(HaltReason::kArmUnavailable)`
+  (new enum value), then store `active_mode_kind_ = kPosition` and
+  `exec_.request_mode(&pos_)` (halt first: `close_stream()` tears down the
+  stream's own, still recorded, mode). A stream open or a goal promotion that
+  races the drop re-lines position up (review, 2026-10-29);
 - entering `kRunning`: mark ready;
 - `on_trajectory_goal` rejects and `on_stream_open` refuses ("arm not ready")
   while not ready;
@@ -251,10 +253,11 @@ through its existing fixture.
   ready). A `try/catch` around `link.run()` logs a configuration error as
   FATAL and exits non-zero.
 - **`/clear_faults`** (`std_srvs/srv/Trigger`): calls `link.request_clear()`,
-  waits up to 5 s for the state to leave `kFaulted`, and answers with success
-  and the resulting state/reason. Own callback group so it never blocks state
+  waits up to 10 s (a reply deadline: the clear may finish later) for the clear
+  to resolve, and answers with success and the resulting state/reason. Own callback group so it never blocks state
   publishing. Not gated by the arbitration token (my call).
-- **Diagnostics** ("Arm" entry, already on `/diagnostics`): `kRunning` → OK,
+- **Diagnostics** (its own "Arm link" task; the "Arm" task goes STALE when
+  feedback is over 1 s old): `kRunning` → OK,
   `kFaulted` → ERROR with the reason, `kConnecting` → STALE "waiting for the
   arm at <ip>" with the reason of the last failed attempt. Values: `link_state`,
   `reason`, `faults`, `reconnects`.
