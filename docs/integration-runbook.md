@@ -225,7 +225,8 @@ driver's fault.
 The clear re-enters low-level and the arm holds where you left it. It never
 resumes an interrupted goal.
 
-Validated on the arm 2026-10-28: start with the arm unreachable, cable pull,
-web-app e-stop → controller → clear; feedback keeps flowing while faulted. Not
-yet run end to end: the red e-stop power cycle, and another client switching the
-arm out of low-level. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.
+Validated on the arm 2026-10-28 and 2026-10-29: start with the arm off then
+powered on, cable pull, web-app e-stop, another client switching the arm out of
+low-level, the red e-stop power cycle with the Kinova controller, and the arm
+NIC losing its address; feedback keeps flowing while faulted, and one clear
+recovers each. Spec: `docs/superpowers/specs/2026-10-27-never-crash-design.md`.

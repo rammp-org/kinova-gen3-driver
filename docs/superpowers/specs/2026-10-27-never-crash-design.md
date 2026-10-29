@@ -353,7 +353,31 @@ unsent UDP `connect()`; nothing goes on the wire. A failed check is an ordinary
 connect failure, retried at 1 s, with the interface named in the reason. It
 matters most on a direct cable to the arm (flatbot): an arm without power drops
 the carrier, NetworkManager removes the static address, and every attempt would
-otherwise leave by the default route. Not yet seen on the arm.
+otherwise leave by the default route.
+
+## On the arm (abra, 2026-10-29)
+
+All on one driver process (5 faults, 3 reconnects, never exited), holding in
+position mode throughout, host tuned (rx coalescing 8 µs / 1 frame):
+
+- Started with the arm off, then powered on: retried through the boot
+  (`actuator 1 not registered yet`), then `kRunning` by itself.
+- Web-app e-stop: `kFaulted`, feedback kept flowing; the first `/clear_faults`
+  succeeded.
+- Cable pull: `kConnecting` reported in the same millisecond as the comms
+  loss; reconnected; `kFaulted` (`connection lost`); one clear.
+- A second KORTEX client set single-level servoing: the next cycle was
+  refused (`WRONG_SERVOING_MODE`), `kFaulted`; one clear.
+- Red e-stop (power cut, arm reboots): rode out the reboot, `kFaulted`
+  without taking the arm back; driven with the Kinova controller; the clear
+  held the arm where it was left (within 0.002°).
+- `nmcli device disconnect eno1`: each attempt failed at once with
+  `no route to 192.168.1.10 (No route to host)` (the host's unreachable
+  fallback route plus the route check); on reconnect `kFaulted`, one clear.
+- 5 min holding afterwards: 300 105 cycles, 0 overruns, 0 comm timeouts, 0
+  dropped; compute p99 0.3 µs, wake jitter p99 0.1 µs.
+
+Every recovery held the arm within 0.0001° over 3 s.
 
 ## Not verified (needs the arm)
 
@@ -361,8 +385,6 @@ otherwise leave by the default route. Not yet seen on the arm.
 - What the 2F-85 does when left uncommanded after a re-entry (expected: the
   same as at first startup).
 - In which actuator mode the arm leaves the actuators after a cable pull.
-- The red e-stop (power cut → reboot) path end to end, and something else
-  switching the arm out of low-level (tested with a second KORTEX client).
 
 Attended validation (with Swapnil): arm off at start then powered on; cable pull
 while holding; e-stop → controller drive → `/clear_faults`; web app forcing
