@@ -14,6 +14,12 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- **`contact_replay`**, an offline tool that replays a recorded joint-state CSV
+  through the `ContactMonitor` (observe mode) to tune contact thresholds between
+  arm sessions, and `tools/contact/parity.py`, which checks its residual against
+  the Python reference observer. The core is `replay()` in `contact_replay.h`.
+  See `docs/guide/contact-detection.md`.
+
 - **Contact stop in the Supervisor.** With a `ContactMonitor` in
   `SupervisorDeps::contact`, a latch halts with the new
   `HaltReason::kContact`: goals settle with the new
