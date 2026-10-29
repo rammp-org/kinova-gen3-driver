@@ -213,6 +213,8 @@ class Supervisor : public CommandSink,
   std::mutex contact_mtx_;
   ContactProfile contact_profile_ = ContactProfile::kDefault;  // last accepted
   JointVec contact_theta_ = JointVec::Zero();                  // what it resolved to
+  // Set by clear_contact, exchanged by the sampler: resets its latch edge detector.
+  std::atomic<bool> contact_cleared_{false};
   SupervisorConfig cfg_;
   // Which joints wrap into (-pi, pi]. Derived from the URDF in the constructor and
   // handed to every TrajectoryExecutor this class builds, so the divergence guard

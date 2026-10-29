@@ -786,8 +786,11 @@ satisfies this by construction: it latches a flag and clears a deque.
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
-every goal still waiting in its inbox with `result_code::kHalted`, then holds
-the active mode's target at the last-good **measured** q.
+every goal still waiting in its inbox with `result_code::kHalted`
+(`result_code::kContactStop`, −11, for `kContact`), then holds the active mode's
+target at the last-good **measured** q. A goal the sampler had already taken from
+its inbox when the halt landed (for example while it slept through a mode settle)
+is settled the same way instead of being started.
 
 `HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
 raised by the `Supervisor` itself, never by a caller, from
@@ -812,7 +815,8 @@ with `RtExecutor::attach_contact`), the RT loop latches a contact stop and
 floats the arm itself; the `Supervisor` reacts at sampler rate.
 
 - **Halt.** The sampler calls `on_halt(HaltReason::kContact)` once per rising
-  edge of `ContactMonitor::latched()`. The active and queued goals settle
+  edge of `ContactMonitor::latched()`. A clear resets the edge, so a re-trip
+  after a clear halts again even if the sampler never saw the latch go down. The active and queued goals settle
   `result_code::kContactStop = -11` with `"halted: unexpected contact"`. A
   second halt landing before the sampler takes a pending contact halt (an
   ArmLink drop, an e-stop) keeps the contact reason.
