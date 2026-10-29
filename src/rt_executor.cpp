@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "kinova_lowlevel/contact_monitor.h"
+
 namespace kinova {
 
 namespace {
@@ -64,6 +66,11 @@ RtExecutor::RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg)
 
 void RtExecutor::request_mode(ControlMode* m) noexcept {
   requested_.store(m, std::memory_order_release);
+}
+
+void RtExecutor::attach_contact(ContactMonitor& monitor, ControlMode& on_contact) noexcept {
+  contact_ = &monitor;
+  on_contact_ = &on_contact;
 }
 
 void RtExecutor::run(std::atomic<bool>& stop) {
@@ -161,6 +168,10 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     throw ArmFault(msg);
   };
 
+  // Re-settle the contact observer for this run; the latch is kept, so a run that
+  // starts latched adopts on_contact_ at its first boundary (step 3).
+  if (contact_) contact_->on_run_start();
+
   // Seed one feedback read with the benign hold command so fb is populated and
   // the first control compute sees real joint state. A lost frame is retried:
   // no mode may see fb before one real read.
@@ -189,9 +200,17 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     const uint32_t wake_jitter = clamp_u32(t0 - boundary);
 
     // 3. adopt requested mode at this boundary. Deferred while the last exchange
-    //    missed: on_enter seeds from fb, which is then stale.
-    ControlMode* req =
-        misses == 0 ? requested_.exchange(nullptr, std::memory_order_acq_rel) : nullptr;
+    //    missed: on_enter seeds from fb, which is then stale. While the contact
+    //    latch is set, on_contact_ is the only mode adopted and requested_ is left
+    //    pending: the Supervisor's latest request is adopted after the clear.
+    ControlMode* req = nullptr;
+    if (misses == 0) {
+      if (contact_ && contact_->latched()) {
+        req = on_contact_;
+      } else {
+        req = requested_.exchange(nullptr, std::memory_order_acq_rel);
+      }
+    }
     if (req && req != active) {
       if (active) active->on_exit();
       // set_actuator_modes performs the pumping handshake; acceptable at a
@@ -217,11 +236,29 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     // 5. fault flag from feedback
     const bool fault = fb.fault;
 
+    // 5b. contact. A trip (never on a miss: the monitor skips stale feedback)
+    //     leaves on_contact_ to adopt: now when the actuator modes match, else a
+    //     freeze this cycle and step 3 adopts it at the next boundary.
+    const bool latched = contact_ && contact_->step(fb, dt_s, missed);
+    bool frozen = false;
+    if (latched && active != on_contact_ && !missed) {
+      if (active && active->required_modes() == on_contact_->required_modes()) {
+        active->on_exit();
+        on_contact_->on_enter(fb);
+        active = on_contact_;
+      } else {
+        cmd.position = fb.q;
+        cmd.velocity.setZero();
+        frozen = true;
+      }
+    }
+
     // 6. compute (or hold last cmd if no active mode). Skipped on a miss, so the
     //    next cycle re-sends this cycle's command unchanged: compute() on stale fb
     //    would still advance its integrators (JointVelocityMode's q_ref += qd*dt,
-    //    the reference rate limiters, watchdogs) with the arm unobserved.
-    if (active && !missed) {
+    //    the reference rate limiters, watchdogs) with the arm unobserved. Skipped
+    //    on a contact freeze, which must go out as set.
+    if (active && !missed && !frozen) {
       const double dt =
           last_compute_ns < 0 ? dt_s : std::min(double(t1 - last_compute_ns) * 1e-9, max_dt_s);
       last_compute_ns = t1;
@@ -246,7 +283,8 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     s.comm_ns = comm_ns;
     s.compute_ns = compute_ns;
     s.cycle_ns = clamp_u32(t2 - t0);
-    s.flags = uint16_t((overrun ? 1u : 0u) | (fault ? 2u : 0u) | (missed ? 4u : 0u));
+    s.flags = uint16_t((overrun ? 1u : 0u) | (fault ? 2u : 0u) | (missed ? 4u : 0u) |
+                       (latched ? 8u : 0u));
     ring_.push(s);  // drop-don't-block; return ignored on the RT path
   }
 }

@@ -126,7 +126,7 @@ class MonitoredGravComp : public ControlMode {
   MonitoredGravComp(JointTorqueMode& inner, ContactMonitor& mon) : inner_(inner), mon_(mon) {}
   ActuatorModes required_modes() const override { return inner_.required_modes(); }
   void on_enter(const JointFeedback& fb) override {
-    mon_.on_run_start();
+    mon_.on_run_start();  // harness shortcut: production calls it at RtExecutor::run start
     inner_.on_enter(fb);
   }
   void compute(const JointFeedback& fb, double dt_s, JointCommand& out) override {
