@@ -1,7 +1,10 @@
 #pragma once
+#include <Eigen/Core>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "kinova_lowlevel/contact_monitor.h"
 #include "kinova_lowlevel/joint_types.h"
 
 namespace kinova {
@@ -31,12 +34,28 @@ struct ReplayOptions {
   double gain = 25.0;
   int debounce_cycles = 5;
   JointVec theta = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  // The impulse trip (ContactMonitorConfig::impulse), off unless set.
+  bool impulse = false;
+  JointVec impulse_theta = JointVec::Zero();
+  double slow_tau_s = 0.2;
+  // Grasps and releases, each (begin, end) in recording time [s]: the tare window
+  // starts at `begin`, the weigh window at `end`, both weigh_window_s long, so pick
+  // the start of a still stretch before the gripper moves and after the lift.
+  std::vector<std::pair<double, double>> grasps;
+  Eigen::Vector3d grasp_com = Eigen::Vector3d(0.0, 0.0, 0.10);  // EE frame [m]
+  double weigh_window_s = 0.3;
 };
 
 struct ReplayTrip {
   bool valid = false;
-  double t = 0.0;  // time of the row that completed the debounce
-  double r = 0.0;  // that joint's residual at the trip [N·m]
+  double t = 0.0;        // time of the row that completed the debounce
+  double r = 0.0;        // that joint's residual at the trip [N·m]
+  bool impulse = false;  // reached on the fast band alone
+};
+
+struct ReplayWeigh {
+  double t = 0.0;  // time of the row that produced the outcome
+  WeighResult result;
 };
 
 struct ReplayStats {
@@ -46,6 +65,9 @@ struct ReplayStats {
   size_t moving_samples = 0;         // armed rows with max|qd| > kReplayMovingQd
   size_t would_trips = 0;            // what the RT monitor would count
   ReplayTrip first_trip[kNumJoints];
+  std::vector<ReplayTrip> trips;  // every would-trip in order, with its joint
+  std::vector<int> trip_joints;
+  std::vector<ReplayWeigh> weighs;  // every weigh outcome in order
 };
 
 constexpr double kReplayMovingQd = 0.02;  // [rad/s]

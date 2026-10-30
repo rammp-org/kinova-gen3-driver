@@ -21,6 +21,62 @@ is in the [contact-detection spec](https://github.com/rammp-org/kinova-gen3-ros2
    push along the arm) produces almost no joint torque. The pose check should
    report where the approach goes near such poses; the fix there is the approach.
 
+## The impulse trip
+
+`|r_i| > θ_i` trips on anything that pushes long enough: a hand leaning on the
+arm, hand-guiding, a resting contact, and the model's pose-dependent bias all sit
+in `r`, so `θ` has to sit above them. The optional impulse trip
+(`ContactMonitorConfig::impulse`) also reads the fast band, `r` minus its
+first-order average over `slow_tau_s` (0.2 s), and trips when
+`|fast_i| > impulse_theta_i` for the same debounce. A collision is abrupt and
+shows there; the slow things do not. A lean that builds over a second or two
+moves the fast band by about its rate times `slow_tau_s`: 2.5 N·m over 2 s is
+0.25 N·m. So `impulse_theta` can sit well under `θ`, and `θ` stays the backstop for
+a slow squeeze or a pin, which the fast band misses by design.
+
+Two numbers to keep in mind when choosing `impulse_theta`:
+
+- The fast band shows about 2/3 of a 150 ms push at K = 25 (the observer's 40 ms
+  rise against the 0.2 s average). Size thresholds against that, not the push.
+- Latency to a trip is the observer's rise plus the debounce: 30 to 40 ms for a
+  sharp tap.
+
+`ContactTrip::impulse` says which trip fired: true when the joint reached the
+debounce on the fast band alone.
+
+## Payload: grasp and release
+
+A held object's weight is external torque to the bare model: a 0.5 kg container
+puts a few N·m on the shoulder. The monitor compensates a declared `TipPayload`
+(mass, and centre of mass in the EE frame) by adding its gravity torque back to
+`r`. Only the monitor's view changes; the `Dynamics` the control modes share is
+not modified. The object's own inertia is not compensated: carried at speed, a
+0.5 kg bottle leaves about 0.2 N·m on the worst joint (1.5 kg: 0.6 N·m), against
+thresholds of 2 N·m and up.
+
+Declare a known payload with `set_payload` (validate with `validate_tip_payload`),
+or weigh it at the grasp:
+
+1. Arm still, gripper open: `request_load_change_begin()`. The monitor averages
+   `r` over `weigh_window_cycles` (300, so 0.3 s) and goes `kTaring` →
+   `kHolding`. Wait for `kHolding` before the gripper moves.
+2. Close, lift, hold still: `request_load_change_end(com)`, with `com` the
+   object's centre of mass in the EE frame (between the 2F-85 fingertips is about
+   `(0, 0, 0.10)`). The monitor averages again (`kWeighing`), fits the change as
+   a mass at `com`, and if it explains the change, compensates it from then on.
+3. Release is the same, and weighs back to empty. A fit under 50 g is empty.
+
+Taring right before the grasp, at nearly the weigh pose, cancels the model's
+pose-dependent bias, which is larger than a light object's torque. From the begin
+request until the outcome, both trips read `r` with the torques a held load can
+produce projected out (a vertical force and a horizontal moment at the EE: three
+of the seven directions), so the lift-off does not trip and a bump from the side,
+on the forearm or the elbow, still does. `ContactStatus::weigh` reports each
+outcome: `kOk`, or why not (`kNotStillAtTare`, `kNotStill`, `kUnexplained` when
+the change does not look like a load in the gripper, such as someone holding the
+arm, `kOutOfRange`, `kNoLoadChange`, `kAborted`). After any outcome but `kOk` and
+`kNotStillAtTare`, the load change stays open: request the end again.
+
 ## contact_replay
 
 `contact_replay` runs a recorded CSV through the same `ContactMonitor` (observe
@@ -31,7 +87,8 @@ built with the other apps (`cmake --build <dir> --target contact_replay`).
 contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
     --csv tour.csv --out r.csv \
     [--gain 25] [--debounce 5 | --debounce-ms 5] [--thresholds 8,8,6,6,2,2,2] \
-    [--tau-sign -1]
+    [--tau-sign -1] [--impulse 2,2,1.5,1.5,0.6,0.6,0.6] [--slow-tau 0.2] \
+    [--grasp BEGIN,END ...] [--grasp-com 0,0,0.10]
 ```
 
 `--ee-frame` is the end-effector link in the model you pass: the rendered
@@ -45,7 +102,11 @@ contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
 - **Output:** `r.csv` with `t, r1..r7`.
 - **Stdout:** per joint, RMS and peak `|r|` over the moving samples (max `|qd|` >
   0.02 rad/s, after the `5/gain` settle), the first would-be trip, and the total
-  `would_trips`.
+  `would_trips`, then every would-be trip (marked `impulse` when the fast band
+  tripped it) and every weigh outcome.
+- **`--grasp BEGIN,END`** replays a grasp or a release: the tare window starts at
+  `BEGIN` s and the weigh window at `END` s, each 0.3 s, so pick the start of a
+  still stretch before the gripper moves and after the lift. Repeatable.
 
 !!! warning "Debounce is counted in rows"
     The RT monitor debounces 5 cycles at 1 kHz, which is 5 ms. `--debounce N`
@@ -85,7 +146,8 @@ Each motion batch is confirmed with Swapnil before it runs.
    Also measure the observer transient at position↔impedance mode switches:
    `set_actuator_modes` integrates a nominal 1 ms over the handshake, so look at
    `r` across each switch.
-6. `observe` with real payloads (spoon, container): `r` while carrying. Then
+6. `observe` with real payloads (spoon, container): `r` while carrying, first
+   undeclared, then weighed at the grasp (`--grasp` in `contact_replay`). Then
    `enforce` with the same payloads: trip and check float with a payload heavier
    than the model. The expected risk is a slow, damped droop: the spring gives at
    most `K_s·δ` ≈ 1 N·m, against about 3 N·m on j2 from a 0.5 kg container.

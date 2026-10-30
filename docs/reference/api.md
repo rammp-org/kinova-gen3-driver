@@ -69,6 +69,7 @@ explicit Dynamics(const std::string& urdf_path,
 void gravity(const JointVec& q, JointVec& tau_out);   // RT-safe: generalized gravity torque
 Pose fk(const JointVec& q);                            // RT-safe: pose of ee_frame (world frame)
 void jacobian(const JointVec& q, Jacobian6& J_out);    // RT-safe: 6×7, LOCAL_WORLD_ALIGNED
+void tip_payload_regressor(const JointVec& q, TipRegressor& Y_out);  // RT-safe: 7×4
 int  nv() const;   // # velocity DOF (must be 7)
 int  nq() const;   // # config coords (>7: continuous joints packed as cos/sin)
 ```
@@ -78,6 +79,10 @@ int  nq() const;   // # config coords (>7: continuous joints packed as cos/sin)
 - **`jacobian`** uses Pinocchio's `LOCAL_WORLD_ALIGNED` reference frame: spatial
   velocity in world-aligned axes at the EE origin. `J_out` is filled in place
   (caller owns the fixed-size storage).
+- **`tip_payload_regressor`** gives `Y(q)` such that the gravity torque of a point
+  mass `m` held at `c` (EE frame) is `Y · (m, m·cx, m·cy, m·cz)`, in the `g(q)`
+  convention. It reads the model and adds nothing to it; `ContactMonitor` uses it
+  to compensate a held object without changing the model the control modes share.
 - See the [Deep Dive](../deep-dive/impedance.md#frames) on the frame convention.
 
 ### `pose_error` — `cartesian.h`

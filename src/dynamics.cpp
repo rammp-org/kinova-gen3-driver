@@ -146,6 +146,22 @@ void Dynamics::coriolis(const JointVec& q, const JointVec& qd, JointMat& C_out) 
   for (int i = 0; i < impl_->model.nv; ++i)
     for (int j = 0; j < impl_->model.nv; ++j) C_out(i, j) = impl_->data.C(i, j);
 }
+void Dynamics::tip_payload_regressor(const JointVec& q, TipRegressor& Y_out) {
+  impl_->pack(q);
+  Jacobian6 J = Jacobian6::Zero();  // fixed-size, on the stack
+  pinocchio::computeFrameJacobian(impl_->model, impl_->data, impl_->qcfg, impl_->frame_id,
+                                  pinocchio::LOCAL_WORLD_ALIGNED, J);
+  // computeFrameJacobian leaves the joint placements current; the frame needs its own.
+  pinocchio::updateFramePlacement(impl_->model, impl_->data, impl_->frame_id);
+  const Eigen::Matrix3d& R = impl_->data.oMf[impl_->frame_id].rotation();
+  const Eigen::Vector3d g = impl_->model.gravity.linear();
+  Eigen::Matrix3d gx;
+  gx << 0, -g.z(), g.y(), g.z(), 0, -g.x(), -g.y(), g.x(), 0;
+  // Potential of a point mass m at c: V = -m g.p(c), and dp(c) = (Jv - [R c]x Jw) dq, so
+  // dV/dq = -m Jv^T g + Jw^T [g]x R (m c).
+  Y_out.col(0) = -J.topRows<3>().transpose() * g;
+  Y_out.rightCols<3>() = J.bottomRows<3>().transpose() * gx * R;
+}
 void Dynamics::velocity_limits(JointVec& v_max) const {
   const pinocchio::Model& m = impl_->model;
   for (int i = 0; i < m.nv; ++i) {

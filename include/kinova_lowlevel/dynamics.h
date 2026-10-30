@@ -11,6 +11,9 @@ namespace kinova {
 struct UrdfXml {
   std::string xml;
 };
+// Gravity torque of a point mass held at the EE is linear in (m, m*c), c its centre of
+// mass in the EE frame: g_payload(q) = Y(q) * (m, m*cx, m*cy, m*cz).
+using TipRegressor = Eigen::Matrix<double, kNumJoints, 4>;
 class Dynamics {
  public:
   explicit Dynamics(const std::string& urdf_path,
@@ -40,6 +43,11 @@ class Dynamics {
   // no alloc after ctor. The Christoffel-consistent factorisation, so Mdot = C + C^T
   // and Mdot - 2C is skew-symmetric -- what a momentum observer needs (C^T qd).
   void coriolis(const JointVec& q, const JointVec& qd, JointMat& C_out);
+  // Y(q) for a point mass rigidly held at the EE frame, in the g(q) convention: the
+  // joint torque that holds it against gravity is Y * (m, m*c). Columns:
+  // [ -Jv^T g ,  Jw^T [g]x R ], with J the LOCAL_WORLD_ALIGNED Jacobian and R the EE
+  // rotation. RT-safe: no alloc after ctor. Reads the model; adds nothing to it.
+  void tip_payload_regressor(const JointVec& q, TipRegressor& Y_out);
   // Per-joint position limits [rad] from the URDF. Continuous joints report
   // +/-infinity: Pinocchio packs them (cos,sin) and their config-space limits are
   // [-1,1], which is meaningless as a joint angle. Reads the model only (never
