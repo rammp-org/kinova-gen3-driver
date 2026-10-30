@@ -26,9 +26,9 @@ at varying force and direction.
 
 ![Signed residual per joint, still arm, taps](img/contact-static-residual.png)
 
-Blue lines are ±live θ, dashed lines ±default θ. The 1 kHz counter logged 4 would-be
+Blue lines are ±live θ, dashed lines ±the starting defaults (now `sensitive`). The 1 kHz counter logged 4 would-be
 trips at the live thresholds: 49.5 s (j4 12.5, j6 5.3 N·m), 63.1 s (j4 about 12) and
-65.5 s (j2 17). Several more taps cross the default thresholds. The stretches at
+65.5 s (j2 17). Several more taps cross the starting defaults. The stretches at
 58–61 s and 79–81 s ring at about 5 Hz. That looks like the position hold
 oscillating after a tap, not separate taps.
 
@@ -40,13 +40,13 @@ Smallest force at the gripper (`arm_end_effector_link`, home pose) that takes so
 `|r_i|` past `θ_i`, including the rest offsets. The last column is the force that
 moves `r` 6σ off rest, which is the floor set by sensor noise.
 
-| direction | live θ | default θ | 6σ |
+| direction | live θ (now default) | starting default θ (now `sensitive`) | 6σ |
 |---|---|---|---|
 | ±x | 45–48 N (j4) | 22–25 N (j4) | 0.2 N |
 | ±y | 28–29 N (j3, j5) | 13–14 N (j3, j5) | 0.1 N |
 | ±z | 23–25 N (j6) | 11–13 N (j6) | 0.1 N |
 
-The default-θ column matches the earlier push test, where a downward push of about
+The starting-default column matches the earlier push test, where a downward push of about
 11 N on the gripper tripped j6.
 
 ## Moving, position-mode tour at speed 0.6
@@ -64,7 +64,7 @@ The two runs are aligned at motion onset, and their joint speeds overlay.
 - **Motion floor.** Motion raises the floor to about 3 N·m on j1 and j2, against 0.4
   and 1.3 still. It follows the accelerations, as in the earlier tours.
 - **Presses.** They reach 6–16 N·m on j1–j3, well clear of the motion floor. Several
-  cross the default thresholds.
+  cross the starting defaults.
 - **Live thresholds.** The 1 kHz counter logged none. The closest was j1 at 1.9 s:
   one 50 Hz sample at 16.32 against θ = 16, over for roughly 10–15 ms by
   interpolation. The debounce needs 5 consecutive 1 kHz samples over θ. A residual
