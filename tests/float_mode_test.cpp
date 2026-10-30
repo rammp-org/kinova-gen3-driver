@@ -133,10 +133,13 @@ TEST(FloatMode, AnchorFollowsWrapOnContinuousJoint) {
   fb.q[2] = M_PI - 0.001;
   m.on_enter(fb);
   for (int k = 0; k < 10; ++k) {
-    fb.q[2] = (k % 2) ? M_PI - 0.001 : -M_PI + 0.001;  // 2 mrad apart through the wrap
+    // 2 mrad apart through the wrap: past the wrap is 2 mrad ahead of the anchor, so
+    // the spring pulls back by K_s * 2 mrad (negative), never the far side's +K_s*band.
+    const bool past = k % 2 == 0;
+    fb.q[2] = past ? -M_PI + 0.001 : M_PI - 0.001;
     m.compute(fb, 0.001, c);
     dyn.gravity(fb.q, g);
-    EXPECT_LE(std::abs(c.torque[2] - g[2]), p.spring[2] * 0.0021) << k;
+    EXPECT_NEAR(c.torque[2] - g[2], past ? -p.spring[2] * 0.002 : 0.0, 1e-9) << k;
     EXPECT_NEAR(std::abs(m.anchor()[2]), M_PI - 0.001, 1e-9) << k;  // never dragged
   }
   // A real drag through the wrap: the anchor follows across it, the band still holds.
@@ -144,7 +147,9 @@ TEST(FloatMode, AnchorFollowsWrapOnContinuousJoint) {
     fb.q[2] = wrap_to_pi(M_PI - 0.001 + k * 0.1 * kDeg2Rad);
     m.compute(fb, 0.001, c);
     dyn.gravity(fb.q, g);
-    EXPECT_LE(std::abs(c.torque[2] - g[2]), p.spring[2] * p.drag_band_rad + 1e-9) << k;
+    // The anchor trails q, so the spring only ever pulls back: <= 0, at most K_s*band.
+    EXPECT_LE(c.torque[2] - g[2], 1e-12) << k;
+    EXPECT_GE(c.torque[2] - g[2], -p.spring[2] * p.drag_band_rad - 1e-9) << k;
   }
-  EXPECT_NEAR(std::abs(wrap_to_pi(fb.q[2] - m.anchor()[2])), p.drag_band_rad, 1e-9);
+  EXPECT_NEAR(wrap_to_pi(fb.q[2] - m.anchor()[2]), p.drag_band_rad, 1e-9);
 }

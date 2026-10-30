@@ -4,6 +4,7 @@
 // sees external torque through SimTransport::set_external_torque.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -451,6 +452,7 @@ TEST(ContactExecutor, MissGapStepsMeasuredTimeCapped) {
   constexpr uint64_t kGapAt = kPushAt;
   ContactStatus after{};
   bool read = false;
+  double peak = 0.0;  // max |r| over every status read after the gap
   w.bench.on_call = [&](uint64_t i) {
     if (i == kGapAt) w.sim.set_external_torque(push_j2(6.0));
     if (i == kGapAt || i == kGapAt + 1) {
@@ -460,6 +462,8 @@ TEST(ContactExecutor, MissGapStepsMeasuredTimeCapped) {
     // Call kGapAt+2 is the first good sample after the gap; its step ran in the
     // cycle before this call.
     if (i == kGapAt + 3) read = w.mon->status(after);
+    ContactStatus st;
+    if (i >= kGapAt + 3 && w.mon->status(st)) peak = std::max(peak, st.r.cwiseAbs().maxCoeff());
   };
   w.ex.request_mode(&w.pos);
   w.run_until(kGapAt + 50);
@@ -469,6 +473,7 @@ TEST(ContactExecutor, MissGapStepsMeasuredTimeCapped) {
   EXPECT_NEAR(after.r[1], 6.0, 0.05);
   for (int j = 0; j < kNumJoints; ++j)
     if (j != 1) EXPECT_LT(std::abs(after.r[j]), 0.05) << j;
-  EXPECT_LE(w.status().r.cwiseAbs().maxCoeff(), 6.05);  // and it stays there
+  EXPECT_LE(peak, 6.05);  // and it stays there: no overshoot in the window after
+  EXPECT_NEAR(w.status().r[1], 6.0, 0.05);
   EXPECT_EQ(w.status().would_trips, 1u);
 }

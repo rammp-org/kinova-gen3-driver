@@ -12,11 +12,14 @@ namespace {
 const std::string kUrdf = URDF_PATH;
 const std::string kCsv = std::string(TEST_DATA_DIR) + "/contact_synthetic.csv";
 
+// Test thresholds (N·m), not a threshold profile: the synthetic 6 N·m push is over j4's 3.
+const JointVec kTestTheta = (JointVec() << 4, 4, 3, 3, 1.2, 1.2, 1.2).finished();
+
 ReplayOptions options() {
   ReplayOptions o;
   o.urdf_path = kUrdf;
   o.ee_frame = "gen3_end_effector_link";
-  o.theta << 4, 4, 3, 3, 1.2, 1.2, 1.2;
+  o.theta = kTestTheta;
   return o;
 }
 }  // namespace

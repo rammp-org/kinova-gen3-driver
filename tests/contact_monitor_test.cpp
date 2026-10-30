@@ -20,12 +20,14 @@ constexpr int kDebounce = 5;
 constexpr int kSettleCycles = 200;  // 5/K at 1 kHz
 constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
-const JointVec kSensitive = (JointVec() << 4, 4, 3, 3, 1.2, 1.2, 1.2).finished();
-const JointVec kDefault = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+// Test thresholds (N·m), not the threshold profiles: a 6 N·m push on j2 is over
+// kThetaLow and under kThetaHigh.
+const JointVec kThetaLow = (JointVec() << 4, 4, 3, 3, 1.2, 1.2, 1.2).finished();
+const JointVec kThetaHigh = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
 const JointVec kCeiling = (JointVec() << 30, 30, 22, 22, 7, 7, 7).finished();
 
 ContactMonitorConfig config(ContactDetection d = ContactDetection::kEnforce,
-                            const JointVec& theta = kDefault) {
+                            const JointVec& theta = kThetaHigh) {
   ContactMonitorConfig c;
   c.detection = d;
   c.gain = kGain;
@@ -110,7 +112,7 @@ TEST(ContactMonitor, NoTripDuringSettling) {
 }
 
 TEST(ContactMonitor, EnforceLatchesOnSustainedPush) {
-  Rig rig(config(ContactDetection::kEnforce, kSensitive));
+  Rig rig(config(ContactDetection::kEnforce, kThetaLow));
   const int first = rig.run(kSettleCycles + kDebounce + 2, push(1, 6.0));
   ASSERT_GE(first, 0);
   EXPECT_GE(first, kSettleCycles + kDebounce - 1);
@@ -127,8 +129,8 @@ TEST(ContactMonitor, EnforceLatchesOnSustainedPush) {
   EXPECT_GT(st.last.r[1], 4.0);
   EXPECT_NEAR(st.last.r[1], 6.0, 0.1);
   for (int j = 0; j < kNumJoints; ++j)
-    if (j != 1) EXPECT_LT(std::abs(st.last.r[j]), kSensitive[j]) << j;
-  EXPECT_EQ(st.last.theta, kSensitive);
+    if (j != 1) EXPECT_LT(std::abs(st.last.r[j]), kThetaLow[j]) << j;
+  EXPECT_EQ(st.last.theta, kThetaLow);
   EXPECT_EQ(st.last.q, rest().q0);
   EXPECT_EQ(st.last.qd, JointVec::Zero());
 }
@@ -159,7 +161,7 @@ TEST(ContactMonitor, DebounceRejectsShortSpike) {
 }
 
 TEST(ContactMonitor, ObserveCountsButNeverLatches) {
-  Rig rig(config(ContactDetection::kObserve, kSensitive));
+  Rig rig(config(ContactDetection::kObserve, kThetaLow));
   const JointVec press = push(1, 6.0);
   EXPECT_EQ(rig.run(1000, press), -1);  // a sustained push is one crossing
   ContactStatus st = rig.status();
@@ -180,7 +182,7 @@ TEST(ContactMonitor, ObserveCountsButNeverLatches) {
 }
 
 TEST(ContactMonitor, LatchHoldsWithoutClear) {
-  Rig rig(config(ContactDetection::kEnforce, kSensitive));
+  Rig rig(config(ContactDetection::kEnforce, kThetaLow));
   ASSERT_GE(rig.run(kSettleCycles + kDebounce + 2, push(1, 6.0)), 0);
   int released = 0;
   for (int k = 0; k < 10000; ++k)
@@ -207,7 +209,7 @@ TEST(ContactMonitor, LatchHoldsWithoutClear) {
 
 // Review Focus 3: blind for 5/K after the clear, then a new trip.
 TEST(ContactMonitor, ClearWhilePressedRetripsAfterSettle) {
-  Rig rig(config(ContactDetection::kEnforce, kSensitive));
+  Rig rig(config(ContactDetection::kEnforce, kThetaLow));
   const JointVec press = push(1, 6.0);
   ASSERT_GE(rig.run(kSettleCycles + kDebounce + 2, press), 0);
   EXPECT_TRUE(rig.step(press));
@@ -272,9 +274,9 @@ TEST(ContactMonitor, NonFiniteSampleSkipped) {
   {
     // A bad sample leaves the debounce count where it was.
     Rig rig(config());
-    const JointVec press = push(1, 6.0);  // under the default 8
+    const JointVec press = push(1, 6.0);  // under kThetaHigh's 8
     ASSERT_EQ(rig.run(500, press), -1);
-    rig.mon().set_thresholds(kSensitive);  // now over 4
+    rig.mon().set_thresholds(kThetaLow);  // now over 4
     EXPECT_EQ(rig.run(kDebounce - 2, press), -1);
     JointFeedback fb = rig.feedback(press);
     fb.tau[1] = kNaN;
@@ -326,7 +328,7 @@ TEST(ContactMonitor, MissedFramesDoNotStepObserver) {
     Rig rig(config());
     const JointVec press = push(1, 6.0);
     ASSERT_EQ(rig.run(500, press), -1);
-    rig.mon().set_thresholds(kSensitive);
+    rig.mon().set_thresholds(kThetaLow);
     EXPECT_EQ(rig.run(kDebounce - 2, press), -1);
     for (int i = 0; i < 3; ++i) EXPECT_FALSE(rig.step_fb(rig.feedback(press), true));
     EXPECT_FALSE(rig.step(press));
@@ -368,18 +370,18 @@ TEST(ContactMonitor, ThresholdChangeTakesEffectNextCycle) {
   Rig rig(config());
   const JointVec press = push(1, 6.0);
   ASSERT_EQ(rig.run(500, press), -1);
-  EXPECT_EQ(rig.status().theta, kDefault);
-  rig.mon().set_thresholds(kSensitive);
-  EXPECT_EQ(rig.status().theta, kDefault);  // published by the RT side, not by the setter
+  EXPECT_EQ(rig.status().theta, kThetaHigh);
+  rig.mon().set_thresholds(kThetaLow);
+  EXPECT_EQ(rig.status().theta, kThetaHigh);  // published by the RT side, not by the setter
   EXPECT_FALSE(rig.step(press));
-  EXPECT_EQ(rig.status().theta, kSensitive);
+  EXPECT_EQ(rig.status().theta, kThetaLow);
   EXPECT_EQ(rig.run(kDebounce - 2, press), -1);
   EXPECT_TRUE(rig.step(press));  // the count started on the cycle after the change
-  EXPECT_EQ(rig.status().last.theta, kSensitive);
+  EXPECT_EQ(rig.status().last.theta, kThetaLow);
 }
 
 TEST(ContactMonitor, OnRunStartResettlesButKeepsLatch) {
-  Rig latched(config(ContactDetection::kEnforce, kSensitive));
+  Rig latched(config(ContactDetection::kEnforce, kThetaLow));
   ASSERT_GE(latched.run(kSettleCycles + kDebounce + 2, push(1, 6.0)), 0);
   latched.mon().on_run_start();
   EXPECT_TRUE(latched.mon().latched());
@@ -400,7 +402,7 @@ TEST(ContactMonitor, OnRunStartResettlesButKeepsLatch) {
 // A clear requested while no run is going (the link down, latched) is consumed by
 // the next run start, so that run starts unlatched and settling.
 TEST(ContactMonitor, OnRunStartConsumesAPendingClear) {
-  Rig rig(config(ContactDetection::kEnforce, kSensitive));
+  Rig rig(config(ContactDetection::kEnforce, kThetaLow));
   ASSERT_GE(rig.run(kSettleCycles + kDebounce + 2, push(1, 6.0)), 0);
   ASSERT_TRUE(rig.mon().latched());
   rig.mon().request_clear();
@@ -412,11 +414,11 @@ TEST(ContactMonitor, OnRunStartConsumesAPendingClear) {
 }
 
 TEST(ContactThresholds, ValidateRefusesAndNamesJoint) {
-  EXPECT_TRUE(validate_contact_thresholds(kDefault, kCeiling).ok);
+  EXPECT_TRUE(validate_contact_thresholds(kThetaHigh, kCeiling).ok);
   EXPECT_TRUE(validate_contact_thresholds(kCeiling, kCeiling).ok);  // at the ceiling is allowed
   for (const double bad :
        {kNaN, std::numeric_limits<double>::infinity(), 0.0, -1.0, kCeiling[4] + 0.1}) {
-    JointVec theta = kDefault;
+    JointVec theta = kThetaHigh;
     theta[4] = bad;
     const ThresholdCheck c = validate_contact_thresholds(theta, kCeiling);
     EXPECT_FALSE(c.ok) << bad;
@@ -426,7 +428,7 @@ TEST(ContactThresholds, ValidateRefusesAndNamesJoint) {
   }
   JointVec ceiling = kCeiling;
   ceiling[2] = kNaN;  // a NaN ceiling must not let everything through
-  const ThresholdCheck c = validate_contact_thresholds(kDefault, ceiling);
+  const ThresholdCheck c = validate_contact_thresholds(kThetaHigh, ceiling);
   EXPECT_FALSE(c.ok);
   EXPECT_NE(c.message.find("joint 3"), std::string::npos) << c.message;
 }
@@ -472,7 +474,7 @@ TEST(ContactMonitor, CtorRejectsBadConfig) {
   EXPECT_FALSE(ok.latched());
   ContactStatus st;
   ASSERT_TRUE(ok.status(st));  // published from construction
-  EXPECT_EQ(st.theta, kDefault);
+  EXPECT_EQ(st.theta, kThetaHigh);
   EXPECT_EQ(st.phase, ContactPhase::kSettling);
   EXPECT_EQ(st.detection, ContactDetection::kObserve);
 }
