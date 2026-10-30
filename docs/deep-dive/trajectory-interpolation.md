@@ -107,9 +107,9 @@ It happens in two cases:
   the curve swings past its endpoints. A realistic source is a client that
   dilates `t` but forgets `v·s` and `a·s²` (RAMMP-CuRobo's `scaled_msg`
   does all three). Compressing the timestamps (`k < 1`) makes the tangents
-  too short instead. In the measurement below that stays inside the hull
-  (8.5e-5 rad cubic at ×0.5), but the result no longer follows the plan's
-  path either.
+  too short instead. In the measurement below that leaves the hull by less
+  than the consistent plan does (8.5e-5 rad cubic, 1.0e-4 rad quintic at
+  ×0.5), but the result no longer follows the plan's path either.
 
 **The path-tolerance guard will not report it.** `TrajectoryExecutor::tick`
 compares the measured `q` against `q_desired = sample(...)`, the interpolated
@@ -121,8 +121,10 @@ Measured by
 the worst excursion beyond the endpoint hull, on any joint, scanning each
 segment at 1/200 of its span. The plan is 144 points over 2.88 s (20 ms, a
 cuRobo-sized plan) of per-joint sines with amplitudes of 0.5–1.1 rad and
-peak velocities up to 2.75 rad/s, so every joint reverses at least once. That
-is faster than a real Gen3 plan, so treat the numbers as an upper bound.
+peak velocities up to 2.75 rad/s and peak accelerations up to 6.9 rad/s², so
+every joint reverses at least once. The excursion at a reversal scales with
+acceleration, so a plan with higher accelerations shows proportionally more
+in the first row.
 
 | plan | cubic | quintic |
 | --- | --- | --- |
@@ -134,8 +136,9 @@ is faster than a real Gen3 plan, so treat the numbers as an upper bound.
 
 With consistent derivatives the excursion equals the analytic curve's own
 peak between samples (2.1e-4 rad), so Hermite adds nothing measurable on top
-of the plan. With mismatched derivatives it grows fast, and quintic grows
-fastest because its acceleration error scales with `k²`. At ×10, which is a
+of the plan. With mismatched derivatives it grows fast. Quintic tolerates a
+moderate mismatch better than cubic, then overtakes it between ×4 and ×10 as
+its `k²` acceleration error dominates. At ×10, which is a
 0.1 speed scale applied to the timestamps only, the quintic reference
 leaves the checked corridor by 1.8° on the worst joint.
 

@@ -393,12 +393,14 @@ TEST(TrajectorySample, CubicHermiteIsC1WhereLinearIsNot) {
 
 TEST(TrajectorySample, QuinticMatchesEndpointPositionVelocityAndAcceleration) {
   // Acceleration is checked against the analytic p''(u)/span^2 (sample_target's
-  // qdd; DerivativesMatchFiniteDifferencesOfSample ties it to q), from both
-  // sides of every knot. This replaces a one-sided second difference of
-  // sample() whose tolerance had to be tuned to its step h (#22). The analytic
-  // value needs no h, so the check is exact at any spacing: n = 6 is the
+  // qdd) from both sides of every knot, exact at any spacing: n = 6 is the
   // original fixture (span 0.4 s), n = 55 the span-0.037 s case #22 raised, and
-  // n = 144 over 2.88 s a 20 ms cuRobo plan.
+  // n = 144 over 2.88 s a 20 ms cuRobo plan. qdd alone could match while q
+  // drops its acceleration terms, so a centred second difference of sample()
+  // across each knot ties the commanded curve to it. Centred, at h = 1e-4, its
+  // error is ~1e-7 roundoff plus O(h) from the jerk step at the knot; the old
+  // one-sided form had O(h) truncation and needed its tolerance tuned to h.
+  const double h = 1e-4;
   struct Case {
     int n;
     double dur;
@@ -417,6 +419,10 @@ TEST(TrajectorySample, QuinticMatchesEndpointPositionVelocityAndAcceleration) {
         EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3);
         EXPECT_NEAR(right.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " right accel j=" << j;
         EXPECT_NEAR(left.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " left accel j=" << j;
+        const double curve_acc =
+            (sample(tr, w.t_s + h)[j] - 2.0 * sample(tr, w.t_s)[j] + sample(tr, w.t_s - h)[j]) /
+            (h * h);
+        EXPECT_NEAR(curve_acc, w.qdd[j], 1e-2) << "n=" << c.n << " curve accel j=" << j;
       }
     }
   }
@@ -481,7 +487,7 @@ TEST(TrajectorySample, QuinticDegeneraciesAreSafe) {
   const kinova::JointTarget mid = sample_target(ns, 5e-10);
   EXPECT_TRUE(mid.q.allFinite() && mid.qd.allFinite() && mid.qdd.allFinite());
   EXPECT_NEAR(mid.q[0], 0.3 + 2.5e-10, 1e-12);
-  EXPECT_NEAR(mid.qd[0], 0.5, 1e-3);
+  EXPECT_NEAR(mid.qd[0], 0.5, 1e-3);  // qdd: finite only; 1/T^2 amplifies q's rounding
 }
 
 TEST(TrajectorySample, AccelerationsWithoutVelocitiesFallBackToLinear) {
@@ -517,12 +523,12 @@ TEST(TrajectorySample, HermiteCanLeaveTheWaypointHullWhenDerivativesMismatchTime
   // (b) the same plan re-timed (timestamps x s) without recomputing qd/qdd, as
   // when a client dilates t but forgets v*s and a*s^2. At s = 10 (a 0.1 speed
   // scale) the excursion is ~27x (cubic) and ~150x (quintic) the consistent
-  // plan's: quintic is worse because its acceleration error grows as s^2.
+  // plan's: quintic's acceleration error grows as s^2 and dominates by then.
   auto retimed = [](Trajectory tr, double s) {
     for (auto& w : tr.points) w.t_s *= s;
     return tr;
   };
-  for (double s : {1.0, 2.0, 4.0, 10.0, 20.0})
+  for (double s : {0.5, 1.0, 2.0, 4.0, 10.0, 20.0})
     std::printf("hull excursion, re-timed x%g: cubic %.3g rad, quintic %.3g rad\n", s,
                 hull_excursion(retimed(cub, s)), hull_excursion(retimed(quin, s)));
   EXPECT_GT(hull_excursion(retimed(cub, 10.0)), 5e-3);
