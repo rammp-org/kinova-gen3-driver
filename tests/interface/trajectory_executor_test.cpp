@@ -414,9 +414,9 @@ TEST(TrajectorySample, QuinticMatchesEndpointPositionVelocityAndAcceleration) {
       const kinova::JointTarget right = sample_target(tr, w.t_s);
       const kinova::JointTarget left = sample_target(tr, std::nextafter(w.t_s, 0.0));
       for (int j = 0; j < kinova::kNumJoints; ++j) {
-        EXPECT_NEAR(right.q[j], w.q[j], 1e-9);
-        EXPECT_NEAR(vel_left(tr, w.t_s, j), w.qd[j], 1e-3);
-        EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3);
+        EXPECT_NEAR(right.q[j], w.q[j], 1e-9) << "n=" << c.n << " j=" << j;
+        EXPECT_NEAR(vel_left(tr, w.t_s, j), w.qd[j], 1e-3) << "n=" << c.n << " j=" << j;
+        EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3) << "n=" << c.n << " j=" << j;
         EXPECT_NEAR(right.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " right accel j=" << j;
         EXPECT_NEAR(left.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " left accel j=" << j;
         const double curve_acc =
@@ -474,9 +474,10 @@ TEST(TrajectorySample, QuinticDegeneraciesAreSafe) {
   EXPECT_NEAR(sample(tr, std::nextafter(1.0, 0.0))[0], 0.5, 1e-12);  // wA's segment, u -> 1
   EXPECT_NEAR(sample_target(tr, 1.0).qdd[0], 1.2, 1e-9);
 
-  // The shortest span a ROS message can express (1 ns): the span^2 scaling of
-  // qdd must stay finite. (Below ~1e-154 s span*span underflows to 0 and qdd is
-  // NaN; no ROS timestamp can express that.)
+  // The shortest span a ROS message can express (1 ns): q and qd stay exact and
+  // nothing goes non-finite. qdd is checked for finiteness only: below ~10 ns
+  // the 1/span^2 scaling amplifies q's rounding until it dominates (~80 rad/s^2
+  // off at 1 ns), and once span*span underflows (~2e-162 s) qdd is inf or NaN.
   JointWaypoint n0{vec7(0.3), 0.0}, n1{vec7(0.3 + 5e-10), 1e-9}, n2{vec7(1.0), 1.0};
   n0.qd = n1.qd = vec7(0.5);
   n0.qdd = n1.qdd = vec7(1.0);
@@ -487,7 +488,7 @@ TEST(TrajectorySample, QuinticDegeneraciesAreSafe) {
   const kinova::JointTarget mid = sample_target(ns, 5e-10);
   EXPECT_TRUE(mid.q.allFinite() && mid.qd.allFinite() && mid.qdd.allFinite());
   EXPECT_NEAR(mid.q[0], 0.3 + 2.5e-10, 1e-12);
-  EXPECT_NEAR(mid.qd[0], 0.5, 1e-3);  // qdd: finite only; 1/T^2 amplifies q's rounding
+  EXPECT_NEAR(mid.qd[0], 0.5, 1e-3);
 }
 
 TEST(TrajectorySample, AccelerationsWithoutVelocitiesFallBackToLinear) {
@@ -511,7 +512,8 @@ TEST(TrajectorySample, AccelerationsWithoutVelocitiesFallBackToLinear) {
 TEST(TrajectorySample, HermiteCanLeaveTheWaypointHullWhenDerivativesMismatchTimestamps) {
   // #19: cubic/quintic Hermite are not hull-preserving, and the path-tolerance
   // guard measures against the interpolant, so it cannot see an excursion.
-  // These are the numbers quoted in docs/deep-dive/trajectory-interpolation.md.
+  // Prints the numbers quoted in docs/deep-dive/trajectory-interpolation.md;
+  // asserts only the consistent plan and the x10 row.
   // (a) a 20 ms cuRobo-like plan (144 points / 2.88 s) whose qd/qdd match its
   // timestamps: the only excursion is at direction reversals, where the
   // analytic curve itself peaks between samples by 2.1e-4 rad.
@@ -531,6 +533,13 @@ TEST(TrajectorySample, HermiteCanLeaveTheWaypointHullWhenDerivativesMismatchTime
   for (double s : {0.5, 1.0, 2.0, 4.0, 10.0, 20.0})
     std::printf("hull excursion, re-timed x%g: cubic %.3g rad, quintic %.3g rad\n", s,
                 hull_excursion(retimed(cub, s)), hull_excursion(retimed(quin, s)));
+  // Downsampled, derivatives kept: the interpolant still follows the plan, but
+  // the curve between samples at a reversal grows with the spacing squared.
+  Trajectory every5th = quin;
+  every5th.points.clear();
+  for (size_t i = 0; i < quin.points.size(); i += 5) every5th.points.push_back(quin.points[i]);
+  std::printf("hull excursion, every 5th point (100 ms): quintic %.3g rad\n",
+              hull_excursion(every5th));
   EXPECT_GT(hull_excursion(retimed(cub, 10.0)), 5e-3);
   EXPECT_GT(hull_excursion(retimed(quin, 10.0)), 3e-2);
 }

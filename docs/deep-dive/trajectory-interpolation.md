@@ -83,7 +83,7 @@ c₅ =   6d − 3v₀ − 3v₁ − 0.5A₀ + 0.5A₁
 Duplicate timestamps never produce a zero-span segment: the segment search
 brackets every query with `a.t_s ≤ t < b.t_s`, so it skips the zero-width
 pair and the reference steps from the first duplicate's position to the
-second's at that instant. The `T ≤ 0` guard in `sample_target` is defensive;
+last's at that instant. The `T ≤ 0` guard in `sample_target` is defensive;
 no query reaches it.
 
 ## Hermite is not hull-preserving
@@ -106,13 +106,13 @@ It happens in two cases:
   tangent is `k` times too long and every `A` is `k²` times too large, and
   the curve swings past its endpoints. A realistic source is a client that
   stretches the timestamps but leaves `qd` and `qdd` as they were
-  (RAMMP-CuRobo's `scaled_msg` rescales all three). Compressing the timestamps (`k < 1`) makes the tangents
-  too short instead. In the measurement below that leaves the hull by less
+  (RAMMP-CuRobo's `scaled_msg` rescales all three). Compressing the
+  timestamps (`k < 1`) makes the tangents too short instead. In the measurement below that leaves the hull by less
   than the consistent plan does (8.5e-5 rad cubic, 1.0e-4 rad quintic at
   ×0.5), but the result no longer follows the plan's path either.
 
 **The path-tolerance guard will not report it.** `TrajectoryExecutor::tick`
-compares the measured `q` against `q_desired = sample(...)`, the interpolated
+compares the measured `q` against `sample_target(...).q`, the interpolated
 value, not against the planner's waypoints. If the interpolant overshoots, the
 guard measures tracking error relative to the overshoot.
 
@@ -122,9 +122,12 @@ the worst excursion beyond the endpoint hull, on any joint, scanning each
 segment at 1/200 of its span. The plan is 144 points over 2.88 s (20 ms, a
 cuRobo-sized plan) of per-joint sines: amplitudes 0.5–1.1 rad, peak
 velocity up to 2.75 rad/s, peak acceleration up to 6.9 rad/s². Every joint
-reverses at least once. The excursion at a reversal scales with
-acceleration, so a plan with higher accelerations leaves the hull further
-even when its derivatives are consistent.
+reverses at least once. The excursion at a reversal is about
+`qdd·T²/8`, so it grows with acceleration and with the square of the
+spacing even when the derivatives are consistent. Downsampling a plan while
+keeping its derivatives is therefore safe in the sense that the interpolant
+still follows the plan's own curve, but that curve leaves the hull further:
+keeping every 5th point of this plan (100 ms) gives 3.9e-3 rad quintic.
 
 | plan | cubic | quintic |
 | --- | --- | --- |
