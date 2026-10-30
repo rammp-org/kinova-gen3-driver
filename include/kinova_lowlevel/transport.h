@@ -29,7 +29,7 @@ class ArmRejected : public std::runtime_error {
 // pumps in KortexTransport::set_actuator_modes() always use it.
 inline constexpr int kMaxConsecutiveTimeouts = 3;
 // KortexTransport's default bound on one cyclic round-trip, in ms. RtExecutor
-// caps the dt it hands compute() at max_consecutive_misses of these.
+// caps the dt it hands compute() at max_consecutive_misses of these plus a period.
 inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 using ActuatorModes = std::array<ActuatorMode, kNumJoints>;
 class Transport {

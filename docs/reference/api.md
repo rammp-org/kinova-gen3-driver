@@ -332,10 +332,16 @@ class RtExecutor {
   `compute`, so time lost to misses counts on the modes' watchdogs, gain
   ramps, rate limiters and integrators (#103). The first `compute` after
   `run` starts or after a mode switch gets the nominal `1 / rate_hz`: the
-  switch's pumps are not time the mode lived through. It is capped at
-  `max_consecutive_misses` x `kDefaultCyclicTimeoutMs` (60 ms by default):
-  no run survives a longer burst of misses, so a longer gap is a stalled loop
-  and is not passed on as one step.
+  switch's pumps are not time the mode lived through (so a miss in the switch
+  cycle itself goes uncounted). It is capped at `max_consecutive_misses` x
+  (`kDefaultCyclicTimeoutMs` + one period), 63 ms at the defaults: no run
+  survives a longer burst of misses, so a longer gap is a stalled loop and is
+  not passed on as one step. The cap assumes the default cyclic timeout; a
+  `KortexTransport` built with a longer one loses miss time past it. After a
+  miss, the rate-limited and integrated references take one step of the time
+  the miss took: up to `max_ref_speed` x ~21 ms per miss in the position mode
+  (~10 mrad at the default), `qd` x ~21 ms in the velocity mode, bounded by
+  their leashes.
 - **Faults (`exit_on_fault`):** off by default, so a caller that clears faults
   in place while the loop runs (the teleop app) keeps today's behaviour. On, a
   good exchange reporting `JointFeedback::fault` `kFaultConfirmExchanges` times

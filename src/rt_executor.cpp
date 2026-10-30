@@ -98,11 +98,11 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   const double dt_s = 1.0 / rate_hz;
   // compute() gets the wall time since the previous compute() (#103), so the
   // time a miss blocked counts on the modes' watchdogs, ramps and integrators.
-  // Capped at max_consecutive_misses default cyclic timeouts: a run survives no
-  // longer burst of misses, so a longer gap is a stalled loop, and that is not
-  // handed to the modes as one step.
-  const double max_dt_s =
-      std::max(dt_s, cfg_.max_consecutive_misses * kDefaultCyclicTimeoutMs * 1e-3);
+  // Capped at max_consecutive_misses x (default cyclic timeout + period): every
+  // gap a run survives is shorter, since that many misses in a row is
+  // CommsLost. A longer gap is a stalled loop, not handed to the modes as one
+  // step.
+  const double max_dt_s = cfg_.max_consecutive_misses * (kDefaultCyclicTimeoutMs * 1e-3 + dt_s);
   int64_t last_compute_ns = -1;  // < 0: no compute yet in this mode, use dt_s
 
   ControlMode* active = nullptr;

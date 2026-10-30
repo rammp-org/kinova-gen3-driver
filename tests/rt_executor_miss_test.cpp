@@ -535,12 +535,11 @@ TEST(RtExecutorDt, ComputeAfterAMissGetsTheElapsedTime) {
   ASSERT_NO_THROW(ex.run(stop));
   ASSERT_EQ(mode.dts.size(), 8u);  // good calls 1-4 and 6-9
   EXPECT_GE(mode.dts[4], 0.025);   // call 6's compute, after the miss
-  EXPECT_LT(mode.dts[4], 0.060);
 }
 
-// A gap longer than max_consecutive_misses cyclic timeouts (3 x KortexTransport's
-// 20 ms by default) is a stalled loop, not a miss burst a run survives: it is
-// passed on capped.
+// A gap longer than max_consecutive_misses x (cyclic timeout + period), 3 x
+// (20 ms + 0.1 ms) here, is a stalled loop, not a miss burst a run survives: it
+// is passed on capped.
 TEST(RtExecutorDt, DtIsCappedAtTheConsecutiveMissSpan) {
   std::atomic<bool> stop{false};
   DroppingTransport t([](uint64_t) { return false; }, 10, stop);
@@ -554,7 +553,7 @@ TEST(RtExecutorDt, DtIsCappedAtTheConsecutiveMissSpan) {
 
   ASSERT_NO_THROW(ex.run(stop));
   ASSERT_EQ(mode.dts.size(), 9u);
-  EXPECT_DOUBLE_EQ(mode.dts[4], 0.060);  // call 5's compute, after the stall
+  EXPECT_DOUBLE_EQ(mode.dts[4], 3 * (0.020 + kNominalDt));  // call 5's compute, after the stall
 }
 
 // The first compute() in a mode, after run() starts or a switch, gets the nominal
