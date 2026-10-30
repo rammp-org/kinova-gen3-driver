@@ -74,6 +74,13 @@ uv run -q --no-project --with pin --with numpy python -I tools/contact/parity.py
 
 Each motion batch is confirmed with Swapnil before it runs.
 
+Through the ROS node, `would_trips`, the active `θ` and the last trip record are
+in the `Contact detection` task on `/diagnostics`. To record `r`, start the node
+with `contact_debug_topic:=true`: it publishes `r` at 50 Hz on
+`/contact_monitor/residual` (`sensor_msgs/JointState`, `effort` = `r` in N·m).
+Record that topic with `/joint_states` and `/ee_state` for the steps below. See
+the node's [interface doc](https://github.com/rammp-org/kinova-gen3-ros2/blob/dev/docs/interface.md#contact-stops).
+
 1. `observe`, no motion, 60 s: the still floor per joint.
 2. `observe`, the tour at speed 0.6, then 1.0, nobody touching: motion RMS and
    peak per joint, plus `would_trips`. Set `default` to about 3x the peak, rerun,
