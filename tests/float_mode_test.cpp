@@ -5,6 +5,8 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+
+#include "kinova_lowlevel/units.h"
 using namespace kinova;
 
 namespace {
@@ -115,4 +117,34 @@ TEST(FloatMode, RejectsBadParams) {
   bad([](FloatParams& p) { p.torque_limit[4] = 0; });
   bad([&](FloatParams& p) { p.torque_limit[0] = nan; });
   EXPECT_NO_THROW(FloatMode(dyn, FloatParams{}));
+}
+
+// j3 is continuous and the transport wraps q to (-pi, pi]; home has j3 = pi, so an
+// encoder dithering across the wrap must not flip the anchor to the far side
+// (each flip would be a K_s*band step of spring torque).
+TEST(FloatMode, AnchorFollowsWrapOnContinuousJoint) {
+  Dynamics dyn(URDF_PATH);
+  FloatParams p;
+  p.torque_limit.setConstant(1e9);
+  FloatMode m(dyn, p);
+  JointFeedback fb = pose();
+  JointCommand c;
+  JointVec g;
+  fb.q[2] = M_PI - 0.001;
+  m.on_enter(fb);
+  for (int k = 0; k < 10; ++k) {
+    fb.q[2] = (k % 2) ? M_PI - 0.001 : -M_PI + 0.001;  // 2 mrad apart through the wrap
+    m.compute(fb, 0.001, c);
+    dyn.gravity(fb.q, g);
+    EXPECT_LE(std::abs(c.torque[2] - g[2]), p.spring[2] * 0.0021) << k;
+    EXPECT_NEAR(std::abs(m.anchor()[2]), M_PI - 0.001, 1e-9) << k;  // never dragged
+  }
+  // A real drag through the wrap: the anchor follows across it, the band still holds.
+  for (int k = 1; k <= 100; ++k) {
+    fb.q[2] = wrap_to_pi(M_PI - 0.001 + k * 0.1 * kDeg2Rad);
+    m.compute(fb, 0.001, c);
+    dyn.gravity(fb.q, g);
+    EXPECT_LE(std::abs(c.torque[2] - g[2]), p.spring[2] * p.drag_band_rad + 1e-9) << k;
+  }
+  EXPECT_NEAR(std::abs(wrap_to_pi(fb.q[2] - m.anchor()[2])), p.drag_band_rad, 1e-9);
 }

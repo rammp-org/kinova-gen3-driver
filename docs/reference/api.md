@@ -180,7 +180,9 @@ Law: `tau = gravity(q) − D·q̇ − K_s·(q − q_a)`, clamped per joint to
 `torque_limit`. `on_enter` sets `q_a = fb.q`. Each cycle, per joint, if
 `|q − q_a| > drag_band_rad` the anchor is moved to stay `drag_band_rad` behind
 `q`, so the spring contributes at most `K_s·drag_band_rad` (about 1 N·m on
-joints 1-4, 0.3 N·m on 5-7). `required_modes()` is all torque; `command.position`
+joints 1-4, 0.3 N·m on 5-7). On continuous joints (both URDF limits infinite)
+`q − q_a` is wrapped to (−π, π] and the anchor kept there, as the transport wraps
+`q`. `required_modes()` is all torque; `command.position`
 passes `q` through. The constructor throws on non-finite or negative gains, a
 non-positive band, or a non-positive torque limit. The defaults are starting
 values, untuned on the arm. See the

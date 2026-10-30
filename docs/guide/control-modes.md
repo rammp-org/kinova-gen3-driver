@@ -96,7 +96,9 @@ back to the pose it tripped at.
   `drag_band_rad` behind `q`. A push therefore never meets more than
   `K_s·drag_band_rad` of spring, and wherever the arm comes to rest the anchor is
   within the band, so there is no pull back toward the trip pose. The spring only
-  resists slow creep from gravity-model error.
+  resists slow creep from gravity-model error. On the continuous joints (1, 3,
+  5, 7) `q − q_a` is wrapped to (−π, π], so a joint sitting at ±π (home's j3)
+  does not flip the anchor each time its reading crosses the wrap.
 - **`damping` (D)** — N·m·s/rad per joint. Intended to stop the arm from demo
   speeds in about 0.2 s (not yet measured on the arm). Defaults 5 on joints 1-4
   and 1.5 on joints 5-7.

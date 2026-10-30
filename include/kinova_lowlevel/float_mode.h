@@ -1,4 +1,6 @@
 #pragma once
+#include <array>
+
 #include "kinova_lowlevel/control_mode.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/joint_types.h"
@@ -18,7 +20,8 @@ struct FloatParams {
 // stays where it is left.
 //   tau = gravity(q) - D*qd - K_s*(q - q_a), clamped per joint.
 // The anchor q_a starts at the entry pose and is dragged so it never trails q by
-// more than drag_band_rad, so the spring only resists model-error creep.
+// more than drag_band_rad, so the spring only resists model-error creep. On
+// continuous joints (both URDF limits infinite) q - q_a is wrapped to (-pi, pi].
 class FloatMode : public ControlMode {
  public:
   // Throws std::invalid_argument on non-finite or negative gains, a
@@ -34,10 +37,12 @@ class FloatMode : public ControlMode {
  private:
   Dynamics& dyn_;
   FloatParams p_;
-  JointVec anchor_ = JointVec::Zero();  // RT-thread-only state
+  JointVec anchor_ = JointVec::Zero();         // RT-thread-only state
+  std::array<bool, kNumJoints> continuous_{};  // from the URDF limits, in the ctor
 
   // Preallocated RT scratch.
   JointVec g_;
+  JointVec err_;  // q - q_a, wrapped on continuous joints
   JointVec tau_;
 };
 }  // namespace kinova
