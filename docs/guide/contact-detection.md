@@ -30,7 +30,7 @@ built with the other apps (`cmake --build <dir> --target contact_replay`).
 ```
 contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
     --csv tour.csv --out r.csv \
-    [--gain 25] [--debounce 5 | --debounce-ms 5] [--thresholds 8,8,6,6,2,2,2] \
+    [--gain 25] [--debounce 5 | --debounce-ms 5] [--thresholds 16,16,12,12,4,4,4] \
     [--tau-sign -1]
 ```
 

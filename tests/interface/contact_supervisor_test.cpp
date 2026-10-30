@@ -29,10 +29,10 @@ using namespace kinova::interface;
 
 namespace {
 
-// The starting numbers from the design (N·m, j1..j7).
-const JointVec kSensitive = (JointVec() << 4, 4, 3, 3, 1.2, 1.2, 1.2).finished();
-const JointVec kNormal = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
-const JointVec kLoose = (JointVec() << 20, 20, 15, 15, 5, 5, 5).finished();
+// The profile numbers from the design (N·m, j1..j7).
+const JointVec kSensitive = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+const JointVec kNormal = (JointVec() << 16, 16, 12, 12, 4, 4, 4).finished();
+const JointVec kLoose = (JointVec() << 24, 24, 18, 18, 6, 6, 6).finished();
 const JointVec kCeiling = (JointVec() << 30, 30, 22, 22, 7, 7, 7).finished();
 
 ContactProfiles profiles() { return {kSensitive, kNormal, kLoose, kCeiling}; }
@@ -178,9 +178,9 @@ struct ContactFix {
     if (rt.joinable()) rt.join();
   }
 
-  // Push on j2 (over the default θ of 8 N·m) until the monitor latches.
+  // Push on j2 (over the default θ of 16 N·m) until the monitor latches.
   void trip() {
-    sim.set_external_torque(push_j2(12.0));
+    sim.set_external_torque(push_j2(24.0));
     ASSERT_TRUE(wait_for([&] { return mon.latched(); })) << "no trip";
   }
 

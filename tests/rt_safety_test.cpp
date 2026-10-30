@@ -143,8 +143,8 @@ class MonitoredGravComp : public ControlMode {
 
 TEST(RtSafety, ContactMonitorNoMajorFaultsSteadyState) {
   Dynamics dyn(URDF_PATH);
-  const JointVec sensitive = (JointVec() << 4, 4, 3, 3, 1.2, 1.2, 1.2).finished();
-  const JointVec normal = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  const JointVec sensitive = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  const JointVec normal = (JointVec() << 16, 16, 12, 12, 4, 4, 4).finished();
   ContactMonitorConfig cfg;
   cfg.initial_theta = normal;
   cfg.ceiling = (JointVec() << 30, 30, 22, 22, 7, 7, 7).finished();

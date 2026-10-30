@@ -31,7 +31,7 @@ struct ReplayOptions {
   std::string ee_frame;
   double gain = 25.0;
   int debounce_cycles = 5;
-  JointVec theta = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  JointVec theta = (JointVec() << 16, 16, 12, 12, 4, 4, 4).finished();  // the default profile
 };
 
 struct ReplayTrip {

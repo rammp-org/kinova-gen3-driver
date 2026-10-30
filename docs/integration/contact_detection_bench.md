@@ -6,7 +6,8 @@ image (nightly plus this branch) in `observe` mode. The monitor ran
 at 1 kHz and counted would-be trips without stopping the arm.
 
 - Live thresholds: `[16,16,12,12,4,4,4]` N·m, set through `/set_contact_thresholds`
-  (about double the starting defaults `[8,8,6,6,2,2,2]`).
+  (about double the starting defaults `[8,8,6,6,2,2,2]`; adopted as the default
+  profile after these tests).
 - Data: `/contact_monitor` (residual sampled at 50 Hz, `would_trips` counted at
   1 kHz) and `/joint_states`.
 - Position mode throughout: a position hold at home for the still run, and the tour
