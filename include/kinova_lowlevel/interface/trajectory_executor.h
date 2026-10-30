@@ -49,7 +49,7 @@ enum class SubmitResult {
   kRejectedEmpty,
   kRejectedSpeedScale,
   kRejectedQueueWhileActive,
-  kRejectedShortSegment,
+  kRejectedBadTimestamps,
 };
 
 // Shortest gap submit() accepts between consecutive waypoints, in seconds.
@@ -59,9 +59,10 @@ enum class SubmitResult {
 // waypoints milliseconds apart, so nothing real comes near it.
 inline constexpr double kMinSegmentSpanSec = 10e-9;
 
-// True when every consecutive pair of waypoints is at least kMinSegmentSpanSec
-// apart. A NaN stamp fails.
-bool segments_long_enough(const Trajectory& tr);
+// True when every stamp is finite and every consecutive pair of waypoints is
+// at least kMinSegmentSpanSec apart. A NaN or infinite stamp would otherwise
+// command NaN or never complete, even in a one-point trajectory.
+bool valid_timestamps(const Trajectory& tr);
 
 // Floor for the effective scale. Zero would stop the clock and hang the goal
 // forever; this is slow enough to be a hold in practice and still terminates.

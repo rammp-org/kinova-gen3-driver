@@ -84,7 +84,8 @@ c₅ =   6d − 3v₀ − 3v₁ − 0.5A₀ + 0.5A₁
 
 `submit()` refuses a trajectory with consecutive waypoints less than 10 ns
 apart (`kMinSegmentSpanSec`), which covers duplicate and out-of-order
-timestamps, so a running goal never contains such a segment. Below 10 ns the
+timestamps, or with a non-finite stamp, so a running goal never contains such
+a segment. Below 10 ns the
 `1/T²` in the quintic's `qdd` amplifies the rounding in `q` until it
 dominates: about 80 rad/s² off at 1 ns. ROS stamps are whole nanoseconds,
 so 1 ns is the shortest gap a message can carry. Likely sources are a

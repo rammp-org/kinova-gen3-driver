@@ -364,8 +364,17 @@ int main(int argc, char** argv) {
     interface::TrajectoryExecutor exec(mode);  // JointPositionMode IS-A JointTargetSink
     const JointVec tol = no_guard ? JointVec::Constant(-1.0)  // guard disabled
                                   : JointVec::Constant(path_tol);
-    exec.submit(tr, interface::ControlModeKind::kPosition, interface::Preemption::kLatestWins, tol,
-                speed_scale);
+    const interface::SubmitResult sr =
+        exec.submit(tr, interface::ControlModeKind::kPosition, interface::Preemption::kLatestWins,
+                    tol, speed_scale);
+    if (sr != interface::SubmitResult::kAccepted) {
+      std::printf(
+          "\n[traj] trajectory refused (SubmitResult %d); is --duration under 10 ns? "
+          "Arm holds; run stops.\n",
+          static_cast<int>(sr));
+      g_stop.store(true, std::memory_order_release);
+      return;
+    }
 
     const auto t0 = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration<double>(1.0 / tick_hz);

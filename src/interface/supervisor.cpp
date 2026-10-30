@@ -377,6 +377,16 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         action_.settle(in.id, r);
         continue;
       }
+      // Second layer under on_trajectory_goal's timestamp check, also ahead of
+      // the mode block so a refused goal never switches the mode.
+      if (!valid_timestamps(in.goal.trajectory)) {
+        TrajectoryResult r;
+        r.error_code = result_code::kInvalidGoal;
+        r.error_string =
+            "waypoint timestamps must be finite and at least kMinSegmentSpanSec (10 ns) apart";
+        action_.settle(in.id, r);
+        continue;
+      }
       if (in.goal.control_mode != traj_bound_kind_ ||
           in.goal.control_mode != active_mode_kind_.load()) {
         if (have_active) {  // cross-mode goal slipped past the accept-time pre-check (in_flight_
@@ -409,8 +419,6 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         r.error_code = result_code::kInvalidGoal;
         r.error_string = sr == SubmitResult::kRejectedSpeedScale
                              ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
-                         : sr == SubmitResult::kRejectedShortSegment
-                             ? "waypoints less than 10 ns apart, duplicated or out of order"
                              : "rejected by executor";
         action_.settle(in.id, r);
         continue;
@@ -470,8 +478,8 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (!ready_.load()) return GoalResponse::kReject;               // faulted or reconnecting
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
-  // Waypoints under kMinSegmentSpanSec apart, duplicated or out of order.
-  if (!segments_long_enough(g.trajectory)) return GoalResponse::kReject;
+  // Non-finite stamps, or waypoints under kMinSegmentSpanSec apart.
+  if (!valid_timestamps(g.trajectory)) return GoalResponse::kReject;
   // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
   // floors there internally, and accepting a request slower than the floor
   // would silently RUN it faster than asked -- the clamp this feature's

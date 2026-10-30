@@ -86,9 +86,11 @@ kinova::JointTarget sample_target(const Trajectory& tr, double t_s) {
   return out;
 }
 
-bool segments_long_enough(const Trajectory& tr) {
-  for (size_t i = 1; i < tr.points.size(); ++i)
-    if (!(tr.points[i].t_s - tr.points[i - 1].t_s >= kMinSegmentSpanSec)) return false;
+bool valid_timestamps(const Trajectory& tr) {
+  for (size_t i = 0; i < tr.points.size(); ++i) {
+    if (!std::isfinite(tr.points[i].t_s)) return false;
+    if (i > 0 && !(tr.points[i].t_s - tr.points[i - 1].t_s >= kMinSegmentSpanSec)) return false;
+  }
   return true;
 }
 
@@ -97,7 +99,7 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
   if (tr.points.empty()) return SubmitResult::kRejectedEmpty;
   // Also checked by the Supervisor at accept time; this layer covers callers
   // that reach submit() some other way.
-  if (!segments_long_enough(tr)) return SubmitResult::kRejectedShortSegment;
+  if (!valid_timestamps(tr)) return SubmitResult::kRejectedBadTimestamps;
   // Second layer under the Supervisor's accept-time check: a goal can reach
   // here without passing on_trajectory_goal (on_trajectory_accepted is its own
   // entry point), and effective_scale() clamps internally -- a below-floor
