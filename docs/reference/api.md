@@ -122,7 +122,9 @@ class ControlMode {
 using ActuatorModes = std::array<ActuatorMode, 7>;
 ```
 
-Implement this to add a control law. `compute()` must be RT-safe.
+Implement this to add a control law. `compute()` must be RT-safe. `dt_s` is
+the wall time since the mode's previous `compute()`, not a constant: see
+`RtExecutor` below.
 
 ### `JointTorqueMode` — `joint_torque_mode.h`
 
@@ -326,6 +328,23 @@ class RtExecutor {
   can't run on forever), or a mode switch whose pumps time out: `run` throws
   `CommsLost` and the caller does `safe_shutdown()`. Any other exception from
   `exchange` (such as `ArmRejected`) propagates as before.
+- **`dt_s` passed to `compute`:** the wall time since this mode's previous
+  `compute`, so time lost to misses counts on the modes' watchdogs, gain
+  ramps, rate limiters and integrators (#103). The first `compute` after
+  `run` starts or after a mode switch gets the nominal `1 / rate_hz`: the
+  switch's pumps are not time the mode lived through. Misses between a switch
+  and the new mode's first good exchange go uncounted: at most
+  `max_consecutive_misses - 1`, ~42 ms at the defaults. Without misses `dt_s`
+  still varies cycle to cycle by the loop's wake and round-trip jitter. It is
+  capped at `max_consecutive_misses` x
+  (`kDefaultCyclicTimeoutMs` + one period), 63 ms at the defaults: no run
+  survives a longer burst of misses, so a longer gap is a stalled loop and is
+  not passed on as one step. The cap assumes the default cyclic timeout; a
+  `KortexTransport` built with a longer one loses miss time past it. After a
+  miss, the rate-limited and integrated references take one step of the time
+  the miss took: up to `max_ref_speed` x ~21 ms per miss in the position mode
+  (~10 mrad at the default), `qd` x ~21 ms in the velocity mode, bounded by
+  their leashes.
 - **Faults (`exit_on_fault`):** off by default, so a caller that clears faults
   in place while the loop runs (the teleop app) keeps today's behaviour. On, a
   good exchange reporting `JointFeedback::fault` `kFaultConfirmExchanges` times
@@ -439,6 +458,8 @@ class ArmRejected : public std::runtime_error {};
 // TransportTimeouts in a row taken as the link being down; the default for
 // ExecutorConfig::max_consecutive_misses and the limit for mode-switch pumps
 inline constexpr int kMaxConsecutiveTimeouts = 3;
+// KortexTransport's default cyclic timeout; also sizes RtExecutor's cap on dt_s
+inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 ```
 
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
@@ -447,7 +468,7 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
   hardware. Test knobs for the link lifecycle: `fail_connects`, `set_arm_fault`,
   `set_fault_sticky`, `set_low_level_feedback`, `throw_on_exchange`,
   `fail_health`, `set_joint_positions`, and call counters.
-- **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = 20)`**
+- **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = kDefaultCyclicTimeoutMs)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
   Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` first checks the
   route to the arm (`arm_route_problem`, `arm_route.h`): the arm's address must be on

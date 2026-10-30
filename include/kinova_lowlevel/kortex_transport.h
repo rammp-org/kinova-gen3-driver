@@ -19,7 +19,8 @@ class KortexTransport : public Transport {
   // network load); 20 ms clears that with margin, and expiry throws
   // TransportTimeout. set_servoing_low_level()'s seed reads keep 3000 ms.
   KortexTransport(std::string ip, std::string user = "admin", std::string password = "admin",
-                  int rx_priority = 0, int rx_cpu = -1, uint32_t cyclic_timeout_ms = 20);
+                  int rx_priority = 0, int rx_cpu = -1,
+                  uint32_t cyclic_timeout_ms = kDefaultCyclicTimeoutMs);
   ~KortexTransport() override;
   void connect() override;
   void set_servoing_low_level() override;

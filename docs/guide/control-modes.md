@@ -19,7 +19,10 @@ Every mode implements the same small interface (`ControlMode`):
 - **`on_enter(feedback)`** — runs once, on the RT thread, when the mode is adopted.
   Every shipped mode uses it to "hold where you are" by capturing the entry state.
 - **`compute(feedback, dt, command)`** — the control law, every cycle. It must be
-  RT-safe: no allocation, no locks, no blocking.
+  RT-safe: no allocation, no locks, no blocking. `dt` is the measured wall time
+  since the mode's previous `compute()`: nominal (`1 / rate_hz`) on the first
+  call, varying cycle to cycle, and up to ~63 ms after missed exchanges or a
+  stall (see [`RtExecutor`](../reference/api.md)).
 - **`on_exit()`** — cleanup hook.
 
 You hand a mode to the executor with `request_mode(&mode)`; it's adopted at the
