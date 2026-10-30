@@ -93,3 +93,5 @@ Each motion batch is confirmed with Swapnil before it runs.
 
 Write the results as a bench report in `docs/integration/`, and replay the
 recorded CSVs through `contact_replay` to tune offline between sessions.
+The first report, on how small a tap the residual resolves still and in motion,
+is [contact_detection_bench.md](../integration/contact_detection_bench.md).
