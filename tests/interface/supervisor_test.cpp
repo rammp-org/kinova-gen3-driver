@@ -272,7 +272,7 @@ TEST(Supervisor, QueueGoalWhileAnotherIsActiveIsRefused) {
   f.sup.start();
   f.run_rt();
   interface::TrajectoryGoal ga;
-  ga.trajectory = ramp7(0.0, 0.05, 0.2);
+  ga.trajectory = ramp7(0.0, 0.05, 0.5);  // long enough that B lands while A runs
   ga.control_mode = interface::ControlModeKind::kPosition;
   ga.preemption = interface::Preemption::kLatestWins;
   ga.path_tolerance = JointVec::Constant(-1.0);
@@ -287,7 +287,7 @@ TEST(Supervisor, QueueGoalWhileAnotherIsActiveIsRefused) {
   std::this_thread::sleep_for(std::chrono::milliseconds(60));  // A still active
   ASSERT_EQ(f.sup.on_trajectory_goal(gb), interface::GoalResponse::kAccept);
   f.sup.on_trajectory_accepted(b, gb);
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));  // A completes
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));  // A completes
   f.sup.stop();
   f.teardown();
   int a_code = 999, b_code = 999, a_n = 0, b_n = 0;
@@ -312,13 +312,15 @@ TEST(Supervisor, QueueGoalWhileAnotherIsActiveIsRefused) {
 }
 
 TEST(Supervisor, RefusedQueueGoalDoesNotSwitchTheMode) {
-  // A refused QUEUE goal asking for another mode must be refused as a queue
-  // goal, before the mode-switch block, so the running mode stays put.
+  // A QUEUE goal asking for another mode, behind an active goal, is refused as
+  // a queue goal and leaves the running mode as it was. (Before #84 the
+  // in-flight mode guard refused it too, so the mode probe is a regression
+  // guard and the error string is what pins the queue refusal.)
   SupFix f;
   f.sup.start();
   f.run_rt();
   interface::TrajectoryGoal gp;
-  gp.trajectory = ramp7(0.0, 0.05, 0.4);
+  gp.trajectory = ramp7(0.0, 0.05, 0.5);
   gp.control_mode = interface::ControlModeKind::kPosition;
   gp.preemption = interface::Preemption::kLatestWins;
   gp.path_tolerance = JointVec::Constant(-1.0);
@@ -329,18 +331,18 @@ TEST(Supervisor, RefusedQueueGoalDoesNotSwitchTheMode) {
   p[0] = 1;
   interface::GoalId i{};
   i[0] = 2;
-  // Back-to-back, so the impedance goal passes the in_flight_ pre-check and
-  // reaches the sampler's drain.
   ASSERT_EQ(f.sup.on_trajectory_goal(gp), interface::GoalResponse::kAccept);
   f.sup.on_trajectory_accepted(p, gp);
-  ASSERT_EQ(f.sup.on_trajectory_goal(gi), interface::GoalResponse::kAccept);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));  // gp running
+  // Straight to on_trajectory_accepted, its own entry point: the in_flight_
+  // pre-check would reject a cross-mode goal before it reached the drain.
   f.sup.on_trajectory_accepted(i, gi);
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));  // both drained, gp mid-flight
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));  // gi drained, gp mid-flight
   // The pre-check reads the recorded running mode: position goals still pass,
   // impedance goals are a mode change while moving.
   EXPECT_EQ(f.sup.on_trajectory_goal(gp), interface::GoalResponse::kAccept);
   EXPECT_EQ(f.sup.on_trajectory_goal(gi), interface::GoalResponse::kReject);
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  std::this_thread::sleep_for(std::chrono::milliseconds(700));
   f.sup.stop();
   f.teardown();
   int p_code = 999, i_code = 999;

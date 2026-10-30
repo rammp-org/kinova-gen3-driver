@@ -40,6 +40,7 @@ kinova::JointVec sample(const Trajectory& tr, double t_s);
 // zero WITH has_velocity set.
 kinova::JointTarget sample_target(const Trajectory& tr, double t_s);
 
+// kQueue runs only on an idle executor; behind an active goal it is refused (#84).
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };
 enum class SubmitResult {

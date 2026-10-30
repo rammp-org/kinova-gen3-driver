@@ -166,7 +166,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       r.error_code = result_code::kHalted;
       r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
-      // A goal this thread promoted while the link was dropping may have requested
+      // A goal this thread started while the link was dropping may have requested
       // its own mode after on_link_state lined position up. The next run must
       // still adopt position, so line it up again. Keyed on readiness, not on hr:
       // a second halt (an e-stop) arriving first overwrites the reason.
@@ -366,8 +366,8 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       // finding), so kSessionDefault means "the default when the goal runs".
       //
       // Queueing is disabled (#84): a QUEUE goal behind an active one is
-      // refused HERE, before the block below can switch the arm's mode and
-      // sleep for it -- a refused goal must not touch the running goal.
+      // refused HERE, ahead of the mode block, so it is reported as a queue
+      // refusal whatever mode it asks for and never reaches submit().
       if (have_active && in.goal.preemption == Preemption::kQueue) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
