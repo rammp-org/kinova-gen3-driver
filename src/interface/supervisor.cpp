@@ -740,28 +740,33 @@ ContactState Supervisor::on_query_contact() {
   ContactState s;
   if (!contact_) return s;
   s.enabled = true;
-  {
-    std::lock_guard<std::mutex> l(contact_mtx_);
-    s.profile = contact_profile_;
-  }
-  contact_->status(s.status);  // a torn read leaves the default, as on_query_state does
+  ContactStatus st;
+  const bool whole = contact_->status(st);
+  std::lock_guard<std::mutex> l(contact_mtx_);
+  s.profile = contact_profile_;
+  // A torn read (the RT thread kept publishing through every retry) holds a mix of
+  // two cycles: report the last whole one instead.
+  if (whole) contact_status_ = st;
+  s.status = contact_status_;
   return s;
 }
 // The executor adopts only a PENDING request after a clear, and requests made
-// before the trip were consumed or overwritten: position is requested here, after
-// request_clear, so the executor leaves float for the hold at the next boundary
-// once the monitor has unlatched. The halt covers a latch the sampler has not seen
-// yet (it can be blind for a mode settle): without it a goal ACCEPTed before the
-// trip would start running after the clear. Otherwise it is a no-op repeat.
+// before the trip were consumed or overwritten: position is requested here, before
+// request_clear (a request stays pending while latched), so the hold is already
+// pending when the monitor unlatches. Requested after, the RT loop could unlatch in
+// between and adopt a stale request, or stay in float, for a cycle. The halt covers
+// a latch the sampler has not seen yet (it can be blind for a mode settle): without
+// it a goal ACCEPTed before the trip would start running after the clear.
+// Otherwise it is a no-op repeat.
 bool Supervisor::clear_contact() {
   if (!contact_) return false;
   std::lock_guard<std::mutex> l(contact_mtx_);
   if (!contact_->latched()) return false;
   on_halt(HaltReason::kContact);
-  contact_->request_clear();
-  contact_cleared_.store(true);
   active_mode_kind_.store(ControlModeKind::kPosition);
   exec_.request_mode(&pos_);
+  contact_->request_clear();
+  contact_cleared_.store(true);
   return true;
 }
 ArmState Supervisor::on_query_state() {

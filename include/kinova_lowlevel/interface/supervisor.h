@@ -118,8 +118,8 @@ class Supervisor : public CommandSink,
 
   // Clear a contact latch (any thread; /clear_faults). Returns true if a latch was
   // set. Then: halts with kContact (a no-op repeat unless the sampler has not seen
-  // this latch yet), asks the monitor to clear, and requests position mode, whose
-  // on_enter holds at the measured q once the executor leaves float. Returns
+  // this latch yet), requests position mode, whose on_enter holds at the measured q
+  // once the executor leaves float, and then asks the monitor to clear. Returns
   // false, and does nothing, when nothing is latched or there is no monitor.
   bool clear_contact();
 
@@ -208,11 +208,12 @@ class Supervisor : public CommandSink,
   ContactMonitor* contact_ = nullptr;
   const ContactProfiles contact_profiles_;
   // Serialises the monitor's single-writer calls (set_thresholds, request_clear)
-  // and guards the two fields below. Taken before stream_mtx_ / q_mtx_ (clear_contact
+  // and guards the three fields below. Taken before stream_mtx_ / q_mtx_ (clear_contact
   // halts under it); never taken under either. Never on the RT path.
   std::mutex contact_mtx_;
   ContactProfile contact_profile_ = ContactProfile::kDefault;  // last accepted
   JointVec contact_theta_ = JointVec::Zero();                  // what it resolved to
+  ContactStatus contact_status_{};  // last whole status read, for a torn one
   // Set by clear_contact, exchanged by the sampler: resets its latch edge detector.
   std::atomic<bool> contact_cleared_{false};
   SupervisorConfig cfg_;

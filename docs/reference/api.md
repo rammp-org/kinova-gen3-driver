@@ -396,9 +396,13 @@ class RtExecutor {
   mode the loop runs:
   - **Trip cycle.** If `on_contact`'s actuator modes match the active mode's
     (every torque-controlled mode), the loop switches in that cycle and computes
-    `on_contact`. Otherwise it sends a freeze that cycle (the active mode's
+    `on_contact`. Otherwise that cycle's command is a freeze (the active mode's
     actuator modes, `position` = measured `q`, zero `velocity`, no `compute`) and
-    adopts `on_contact` at the next boundary through `set_actuator_modes`.
+    the loop adopts `on_contact` at the next boundary through
+    `set_actuator_modes`. A cycle's command goes out on the next cycle's exchange,
+    which runs after that handshake, so the freeze is sent once, after the torque
+    switch. Through the switch the arm is held by the handshake's own pumps
+    (measured position, zero torque on KORTEX: the #92 window).
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
     the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or
@@ -837,9 +841,10 @@ floats the arm itself; the `Supervisor` reacts at sampler rate.
   `/clear_faults`) returns false and does nothing if nothing is latched.
   Otherwise it halts with `kContact` (a no-op repeat, unless the sampler has not
   seen this latch yet, for example during a 250 ms mode settle: then it is what
-  settles a goal accepted before the trip), calls `request_clear()`, and
-  requests position mode. The executor adopts only a pending request after a
-  clear, and `JointPositionMode::on_enter` holds at the measured q. Pressing
+  settles a goal accepted before the trip), requests position mode, and then
+  calls `request_clear()`, so the hold is already pending when the latch drops.
+  The executor adopts only a pending request after a clear, and
+  `JointPositionMode::on_enter` holds at the measured q. Pressing
   still when clearing re-trips after the observer settles (5/K).
 
 Thresholds, from `interface/contact.h` and `interface/value_types.h`:
@@ -868,7 +873,7 @@ The `CommandSink` defaults (no monitor) are `{false, "contact detection not
 available"}` and `ContactState{}` (`enabled = false`). `on_query_contact`
 reports `enabled` (a monitor is attached), the last accepted `profile`
 (`kDefault` at start: the constructor applies `contact_profiles.normal`), and
-the monitor's `ContactStatus` (left default on a torn read).
+the monitor's `ContactStatus` (on a torn read, the last whole one).
 
 ### Gating
 
