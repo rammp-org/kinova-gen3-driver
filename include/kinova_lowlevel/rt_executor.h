@@ -66,9 +66,10 @@ class RtExecutor {
   void request_mode(ControlMode* m) noexcept;  // supervisor sets; loop adopts at a cycle boundary
   // Unexpected-contact stop. Call before run(); both MUST outlive the executor.
   // The loop then calls monitor.on_run_start() at each run() start and
-  // monitor.step() every cycle (a missed exchange included) on the RT thread, and
-  // flags latched cycles (CycleSample bit3). While monitor.latched() the loop runs
-  // on_contact and nothing else:
+  // monitor.step() every cycle (a missed exchange included) on the RT thread, with
+  // the measured time since the previous feedback read as dt, and flags latched
+  // cycles (CycleSample bit3). While monitor.latched() the loop runs on_contact and
+  // nothing else:
   //   - the cycle that trips switches to it at once when its actuator modes match
   //     the active mode's; otherwise that cycle sends a freeze (the active mode's
   //     actuator modes, position = measured q, zero velocity, no compute) and the

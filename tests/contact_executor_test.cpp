@@ -5,9 +5,12 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -435,4 +438,37 @@ TEST(ContactExecutor, RunStartResettlesObserver) {
   };
   w.run_until(first_call + 20);
   EXPECT_EQ(early, ContactPhase::kSettling);
+}
+
+// Two missed exchanges that each block 50 ms (a KORTEX timeout takes real time):
+// the observer is stepped over the measured elapsed time, capped at 1/K. The push
+// lands during the gap; at K*dt = 1 the first good sample after it reads the push
+// exactly (the arm is still), where nominal 1 ms steps would read ~7% of it and an
+// uncapped 100 ms step (K*dt = 2.5) would overshoot to ~2.5x. No re-settle.
+TEST(ContactExecutor, MissGapStepsMeasuredTimeCapped) {
+  World w;
+  w.attach(ContactDetection::kObserve);
+  constexpr uint64_t kGapAt = kPushAt;
+  ContactStatus after{};
+  bool read = false;
+  w.bench.on_call = [&](uint64_t i) {
+    if (i == kGapAt) w.sim.set_external_torque(push_j2(6.0));
+    if (i == kGapAt || i == kGapAt + 1) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      throw TransportTimeout("timeout detected: sim");
+    }
+    // Call kGapAt+2 is the first good sample after the gap; its step ran in the
+    // cycle before this call.
+    if (i == kGapAt + 3) read = w.mon->status(after);
+  };
+  w.ex.request_mode(&w.pos);
+  w.run_until(kGapAt + 50);
+
+  ASSERT_TRUE(read);
+  EXPECT_EQ(after.phase, ContactPhase::kArmed);
+  EXPECT_NEAR(after.r[1], 6.0, 0.05);
+  for (int j = 0; j < kNumJoints; ++j)
+    if (j != 1) EXPECT_LT(std::abs(after.r[j]), 0.05) << j;
+  EXPECT_LE(w.status().r.cwiseAbs().maxCoeff(), 6.05);  // and it stays there
+  EXPECT_EQ(w.status().would_trips, 1u);
 }

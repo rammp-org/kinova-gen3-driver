@@ -334,6 +334,27 @@ TEST(ContactMonitor, MissedFramesDoNotStepObserver) {
   }
 }
 
+// A gap longer than 1/K (a mode-switch handshake, back-to-back timeouts) is stepped
+// as 1/K: at K*dt = 1 the step lands r on the external torque of a still arm instead
+// of overshooting by (1 - K*dt) * r. Missed cycles count toward the gap. No re-settle.
+TEST(ContactMonitor, LongGapStepCappedAtOneOverK) {
+  Rig rig(config(ContactDetection::kObserve));
+  const JointVec press = push(1, 6.0);
+  ASSERT_EQ(rig.run(500), -1);
+  ASSERT_EQ(rig.status().phase, ContactPhase::kArmed);
+  rig.mon().step(rig.feedback(press), 0.2, false);
+  ContactStatus st = rig.status();
+  EXPECT_EQ(st.phase, ContactPhase::kArmed);
+  EXPECT_NEAR(st.r[1], 6.0, 1e-6);
+  // The same through missed cycles: 30 ms missed + 30 ms good = 60 ms > 1/K.
+  ASSERT_EQ(rig.run(500), -1);  // released (observe: step never returns true)
+  ASSERT_LT(rig.status().r.cwiseAbs().maxCoeff(), 1e-3);
+  rig.mon().step(rig.feedback(press), 0.03, true);
+  rig.mon().step(rig.feedback(press), 0.03, false);
+  st = rig.status();
+  EXPECT_NEAR(st.r[1], 6.0, 1e-6);
+}
+
 TEST(ContactMonitor, MotionWithoutContactNoTrip) {
   Rig rig(config(), Sinusoid{});
   EXPECT_EQ(rig.run(4000), -1);

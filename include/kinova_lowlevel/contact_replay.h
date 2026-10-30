@@ -50,8 +50,9 @@ struct ReplayStats {
 
 constexpr double kReplayMovingQd = 0.02;  // [rad/s]
 
-// Row k steps the monitor with dt = t[k] - t[k-1] (0 for the first row). Statistics skip
-// the 5/gain settle. Throws std::invalid_argument on bad options or ragged input.
+// Row k steps the monitor with dt = t[k] - t[k-1] (0 for the first row), which the
+// monitor caps at 1/gain. Statistics skip the 5/gain settle. Throws
+// std::invalid_argument on bad options or ragged input.
 ReplayStats replay(const ReplayInput& in, const ReplayOptions& opt);
 
 }  // namespace kinova

@@ -1,5 +1,6 @@
 #include "kinova_lowlevel/contact_monitor.h"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
@@ -41,7 +42,10 @@ ContactMonitorConfig validated(const ContactMonitorConfig& c) {
 }  // namespace
 
 ContactMonitor::ContactMonitor(Dynamics& dyn, ContactMonitorConfig cfg)
-    : cfg_(validated(cfg)), settle_s_(5.0 / cfg_.gain), observer_(dyn, cfg_.gain) {
+    : cfg_(validated(cfg)),
+      settle_s_(5.0 / cfg_.gain),
+      max_step_s_(1.0 / cfg_.gain),
+      observer_(dyn, cfg_.gain) {
   theta_buf_[0] = cfg_.initial_theta;
   theta_buf_[1] = cfg_.initial_theta;
   theta_ = cfg_.initial_theta;
@@ -103,8 +107,8 @@ bool ContactMonitor::step(const JointFeedback& fb, double dt_s, bool missed) noe
     return latched;
   }
 
-  // 3. Step the observer over the true elapsed time.
-  status_.r = observer_.step(fb.q, fb.qd, fb.tau, pending_dt_ + dt_s);
+  // 3. Step the observer over the elapsed time, at most 1/K (see the header).
+  status_.r = observer_.step(fb.q, fb.qd, fb.tau, std::min(pending_dt_ + dt_s, max_step_s_));
   pending_dt_ = 0.0;
   if (latched) {
     status_.phase = ContactPhase::kLatched;

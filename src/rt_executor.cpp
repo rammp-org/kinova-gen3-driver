@@ -178,6 +178,10 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   // no mode may see fb before one real read.
   while (!exchange_ok()) {
   }
+  // When the last feedback read returned: the contact observer integrates the measured
+  // time between reads, not the nominal period (a miss blocks for its timeout, a mode
+  // switch for the set_actuator_modes handshake, an overrun runs long).
+  int64_t last_read_ns = ns_now();
 
   uint64_t cycle_index = 0;
   int64_t boundary = ns_now() + period_ns;
@@ -233,6 +237,8 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     if (cfg_.exit_on_fault && !missed) check_fault();
     const int64_t t1 = ns_now();
     const uint32_t comm_ns = clamp_u32(t1 - t0);
+    const double read_dt_s = double(t1 - last_read_ns) * 1e-9;
+    last_read_ns = t1;
 
     // 5. fault flag from feedback
     const bool fault = fb.fault;
@@ -240,7 +246,7 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     // 5b. contact. A trip (never on a miss: the monitor skips stale feedback)
     //     leaves on_contact_ to adopt: now when the actuator modes match, else a
     //     freeze this cycle and step 3 adopts it at the next boundary.
-    const bool latched = contact_ && contact_->step(fb, dt_s, missed);
+    const bool latched = contact_ && contact_->step(fb, read_dt_s, missed);
     bool frozen = false;
     // !missed: never on stale fb. Only reachable latched-and-not-in-float after two
     // misses in a row (step 3 deferred); the command is re-sent and the next good

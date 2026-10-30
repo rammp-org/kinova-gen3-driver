@@ -91,10 +91,18 @@ ThresholdCheck validate_contact_thresholds(const JointVec& theta, const JointVec
 // debounce_cycles, so a sustained push is one would-trip, and it re-arms only after it
 // drops back under θ.
 //
-// Samples. A missed cycle (missed = true) or one with any non-finite q/qd/tau does not
-// step the observer or touch the counters; its dt is carried into the next good step so
-// the observer integrates over the true elapsed time. Non-finite samples are counted in
-// bad_samples; a missed cycle is not (its feedback is stale, not bad).
+// Samples. dt_s is the time since the previous step(): the executor passes the measured
+// time between feedback reads, not the nominal period. A missed cycle (missed = true) or
+// one with any non-finite q/qd/tau does not step the observer or touch the counters; its
+// dt is carried into the next good step. Non-finite samples are counted in bad_samples;
+// a missed cycle is not (its feedback is stale, not bad).
+// A good step integrates the carried dt plus its own, capped at 1/K, so a longer gap
+// (timeouts back to back, a set_actuator_modes handshake) is one step of 1/K. At
+// K*dt = 1 the Euler step drops the previous r and lands on the external torque of a
+// still arm, plus K times the momentum change across the gap; uncapped, K*dt > 1 would
+// scale the previous r by (1 - K*dt) and overshoot. The observer is not re-seeded on a
+// gap: that would blind it for 5/K at every mode switch. Observer time (and so the
+// settling window) advances by the capped step.
 class ContactMonitor {
  public:
   // Throws std::invalid_argument naming the field: gain not finite and > 0,
@@ -119,7 +127,8 @@ class ContactMonitor {
   // At each RtExecutor::run start: consume a pending clear, then re-initialize the
   // observer (kSettling unless latched). Without a clear the latch is kept.
   void on_run_start() noexcept;
-  // One cycle on the cycle's feedback. Returns true while latched (enforce only).
+  // One cycle on the cycle's feedback, dt_s after the previous one. Returns true while
+  // latched (enforce only).
   bool step(const JointFeedback& fb, double dt_s, bool missed) noexcept;
 
  private:
@@ -128,6 +137,7 @@ class ContactMonitor {
 
   const ContactMonitorConfig cfg_;  // validated before observer_ is built
   const double settle_s_;
+  const double max_step_s_;  // 1/K: the longest step the observer integrates
   MomentumObserver observer_;
 
   // Threshold handoff: Supervisor writes the inactive buffer, then flips the index.

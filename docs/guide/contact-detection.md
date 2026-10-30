@@ -83,8 +83,8 @@ Each motion batch is confirmed with Swapnil before it runs.
 5. After a trip: force build-up, the position-mode to float window (look for the
    #92 droop), and the RT cycle time with and without the monitor (`--rt-csv`).
    Also measure the observer transient at position↔impedance mode switches:
-   `set_actuator_modes` integrates a nominal 1 ms over the handshake, so look at
-   `r` across each switch.
+   the monitor steps the observer once over the `set_actuator_modes` handshake,
+   capped at `1/K` (40 ms), so look at `r` across each switch.
 6. `observe` with real payloads (spoon, container): `r` while carrying. Then
    `enforce` with the same payloads: trip and check float with a payload heavier
    than the model. The expected risk is a slow, damped droop: the spring gives at
