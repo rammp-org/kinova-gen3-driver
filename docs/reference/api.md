@@ -850,7 +850,7 @@ floats the arm itself; the `Supervisor` reacts at sampler rate.
 Thresholds, from `interface/contact.h` and `interface/value_types.h`:
 
 ```cpp
-enum class ContactProfile { kSensitive, kDefault, kLoose, kCustom };
+enum class ContactProfile { kDefault = 0, kSensitive = 1, kLoose = 2, kCustom = 3 };  // = PROFILE_* on the wire
 struct ContactProfiles { JointVec sensitive, normal, loose, ceiling; };  // N·m; all NaN by default
 ThresholdCheck validate_profiles(const ContactProfiles&);   // ceiling, then each named profile
 ThresholdCheck resolve_contact(const ContactThresholdsRequest&, const ContactProfiles&,

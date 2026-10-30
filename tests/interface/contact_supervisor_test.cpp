@@ -486,6 +486,20 @@ TEST(ContactThresholds, CustomNonFiniteRefused) {
   EXPECT_EQ(f.sup.on_query_contact().profile, ContactProfile::kDefault);
 }
 
+// The wire numbering (SetContactThresholds.PROFILE_*): a request whose profile was
+// never set (0) gets the default profile, never the most sensitive one.
+TEST(ContactThresholds, ProfileZeroIsDefault) {
+  static_assert(static_cast<int>(ContactProfile::kDefault) == 0, "PROFILE_DEFAULT");
+  static_assert(static_cast<int>(ContactProfile::kSensitive) == 1, "PROFILE_SENSITIVE");
+  static_assert(static_cast<int>(ContactProfile::kLoose) == 2, "PROFILE_LOOSE");
+  static_assert(static_cast<int>(ContactProfile::kCustom) == 3, "PROFILE_CUSTOM");
+  ContactThresholdsRequest r;
+  r.profile = static_cast<ContactProfile>(0);
+  JointVec theta = JointVec::Zero();
+  ASSERT_TRUE(resolve_contact(r, profiles(), theta).ok);
+  EXPECT_EQ(theta, kNormal);
+}
+
 TEST(ContactThresholds, UnauthorizedRefusedByArbiter) {
   ContactFix f;
   Arbiter arb{f.sup, f.sup, f.sup, ArbitrationMode::kEnforced, 1};

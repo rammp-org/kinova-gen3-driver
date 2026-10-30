@@ -29,8 +29,9 @@ that heading to the new version and bumps `package.xml`.
   contact; call /clear_faults"`) and gripper setpoints are refused. The latch
   survives link outages. `Supervisor::clear_contact()` clears it and returns
   the arm to the position hold at the measured pose. Threshold profiles
-  (`ContactProfile` `kSensitive` / `kDefault` / `kLoose` / `kCustom`,
-  `interface/contact.h`) are set through the token-gated
+  (`ContactProfile` `kDefault = 0` / `kSensitive = 1` / `kLoose = 2` /
+  `kCustom = 3`, the `SetContactThresholds.PROFILE_*` wire values, so an unset
+  profile selects the default; `interface/contact.h`) are set through the token-gated
   `CommandSink::on_set_contact_thresholds`. Anything non-finite, ≤ 0 or above
   the ceiling is refused, naming the joint and the limit. State is read through
   the ungated `on_query_contact`. Bad profiles in startup config throw from the

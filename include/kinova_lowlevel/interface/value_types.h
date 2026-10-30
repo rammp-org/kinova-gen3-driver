@@ -213,7 +213,9 @@ struct SpeedResult {
 // Contact-detection thresholds. Named profiles are per-joint vectors from startup
 // config (see interface/contact.h); kCustom carries exact values. Every value must
 // be finite, > 0 and <= the per-joint ceiling: refused otherwise, never clamped.
-enum class ContactProfile { kSensitive, kDefault, kLoose, kCustom };
+// The values are SetContactThresholds.PROFILE_* on the wire (the node static_asserts
+// each): 0 is kDefault, so an unset profile field selects the default profile.
+enum class ContactProfile { kDefault = 0, kSensitive = 1, kLoose = 2, kCustom = 3 };
 struct ContactThresholdsRequest {
   ContactProfile profile = ContactProfile::kDefault;
   JointVec custom = JointVec::Zero();  // N·m, read iff profile == kCustom

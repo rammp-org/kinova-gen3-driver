@@ -26,17 +26,17 @@ ThresholdCheck resolve_contact(const ContactThresholdsRequest& req, const Contac
   };
   // No default: adding a profile is a compile warning here, not a silent case.
   switch (req.profile) {
-    case ContactProfile::kSensitive:
-      return check(p.sensitive);
     case ContactProfile::kDefault:
       return check(p.normal);
+    case ContactProfile::kSensitive:
+      return check(p.sensitive);
     case ContactProfile::kLoose:
       return check(p.loose);
     case ContactProfile::kCustom:
       return check(req.custom);
   }
   // An out-of-enum byte from the wire.
-  return {false, "unknown contact profile: expected sensitive, default, loose or custom"};
+  return {false, "unknown contact profile: expected default, sensitive, loose or custom"};
 }
 
 }  // namespace kinova::interface
