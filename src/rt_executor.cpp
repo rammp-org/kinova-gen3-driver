@@ -168,8 +168,9 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     throw ArmFault(msg);
   };
 
-  // Re-settle the contact observer for this run; the latch is kept, so a run that
-  // starts latched adopts on_contact_ at its first boundary (step 3).
+  // Re-settle the contact observer for this run; the latch is kept (a clear
+  // requested between runs is consumed here), so a run that starts latched adopts
+  // on_contact_ at its first boundary (step 3).
   if (contact_) contact_->on_run_start();
 
   // Seed one feedback read with the benign hold command so fb is populated and

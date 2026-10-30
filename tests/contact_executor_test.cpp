@@ -301,6 +301,35 @@ TEST(ContactExecutor, LatchSurvivesRunRestartAfterCommsLost) {
   expect_restart_in_float(w);
 }
 
+// A clear and a mode request made while no run is going (latched, the link down):
+// the next run adopts the request first and never float, so a combined clear is
+// one set_actuator_modes handshake, not float then position.
+TEST(ContactExecutor, ClearBetweenRunsAdoptsTheRequestNotFloat) {
+  World w;
+  w.attach();
+  w.bench.on_call = [&](uint64_t i) {
+    if (i == kPushAt) w.sim.set_external_torque(push_j2(6.0));
+  };
+  w.ex.request_mode(&w.pos);
+  w.run_until(kPushAt + 100);
+  ASSERT_TRUE(w.mon->latched());
+
+  w.bench.on_call = nullptr;
+  w.sim.set_external_torque(JointVec::Zero());
+  w.mon->request_clear();
+  JointPositionMode hold(w.dyn);  // the Supervisor's position hold
+  w.ex.request_mode(&hold);
+  const size_t switches_before = w.bench.switches.size();
+  const uint64_t first_call = w.bench.calls;
+  w.run_until(first_call + 100);
+
+  EXPECT_FALSE(w.mon->latched());
+  ASSERT_EQ(w.bench.switches.size(), switches_before + 1);
+  EXPECT_EQ(w.bench.switches[switches_before].second, all(ActuatorMode::kPosition));
+  for (uint64_t i = first_call + 2; i < w.bench.sent.size(); ++i)
+    ASSERT_EQ(w.bench.sent[i].mode, ActuatorMode::kPosition) << "call " << i;
+}
+
 TEST(ContactExecutor, ObserveNeverChangesCommand) {
   auto run = [](bool pushed, std::vector<JointCommand>& sent, uint64_t& would_trips) {
     World w;

@@ -376,6 +376,20 @@ TEST(ContactMonitor, OnRunStartResettlesButKeepsLatch) {
   EXPECT_EQ(armed.status().phase, ContactPhase::kSettling);
 }
 
+// A clear requested while no run is going (the link down, latched) is consumed by
+// the next run start, so that run starts unlatched and settling.
+TEST(ContactMonitor, OnRunStartConsumesAPendingClear) {
+  Rig rig(config(ContactDetection::kEnforce, kSensitive));
+  ASSERT_GE(rig.run(kSettleCycles + kDebounce + 2, push(1, 6.0)), 0);
+  ASSERT_TRUE(rig.mon().latched());
+  rig.mon().request_clear();
+  rig.mon().on_run_start();
+  EXPECT_FALSE(rig.mon().latched());
+  EXPECT_EQ(rig.status().phase, ContactPhase::kSettling);
+  EXPECT_FALSE(rig.step());
+  EXPECT_EQ(rig.status().phase, ContactPhase::kSettling);
+}
+
 TEST(ContactThresholds, ValidateRefusesAndNamesJoint) {
   EXPECT_TRUE(validate_contact_thresholds(kDefault, kCeiling).ok);
   EXPECT_TRUE(validate_contact_thresholds(kCeiling, kCeiling).ok);  // at the ceiling is allowed

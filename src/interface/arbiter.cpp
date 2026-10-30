@@ -186,7 +186,8 @@ ContactThresholdsResult Arbiter::on_set_contact_thresholds(const ContactThreshol
   std::lock_guard<std::mutex> l(m_);
   if (!admit(r.token)) {
     ++rejected_;
-    return {false, "not authorized"};
+    const ContactState s = down_.on_query_contact();  // a refusal reports what is active
+    return {false, "not authorized", s.profile, s.status.theta};
   }
   return down_.on_set_contact_thresholds(r);
 }

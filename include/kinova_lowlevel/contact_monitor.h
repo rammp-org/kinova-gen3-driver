@@ -70,7 +70,7 @@ ThresholdCheck validate_contact_thresholds(const JointVec& theta, const JointVec
 //     adopted at the top of the next step(). A reader copy can only tear if two
 //     set_thresholds() calls land inside one 56-byte copy; each joint then holds a
 //     value from one of two validated vectors.
-//   - clear: an atomic flag, consumed (exchange) by the next step().
+//   - clear: an atomic flag, consumed (exchange) by the next step() or on_run_start().
 //   - latch: an atomic written only by the RT thread.
 //   - status: a Seqlock, stored at the end of every step() and by on_run_start().
 //
@@ -83,9 +83,10 @@ ThresholdCheck validate_contact_thresholds(const JointVec& theta, const JointVec
 //     would_trips += 1 and `last` records it. Joints reaching the count on the same
 //     cycle are one crossing, recorded under the lowest-numbered joint.
 //   - kLatched (enforce only): the first crossing latches. The latch holds until a clear
-//     and nothing else: on_run_start() re-settles the observer but keeps the latch, and
-//     phase stays kLatched. While latched the observer still runs (r stays live in the
-//     status) but nothing is counted.
+//     and nothing else: on_run_start() re-settles the observer but keeps the latch
+//     (unless a clear is pending, which it consumes), and phase stays kLatched. While
+//     latched the observer still runs (r stays live in the status) but nothing is
+//     counted.
 // Observe never latches. A joint counts once per crossing: its counter saturates at
 // debounce_cycles, so a sustained push is one would-trip, and it re-arms only after it
 // drops back under θ.
@@ -103,7 +104,8 @@ class ContactMonitor {
   // --- non-RT, single writer (the Supervisor) ---
   // Caller has validated theta against ceiling(); takes effect on the next step().
   void set_thresholds(const JointVec& theta) noexcept;
-  // Consumed by the next step(): unlatch, re-initialize the observer, phase kSettling.
+  // Consumed by the next step() or on_run_start(): unlatch, re-initialize the
+  // observer, phase kSettling.
   void request_clear() noexcept;
 
   // --- any thread ---
@@ -114,8 +116,8 @@ class ContactMonitor {
   ContactDetection detection() const noexcept { return cfg_.detection; }
 
   // --- RT thread only ---
-  // At each RtExecutor::run start: re-initialize the observer (kSettling unless
-  // latched). The latch is kept.
+  // At each RtExecutor::run start: consume a pending clear, then re-initialize the
+  // observer (kSettling unless latched). Without a clear the latch is kept.
   void on_run_start() noexcept;
   // One cycle on the cycle's feedback. Returns true while latched (enforce only).
   bool step(const JointFeedback& fb, double dt_s, bool missed) noexcept;
