@@ -826,7 +826,7 @@ floats the arm itself; the `Supervisor` reacts at sampler rate.
 
 - **Halt.** The sampler calls `on_halt(HaltReason::kContact)` once per rising
   edge of `ContactMonitor::latched()`. A clear resets the edge, so a re-trip
-  after a clear halts again even if the sampler never saw the latch go down. The active and queued goals settle
+  after a clear halts again even if the sampler never saw the latch go down. The active goal and any goal still in the inbox settle
   `result_code::kContactStop = -11` with `"halted: unexpected contact"`. A
   second halt landing before the sampler takes a pending contact halt (an
   ArmLink drop, an e-stop) keeps the contact reason.
