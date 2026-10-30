@@ -104,6 +104,17 @@ that heading to the new version and bumps `package.xml`.
   `TrajectoryExecutor::submit` returns the new
   `SubmitResult::kRejectedQueueWhileActive`, and `ExecStatus::promoted` is gone.
 
+- **Behaviour change:** a trajectory goal whose consecutive waypoints are less
+  than 10 ns apart (`kMinSegmentSpanSec`), or that has a non-finite stamp, is
+  now refused, at `on_trajectory_goal` and again before any mode switch when
+  the goal runs (settled `kInvalidGoal`). `TrajectoryExecutor::submit` refuses
+  it too, with the new `SubmitResult::kRejectedBadTimestamps`. That includes
+  duplicate and out-of-order `time_from_start` values. Duplicates used to make
+  the reference step at that instant, and a goal whose timestamps were all
+  left at zero commanded its first point and reported success at once,
+  without moving through the rest. Below 10 ns the quintic's acceleration
+  feedforward is dominated by rounding.
+
 - `KortexTransport` classifies KORTEX errors at the boundary: an error reply is
   `ArmRejected` (was `KDetailedException`), a failed local `sendto` is a
   survivable `TransportTimeout` (was a fatal `runtime_error`), an RPC timeout is
