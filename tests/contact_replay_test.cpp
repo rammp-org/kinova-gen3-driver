@@ -2,7 +2,9 @@
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <stdexcept>
+#include <string>
 
 using namespace kinova;
 
@@ -63,4 +65,32 @@ TEST(ContactReplay, DebounceMsConvertsToRows) {
   EXPECT_FALSE(replay(in, o).first_trip[0].valid);
   o.debounce_cycles = debounce_rows_from_ms(in.t, 5.0);
   EXPECT_TRUE(replay(in, o).first_trip[0].valid);
+}
+
+// strtod reads "abc" as 0 and "1.5x" as 1.5; a field that is not a whole number must
+// be refused with the row and column, not replayed as a still arm.
+TEST(ContactReplay, NonNumericFieldThrows) {
+  const std::string head =
+      "t,q1,q2,q3,q4,q5,q6,q7,qd1,qd2,qd3,qd4,qd5,qd6,qd7,"
+      "tau1,tau2,tau3,tau4,tau5,tau6,tau7\n";
+  auto row = [](const std::string& tau3, const std::string& eol = "\n") {
+    return "0.01,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,2," + tau3 + ",4,5,6,7" + eol;
+  };
+  auto load = [&](const std::string& body) {
+    const std::string path = ::testing::TempDir() + "contact_replay_bad.csv";
+    std::ofstream(path) << head << body;
+    return load_replay_csv(path);
+  };
+  // Good rows parse, including padding and a CRLF line end.
+  EXPECT_EQ(load(row("3") + row(" 3.5 ", "\r\n")).tau[1][2], 3.5);
+  for (const char* bad : {"abc", "1.5x", "", "--1"}) {
+    try {
+      load(row("3") + row(bad));
+      ADD_FAILURE() << "accepted '" << bad << "'";
+    } catch (const std::runtime_error& e) {
+      const std::string m = e.what();
+      EXPECT_NE(m.find(":3:"), std::string::npos) << m;   // the row
+      EXPECT_NE(m.find("tau3"), std::string::npos) << m;  // the column
+    }
+  }
 }

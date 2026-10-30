@@ -1,6 +1,7 @@
 #include "kinova_lowlevel/contact_replay.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -53,7 +54,18 @@ ReplayInput load_replay_csv(const std::string& path, double tau_sign) {
       throw std::runtime_error(path + ":" + std::to_string(row) + ": expected " +
                                std::to_string(header.size()) + " columns, got " +
                                std::to_string(c.size()));
-    auto num = [&](size_t i) { return std::strtod(c[i].c_str(), nullptr); };
+    // The whole field must be a number (surrounding whitespace, a CRLF '\r', is fine):
+    // plain strtod reads "abc" as 0 and "1.5x" as 1.5.
+    auto num = [&](size_t i) {
+      const char* s = c[i].c_str();
+      char* end = nullptr;
+      const double v = std::strtod(s, &end);
+      while (end != s && std::isspace(static_cast<unsigned char>(*end))) ++end;
+      if (end == s || *end != '\0')
+        throw std::runtime_error(path + ":" + std::to_string(row) + ": column " + header[i] +
+                                 ": not a number: '" + c[i] + "'");
+      return v;
+    };
     JointVec q, qd, tau;
     for (int j = 0; j < kNumJoints; ++j) {
       q[j] = num(cq[j]);
