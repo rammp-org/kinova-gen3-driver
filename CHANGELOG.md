@@ -173,10 +173,12 @@ that heading to the new version and bumps `package.xml`.
   the miss budget declared comms lost. `compute()` now gets the wall time since
   the mode's previous `compute()`, capped at `max_consecutive_misses` x (the new
   `kDefaultCyclicTimeoutMs` + one period), 63 ms at the defaults. The first
-  `compute()` in a mode still gets `1 / rate_hz`. The command watchdogs, gain
-  ramps, `ik_fault_s`, the torque feedforward decay, the reference rate
-  limiters and `JointVelocityMode`'s reference integration all follow wall
-  time. So after a miss the position and velocity modes' setpoint moves about
+  `compute()` in a mode still gets `1 / rate_hz`. Because `dt` is measured
+  every cycle, it varies by the loop's wake and round-trip jitter even without
+  misses; every mode in the library sums it, none divides by it. The command
+  watchdogs, gain ramps, `ik_fault_s`, the torque feedforward decay, the
+  reference rate limiters and `JointVelocityMode`'s reference integration all
+  follow wall time. So after a miss the position and velocity modes' setpoint moves about
   21 ms worth in one cycle per miss, at most the cap's worth: ~10 mrad per
   miss at the position mode's default 0.5 rad/s, up to ~29 mrad per miss in
   the velocity mode at a 1.4 rad/s `max_qd`. Their leashes still bound it.

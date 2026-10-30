@@ -332,8 +332,11 @@ class RtExecutor {
   `compute`, so time lost to misses counts on the modes' watchdogs, gain
   ramps, rate limiters and integrators (#103). The first `compute` after
   `run` starts or after a mode switch gets the nominal `1 / rate_hz`: the
-  switch's pumps are not time the mode lived through (so a miss in the switch
-  cycle itself goes uncounted). It is capped at `max_consecutive_misses` x
+  switch's pumps are not time the mode lived through. Misses between a switch
+  and the new mode's first good exchange go uncounted: at most
+  `max_consecutive_misses - 1`, ~42 ms at the defaults. Without misses `dt_s`
+  still varies cycle to cycle by the loop's wake and round-trip jitter. It is
+  capped at `max_consecutive_misses` x
   (`kDefaultCyclicTimeoutMs` + one period), 63 ms at the defaults: no run
   survives a longer burst of misses, so a longer gap is a stalled loop and is
   not passed on as one step. The cap assumes the default cyclic timeout; a
