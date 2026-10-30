@@ -118,6 +118,37 @@ TEST(ExecutorSubmit, RejectsAnOutOfRangeOrNonFiniteSpeedScale) {
       SubmitResult::kRejectedSpeedScale);
 }
 
+TEST(ExecutorSubmit, RejectsWaypointsUnder10nsApart) {
+  // Duplicate, out-of-order, sub-10 ns and NaN stamps would reach
+  // sample_target as a step or a meaningless quintic qdd (see
+  // QuinticDegeneraciesAreSafe). Exactly 10 ns is accepted.
+  RecordingSink sink;
+  kinova::interface::TrajectoryExecutor ex(sink);
+  using namespace kinova::interface;
+  auto plan = [](double t1, double t2) {
+    Trajectory tr;
+    tr.points = {{vec7(0.0), 0.0}, {vec7(0.1), t1}, {vec7(0.2), t2}};
+    return tr;
+  };
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  for (auto [t1, t2] : {std::pair{0.0, 1.0}, std::pair{1.0, 1.0}, std::pair{1.0, 0.5},
+                        std::pair{1e-9, 1.0}, std::pair{9e-9, 1.0}, std::pair{nan, 1.0}}) {
+    EXPECT_EQ(ex.submit(plan(t1, t2), ControlModeKind::kPosition, Preemption::kLatestWins,
+                        vec7(-1.0)),
+              SubmitResult::kRejectedShortSegment)
+        << "t1 " << t1 << " t2 " << t2;
+    EXPECT_FALSE(ex.is_active()) << "t1 " << t1 << " t2 " << t2;
+  }
+  ASSERT_EQ(
+      ex.submit(plan(10e-9, 1.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)),
+      SubmitResult::kAccepted);
+  // A refused preempt leaves the active goal running.
+  EXPECT_EQ(
+      ex.submit(plan(1.0, 1.0), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)),
+      SubmitResult::kRejectedShortSegment);
+  EXPECT_TRUE(ex.is_active());
+}
+
 TEST(ExecutorTick, SamplesToSinkAndCompletesOnTime) {
   RecordingSink sink;
   kinova::interface::TrajectoryExecutor ex(sink);
@@ -478,6 +509,7 @@ TEST(TrajectorySample, QuinticDegeneraciesAreSafe) {
   // nothing goes non-finite. qdd is checked for finiteness only: below ~10 ns
   // the 1/span^2 scaling amplifies q's rounding until it dominates (~80 rad/s^2
   // off at 1 ns), and once span*span underflows (~2e-162 s) qdd is inf or NaN.
+  // submit() refuses spans under kMinSegmentSpanSec; this exercises the sampler.
   JointWaypoint n0{vec7(0.3), 0.0}, n1{vec7(0.3 + 5e-10), 1e-9}, n2{vec7(1.0), 1.0};
   n0.qd = n1.qd = vec7(0.5);
   n0.qdd = n1.qdd = vec7(1.0);

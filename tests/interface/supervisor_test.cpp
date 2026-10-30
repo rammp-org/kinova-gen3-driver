@@ -237,6 +237,31 @@ TEST(Supervisor, AcceptedGoalWithBelowFloorScaleIsRefusedNotRunFaster) {
   EXPECT_EQ(f.be.last_result_id()[0], 7);
 }
 
+TEST(Supervisor, GoalWithWaypointsUnder10nsApartIsRefused) {
+  // Refused at accept time, and again by submit() on the path that bypasses it.
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.4);
+  g.trajectory.points[1].t_s = 1e-9;
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  EXPECT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kReject);
+  interface::GoalId id{};
+  id[0] = 8;
+  f.sup.on_trajectory_accepted(id, g);  // bypasses the front gate
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kInvalidGoal);
+  EXPECT_NE(f.be.last_result().error_string.find("10 ns"), std::string::npos)
+      << f.be.last_result().error_string;
+  EXPECT_EQ(f.be.last_result_id()[0], 8);
+}
+
 TEST(Supervisor, LatestWinsPreemptionSettlesOldGoalPreempted) {
   SupFix f;
   f.sup.start();

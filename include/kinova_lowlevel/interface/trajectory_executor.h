@@ -49,7 +49,19 @@ enum class SubmitResult {
   kRejectedEmpty,
   kRejectedSpeedScale,
   kRejectedQueueWhileActive,
+  kRejectedShortSegment,
 };
+
+// Shortest gap submit() accepts between consecutive waypoints, in seconds.
+// Below it the quintic's 1/span^2 scaling turns q's rounding into a
+// meaningless qdd (~80 rad/s^2 off at 1 ns), and a zero or negative gap
+// (duplicate or out-of-order stamps) makes the reference step. Planners space
+// waypoints milliseconds apart, so nothing real comes near it.
+inline constexpr double kMinSegmentSpanSec = 10e-9;
+
+// True when every consecutive pair of waypoints is at least kMinSegmentSpanSec
+// apart. A NaN stamp fails.
+bool segments_long_enough(const Trajectory& tr);
 
 // Floor for the effective scale. Zero would stop the clock and hang the goal
 // forever; this is slow enough to be a hold in practice and still terminates.

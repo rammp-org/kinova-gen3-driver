@@ -407,9 +407,12 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       if (sr != SubmitResult::kAccepted) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
-        r.error_string = sr == SubmitResult::kRejectedSpeedScale
-                             ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
-                             : "rejected by executor";
+        r.error_string =
+            sr == SubmitResult::kRejectedSpeedScale
+                ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
+            : sr == SubmitResult::kRejectedShortSegment
+                ? "waypoints less than 10 ns apart, duplicated or out of order"
+                : "rejected by executor";
         action_.settle(in.id, r);
         continue;
       }
@@ -468,6 +471,8 @@ GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (!ready_.load()) return GoalResponse::kReject;               // faulted or reconnecting
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
+  // Waypoints under kMinSegmentSpanSec apart, duplicated or out of order.
+  if (!segments_long_enough(g.trajectory)) return GoalResponse::kReject;
   // Refused below kMinSpeedScale, not just at/below zero: effective_scale()
   // floors there internally, and accepting a request slower than the floor
   // would silently RUN it faster than asked -- the clamp this feature's

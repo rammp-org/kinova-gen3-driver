@@ -80,11 +80,24 @@ c₄ = −15d + 8v₀ + 7v₁ + 1.5A₀ −     A₁
 c₅ =   6d − 3v₀ − 3v₁ − 0.5A₀ + 0.5A₁
 ```
 
-Duplicate timestamps never produce a zero-span segment: the segment search
-brackets every query with `a.t_s ≤ t < b.t_s`, so it skips the zero-width
-pair and the reference steps from the first duplicate's position to the
-last's at that instant. The `T ≤ 0` guard in `sample_target` is defensive;
-no query reaches it.
+### Degenerate segments
+
+`submit()` refuses a trajectory with consecutive waypoints less than 10 ns
+apart (`kMinSegmentSpanSec`), which covers duplicate and out-of-order
+timestamps, so a running goal never contains such a segment. Below 10 ns the
+`1/T²` in the quintic's `qdd` amplifies the rounding in `q` until it
+dominates: about 80 rad/s² off at 1 ns. ROS stamps are whole nanoseconds,
+so 1 ns is the shortest gap a message can carry. Likely sources are a
+client that leaves `time_from_start` at zero or repeats a point when joining
+two plans. Before this check, a repeated stamp made the reference step, and a
+goal with every stamp at zero commanded its first point and reported success
+at once.
+
+`sample_target` called directly still copes. Duplicate timestamps never
+produce a zero-span segment: the segment search brackets every query with
+`a.t_s ≤ t < b.t_s`, so it skips the zero-width pair and the reference steps
+from the first duplicate's position to the last's at that instant. The
+`T ≤ 0` guard in `sample_target` is defensive; no query reaches it.
 
 ## Hermite is not hull-preserving
 

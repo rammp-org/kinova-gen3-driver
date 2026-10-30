@@ -649,6 +649,14 @@ at `on_trajectory_goal` (`GoalResponse::kReject`) and again by
 accepting a below-floor request and silently running it at the floor would be
 *faster* than asked for, not slower.
 
+### Waypoint timestamps
+
+Consecutive waypoints must be at least `kMinSegmentSpanSec` (10 ns) apart, so
+timestamps must strictly increase. A goal that breaks this, including one with
+a duplicate, out-of-order or NaN `t_s`, is refused at `on_trajectory_goal` and
+again by `TrajectoryExecutor::submit` (`SubmitResult::kRejectedShortSegment`,
+settled `kInvalidGoal`). See [degenerate segments](../deep-dive/trajectory-interpolation.md#degenerate-segments).
+
 ### `TrajectoryGoal::preemption` — `interface/value_types.h`
 
 `Preemption` says what a goal does to a goal that is already running:
