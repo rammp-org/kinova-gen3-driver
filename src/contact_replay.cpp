@@ -94,8 +94,26 @@ ReplayStats replay(const ReplayInput& in, const ReplayOptions& opt) {
   cfg.gain = opt.gain;
   cfg.debounce_cycles = opt.debounce_cycles;
   cfg.initial_theta = opt.theta;
-  cfg.ceiling = opt.theta;  // replay has no profile ceiling; the thresholds are the ceiling
+  // Replay has no profile ceiling; the thresholds are the ceiling.
+  cfg.ceiling = opt.impulse ? opt.theta.cwiseMax(opt.impulse_theta) : opt.theta;
+  cfg.impulse = opt.impulse;
+  cfg.impulse_theta = opt.impulse_theta;
+  cfg.slow_tau_s = opt.slow_tau_s;
+  const double dt_med = median_dt(in.t);
+  cfg.weigh_window_cycles =
+      dt_med > 0.0 ? std::max(1, static_cast<int>(std::lround(opt.weigh_window_s / dt_med))) : 1;
   ContactMonitor mon(dyn, cfg);
+  // (time, true = begin / false = end), in time order.
+  std::vector<std::pair<double, bool>> events;
+  for (const auto& g : opt.grasps) {
+    if (!(g.first < g.second))
+      throw std::invalid_argument("replay: a grasp's begin must come before its end");
+    events.push_back({g.first, true});
+    events.push_back({g.second, false});
+  }
+  std::sort(events.begin(), events.end());
+  size_t next_event = 0;
+  uint32_t seen_weighs = 0;
 
   ReplayStats s;
   s.r.reserve(n);
@@ -107,6 +125,12 @@ ReplayStats replay(const ReplayInput& in, const ReplayOptions& opt) {
     fb.q = in.q[k];
     fb.qd = in.qd[k];
     fb.tau = in.tau[k];
+    for (; next_event < events.size() && in.t[k] >= events[next_event].first; ++next_event) {
+      if (events[next_event].second)
+        mon.request_load_change_begin();
+      else
+        mon.request_load_change_end(opt.grasp_com);
+    }
     mon.step(fb, dt, false);
     ContactStatus st;
     if (!mon.status(st)) throw std::logic_error("replay: torn status read on a single thread");
@@ -114,8 +138,15 @@ ReplayStats replay(const ReplayInput& in, const ReplayOptions& opt) {
 
     if (st.would_trips > seen_trips) {
       seen_trips = st.would_trips;
+      const ReplayTrip trip{true, in.t[k], st.last.r[st.last.joint], st.last.impulse};
       ReplayTrip& ft = s.first_trip[st.last.joint];
-      if (!ft.valid) ft = {true, in.t[k], st.last.r[st.last.joint]};
+      if (!ft.valid) ft = trip;
+      s.trips.push_back(trip);
+      s.trip_joints.push_back(st.last.joint);
+    }
+    if (st.weigh.count > seen_weighs) {
+      seen_weighs = st.weigh.count;
+      s.weighs.push_back({in.t[k], st.weigh});
     }
     if (st.phase == ContactPhase::kArmed && in.qd[k].cwiseAbs().maxCoeff() > kReplayMovingQd) {
       ++s.moving_samples;

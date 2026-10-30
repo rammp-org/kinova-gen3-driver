@@ -369,6 +369,7 @@ add_executable(unit_tests
     tests/dynamics_test.cpp
     tests/momentum_observer_test.cpp
     tests/contact_monitor_test.cpp
+    tests/contact_payload_test.cpp
     tests/contact_replay_test.cpp
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp

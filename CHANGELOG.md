@@ -14,6 +14,21 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- **Payload compensation and an impulse trip in `ContactMonitor`.** A held object
+  (`TipPayload`: mass and centre of mass in the EE frame) is compensated in `r`, so
+  carrying it does not need a looser profile: declare it with `set_payload`, or
+  weigh it with `request_load_change_begin` (tare, arm still, before the gripper
+  moves) and `request_load_change_end(com)` (arm still after the lift). Between the
+  two, the torques a held load can produce are projected out of both trips, so the
+  grasp does not trip and a bump from the side still does. The optional impulse
+  trip (`ContactMonitorConfig::impulse`, `impulse_theta`, `slow_tau_s`) also trips
+  on `r` minus its 0.2 s average, which a lean, hand-guiding or a resting contact
+  does not move, so its thresholds can sit well under `θ`. `ContactStatus` gains
+  `fast`, `payload`, `load_change` and `weigh`; `ContactTrip` gains `impulse`.
+  New `Dynamics::tip_payload_regressor`. `contact_replay` gains `--impulse`,
+  `--grasp BEGIN,END` and `--grasp-com`. The shared `Dynamics` is not modified:
+  the control modes do not see the payload.
+
 - **`contact_replay`**, an offline tool that replays a recorded joint-state CSV
   through the `ContactMonitor` (observe mode) to tune contact thresholds between
   arm sessions, and `tools/contact/parity.py`, which checks its residual against

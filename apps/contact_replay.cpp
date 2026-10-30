@@ -4,7 +4,8 @@
 //
 //   contact_replay --urdf F --ee-frame E --csv in.csv --out r.csv
 //                  [--gain 25] [--debounce 5 | --debounce-ms 5] [--thresholds a,b,c,d,e,f,g]
-//                  [--tau-sign -1]
+//                  [--tau-sign -1] [--impulse a,b,c,d,e,f,g] [--slow-tau 0.2]
+//                  [--grasp BEGIN,END ...] [--grasp-com x,y,z]
 #include "kinova_lowlevel/contact_replay.h"
 
 #include <cstdio>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace kinova;
 
@@ -22,21 +24,28 @@ void usage() {
       stderr,
       "usage: contact_replay --urdf F --ee-frame E --csv in.csv --out r.csv\n"
       "       [--gain 25] [--debounce ROWS | --debounce-ms MS] [--thresholds a,b,c,d,e,f,g]\n"
-      "       [--tau-sign -1]\n"
-      "  --tau-sign -1  raw core v1.2.0 recording (default 1: command convention)\n");
+      "       [--tau-sign -1] [--impulse a,b,c,d,e,f,g] [--slow-tau 0.2]\n"
+      "       [--grasp BEGIN,END ...] [--grasp-com x,y,z]\n"
+      "  --tau-sign -1  raw core v1.2.0 recording (default 1: command convention)\n"
+      "  --impulse      enable the impulse trip with these thresholds [N·m]\n"
+      "  --grasp        a grasp or release: tare from BEGIN s, weigh from END s, each\n"
+      "                 window 0.3 s with the arm still; repeatable\n"
+      "  --grasp-com    the held object's centre of mass, EE frame [m] (0,0,0.10)\n");
 }
 
-JointVec parse_thresholds(const std::string& s) {
-  JointVec v;
+std::vector<double> parse_list(const std::string& flag, const std::string& s, size_t count) {
+  std::vector<double> v;
   std::stringstream ss(s);
   std::string cell;
-  int n = 0;
-  while (std::getline(ss, cell, ',')) {
-    if (n >= kNumJoints) throw std::runtime_error("--thresholds needs exactly 7 values");
-    v[n++] = std::stod(cell);
-  }
-  if (n != kNumJoints) throw std::runtime_error("--thresholds needs exactly 7 values");
+  while (std::getline(ss, cell, ',')) v.push_back(std::stod(cell));
+  if (v.size() != count)
+    throw std::runtime_error(flag + " needs exactly " + std::to_string(count) + " values");
   return v;
+}
+
+JointVec parse_thresholds(const std::string& flag, const std::string& s) {
+  const std::vector<double> v = parse_list(flag, s, kNumJoints);
+  return Eigen::Map<const JointVec>(v.data());
 }
 }  // namespace
 
@@ -68,8 +77,19 @@ int main(int argc, char** argv) {
       } else if (a == "--debounce-ms")
         debounce_ms = std::stod(value());
       else if (a == "--thresholds")
-        opt.theta = parse_thresholds(value());
-      else if (a == "--tau-sign")
+        opt.theta = parse_thresholds(a, value());
+      else if (a == "--impulse") {
+        opt.impulse = true;
+        opt.impulse_theta = parse_thresholds(a, value());
+      } else if (a == "--slow-tau")
+        opt.slow_tau_s = std::stod(value());
+      else if (a == "--grasp") {
+        const std::vector<double> g = parse_list(a, value(), 2);
+        opt.grasps.push_back({g[0], g[1]});
+      } else if (a == "--grasp-com") {
+        const std::vector<double> c = parse_list(a, value(), 3);
+        opt.grasp_com = Eigen::Vector3d(c[0], c[1], c[2]);
+      } else if (a == "--tau-sign")
         tau_sign = std::stod(value());
       else
         throw std::runtime_error("unknown argument " + a);
@@ -106,11 +126,23 @@ int main(int argc, char** argv) {
     for (int j = 0; j < kNumJoints; ++j) {
       std::printf("  %d   %6.2f  %6.2f  %6.2f   ", j + 1, opt.theta[j], s.rms[j], s.peak[j]);
       if (s.first_trip[j].valid)
-        std::printf("t=%.3f s  r=%.2f\n", s.first_trip[j].t, s.first_trip[j].r);
+        std::printf("t=%.3f s  r=%.2f%s\n", s.first_trip[j].t, s.first_trip[j].r,
+                    s.first_trip[j].impulse ? "  (impulse)" : "");
       else
         std::printf("-\n");
     }
     std::printf("would-be trips: %zu\n", s.would_trips);
+    for (size_t i = 0; i < s.trips.size(); ++i)
+      std::printf("  t=%.3f s  joint %d%s\n", s.trips[i].t, s.trip_joints[i] + 1,
+                  s.trips[i].impulse ? "  impulse" : "");
+    static const char* const kOutcome[] = {"none",           "ok",          "not still at tare",
+                                           "not still",      "unexplained", "out of range",
+                                           "no load change", "aborted"};
+    for (const ReplayWeigh& w : s.weighs) {
+      const WeighResult& r = w.result;
+      std::printf("weigh at t=%.3f s: %s, change %+.3f kg, fit %.2f N·m -> payload %.3f kg\n", w.t,
+                  kOutcome[static_cast<int>(r.outcome)], r.delta_kg, r.fit_rms, r.payload.mass);
+    }
   } catch (const std::exception& e) {
     std::fprintf(stderr, "contact_replay: %s\n\n", e.what());
     usage();

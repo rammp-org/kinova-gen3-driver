@@ -56,6 +56,20 @@ inline std::string articulate_gripper(std::string xml) {
   return xml;
 }
 
+// The fixture with a point mass fixed to `parent` (the EE frame) at c, as a child link:
+// Pinocchio lumps it into link 7, the way a held object is.
+inline std::string with_payload_link(double mass, const Eigen::Vector3d& c,
+                                     const std::string& parent = "gen3_end_effector_link") {
+  std::string xml = read_file(URDF_PATH);
+  std::ostringstream link;
+  link << "<link name=\"test_payload\"><inertial><origin xyz=\"" << c.x() << " " << c.y() << " "
+       << c.z() << "\" rpy=\"0 0 0\"/><mass value=\"" << mass
+       << "\"/><inertia ixx=\"1e-9\" ixy=\"0\" ixz=\"0\" iyy=\"1e-9\" iyz=\"0\" izz=\"1e-9\"/>"
+          "</inertial></link><joint name=\"test_payload_joint\" type=\"fixed\"><parent link=\""
+       << parent << "\"/><child link=\"test_payload\"/></joint></robot>";
+  replace_once(xml, "</robot>", link.str());
+  return xml;
+}
 inline Eigen::Matrix3d Ry(double a) {
   return Eigen::AngleAxisd(a, Eigen::Vector3d::UnitY()).toRotationMatrix();
 }

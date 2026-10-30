@@ -2,7 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <stdexcept>
+
+#include "fixtures.h"
+#include "kinova_lowlevel/dynamics.h"
 
 using namespace kinova;
 
@@ -63,4 +67,42 @@ TEST(ContactReplay, DebounceMsConvertsToRows) {
   EXPECT_FALSE(replay(in, o).first_trip[0].valid);
   o.debounce_cycles = debounce_rows_from_ms(in.t, 5.0);
   EXPECT_TRUE(replay(in, o).first_trip[0].valid);
+}
+
+// 100 Hz, still at one pose: nothing held until 1.5 s, then a 0.5 kg object takes its
+// weight over 0.1 s (lift-off). Tare from 0.5 s, weigh from 2.0 s.
+TEST(ContactReplay, GraspIsWeighedAndDoesNotTripTheImpulse) {
+  Dynamics bare(kUrdf, "gen3_end_effector_link");
+  Dynamics held(UrdfXml{test_fixtures::with_payload_link(0.5, Eigen::Vector3d(0, 0, 0.10))},
+                "gen3_end_effector_link");
+  const JointVec q0 = (JointVec() << 0.0, 0.26, 3.14, -2.27, 0.0, 0.96, 1.57).finished();
+  JointVec gb, gh;
+  bare.gravity(q0, gb);
+  held.gravity(q0, gh);
+  ReplayInput in;
+  for (int k = 0; k < 400; ++k) {
+    const double t = k * 0.01, load = std::clamp((t - 1.5) / 0.1, 0.0, 1.0);
+    in.t.push_back(t);
+    in.q.push_back(q0);
+    in.qd.push_back(JointVec::Zero());
+    in.tau.push_back(gb + load * (gh - gb));
+  }
+  ReplayOptions o = options();
+  o.theta << 8, 8, 6, 6, 2, 2, 2;
+  o.debounce_cycles = 1;
+  o.impulse = true;
+  o.impulse_theta << 2, 2, 1.5, 1.5, 0.6, 0.6, 0.6;
+
+  const ReplayStats undeclared = replay(in, o);
+  ASSERT_GE(undeclared.trips.size(), 1u);
+  EXPECT_TRUE(undeclared.trips[0].impulse);
+  EXPECT_NEAR(undeclared.trips[0].t, 1.55, 0.06);
+
+  o.grasps = {{0.5, 2.0}};
+  const ReplayStats s = replay(in, o);
+  EXPECT_EQ(s.would_trips, 0u);
+  ASSERT_EQ(s.weighs.size(), 1u);
+  EXPECT_EQ(s.weighs[0].result.outcome, WeighOutcome::kOk);
+  EXPECT_NEAR(s.weighs[0].result.payload.mass, 0.5, 1e-3);
+  EXPECT_NEAR(s.weighs[0].t, 2.3, 0.02);  // a 0.3 s window from 2.0 s
 }

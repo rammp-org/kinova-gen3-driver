@@ -177,6 +177,60 @@ TEST(RtSafety, ContactMonitorNoMajorFaultsSteadyState) {
   EXPECT_FALSE(mon.latched());
 }
 
+// The payload and impulse paths: the regressor, the projection solve and the weigh run
+// on the RT thread while the Supervisor side swaps payloads, impulse thresholds and
+// begins/ends load changes. Observe, so a would-trip never stops the stepping, and a
+// short window so weighs complete inside the measured run.
+TEST(RtSafety, ContactMonitorPayloadAndImpulseNoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  const JointVec impulse = (JointVec() << 2, 2, 1.5, 1.5, 0.6, 0.6, 0.6).finished();
+  ContactMonitorConfig cfg;
+  cfg.detection = ContactDetection::kObserve;
+  cfg.initial_theta = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  cfg.ceiling = (JointVec() << 30, 30, 22, 22, 7, 7, 7).finished();
+  cfg.impulse = true;
+  cfg.impulse_theta = impulse;
+  cfg.weigh_window_cycles = 20;
+  ContactMonitor mon(dyn, cfg);
+  JointTorqueMode grav(dyn);
+  MonitoredGravComp mode(grav, mon);
+
+  std::atomic<bool> stop_sup{false};
+  std::thread sup([&] {
+    ContactStatus st;
+    TipPayload p;
+    p.com = Eigen::Vector3d(0, 0, 0.1);
+    for (int k = 0; !stop_sup.load(std::memory_order_acquire); ++k) {
+      mon.status(st);
+      switch (k % 40) {
+        case 0:
+          mon.request_load_change_begin();
+          break;
+        case 10:
+          mon.request_load_change_end(p.com);
+          break;
+        case 20:
+          p.mass = (k / 40) % 2 ? 0.3 : 0.0;
+          mon.set_payload(p);
+          break;
+        case 30:
+          mon.set_impulse_thresholds(impulse * (1.0 + 0.1 * ((k / 40) % 2)));
+          break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  expect_mode_steady_state_rt_safe(mode);
+  stop_sup.store(true, std::memory_order_release);
+  sup.join();
+
+  ContactStatus st;
+  ASSERT_TRUE(mon.status(st));
+  EXPECT_EQ(st.phase, ContactPhase::kArmed);
+  EXPECT_GT(st.weigh.count, 0u);  // the weigh path ran
+  EXPECT_EQ(st.bad_samples, 0u);
+}
+
 TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {
   JointFeedback init;
   init.q.setZero();
