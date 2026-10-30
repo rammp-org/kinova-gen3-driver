@@ -99,6 +99,9 @@ find_package(Eigen3 REQUIRED)
 # (pimpl keeps KORTEX headers out of the public interface).
 set(KINOVA_LIB_SOURCES
     src/dynamics.cpp
+    src/momentum_observer.cpp
+    src/contact_monitor.cpp
+    src/contact_replay.cpp
     src/cartesian.cpp
     src/telemetry.cpp
     src/telemetry_consumers.cpp
@@ -106,6 +109,7 @@ set(KINOVA_LIB_SOURCES
     src/sim_transport.cpp
     src/gripper_controller.cpp
     src/joint_torque_mode.cpp
+    src/float_mode.cpp
     src/cartesian_impedance_mode.cpp
     src/diff_ik.cpp
     src/joint_impedance_mode.cpp
@@ -119,7 +123,8 @@ set(KINOVA_LIB_SOURCES
     src/interface/supervisor.cpp
     src/interface/arbiter.cpp
     src/interface/streaming_session.cpp
-    src/interface/gains.cpp)
+    src/interface/gains.cpp
+    src/interface/contact.cpp)
 if(KINOVA_ENABLE_KORTEX)
     list(APPEND KINOVA_LIB_SOURCES src/kortex_transport.cpp)
 endif()
@@ -355,6 +360,12 @@ else()
     target_compile_definitions(teleop_socket_server PRIVATE KINOVA_NO_KORTEX)
 endif()
 
+# contact_replay replays recorded joint-state CSVs through the contact monitor offline
+# (docs/guide/contact-detection.md). No transport, so no KORTEX handling.
+add_executable(contact_replay apps/contact_replay.cpp)
+target_link_libraries(contact_replay PRIVATE kinova_lowlevel Eigen3::Eigen)
+target_include_directories(contact_replay PRIVATE include)
+
 # --- tests --------------------------------------------------------------------
 enable_testing()
 find_package(GTest REQUIRED)
@@ -364,14 +375,19 @@ add_executable(unit_tests
     tests/cartesian_types_test.cpp
     tests/joint_types_test.cpp
     tests/dynamics_test.cpp
+    tests/momentum_observer_test.cpp
+    tests/contact_monitor_test.cpp
+    tests/contact_replay_test.cpp
     tests/telemetry_test.cpp
     tests/rt_system_test.cpp
     tests/sim_transport_test.cpp
     tests/gripper_controller_test.cpp
     tests/joint_torque_mode_test.cpp
+    tests/float_mode_test.cpp
     tests/command_watchdog_test.cpp
     tests/rt_safety_test.cpp
     tests/rt_executor_miss_test.cpp
+    tests/contact_executor_test.cpp
     tests/arm_link_test.cpp
     tests/arm_route_test.cpp
     tests/cartesian_test.cpp
@@ -388,7 +404,8 @@ add_executable(unit_tests
     tests/interface/supervisor_test.cpp
     tests/interface/arbiter_test.cpp
     tests/interface/streaming_session_test.cpp
-    tests/interface/gains_test.cpp)
+    tests/interface/gains_test.cpp
+    tests/interface/contact_supervisor_test.cpp)
 target_link_libraries(unit_tests PRIVATE GTest::gtest_main Eigen3::Eigen kinova_lowlevel)
 target_include_directories(unit_tests PRIVATE include)
 if(KINOVA_ENABLE_KORTEX)
@@ -401,6 +418,7 @@ endif()
 
 # URDF path for tests that load the Gen3 model (used by later tasks).
 target_compile_definitions(unit_tests PRIVATE
-    URDF_PATH="${CMAKE_SOURCE_DIR}/models/gen3_7dof_2f85.urdf")
+    URDF_PATH="${CMAKE_SOURCE_DIR}/models/gen3_7dof_2f85.urdf"
+    TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
 
 add_test(NAME unit_tests COMMAND unit_tests)

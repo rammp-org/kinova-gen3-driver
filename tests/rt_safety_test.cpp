@@ -7,8 +7,10 @@
 #include "fixtures.h"
 #include "interface/fake_backend.h"
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
+#include "kinova_lowlevel/contact_monitor.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
+#include "kinova_lowlevel/float_mode.h"
 #include "kinova_lowlevel/gripper_controller.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/supervisor.h"
@@ -31,11 +33,10 @@ using namespace kinova;
 // sees zero NEW major faults. The shared atomics carry the readings back to the
 // test thread for assertions.
 namespace {
-void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
+void expect_mode_steady_state_rt_safe(ControlMode& mode) {
   JointFeedback init;
   init.q.setZero();
   SimTransport t(init);
-  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
   SampleRing ring(8192);
   RtExecutor ex(t, ring, {2000.0, Pacing::kSleepSpin, {0, -1, true}});
 
@@ -91,6 +92,11 @@ void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
   EXPECT_EQ(majflt_delta.load(), 0u);
   EXPECT_EQ(ring.dropped(), 0u);
 }
+
+void expect_grav_comp_steady_state_rt_safe(Dynamics& dyn) {
+  JointTorqueMode mode(dyn);  // defaults: tau_ff never set == gravity-comp hold
+  expect_mode_steady_state_rt_safe(mode);
+}
 }  // namespace
 
 TEST(RtSafety, NoMajorFaultsSteadyState) {
@@ -103,6 +109,72 @@ TEST(RtSafety, ReducedTiltedModelNoMajorFaultsSteadyState) {
   Dynamics dyn(UrdfXml{test_fixtures::articulate_gripper(test_fixtures::tilted_fixture())},
                "gen3_end_effector_link");
   expect_grav_comp_steady_state_rt_safe(dyn);
+}
+
+TEST(RtSafety, FloatModeNoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  FloatMode mode(dyn);
+  expect_mode_steady_state_rt_safe(mode);
+}
+
+// Steps a ContactMonitor every cycle ahead of gravity comp, the way the executor will
+// (on_run_start at entry, step() on the cycle's feedback), while a Supervisor-side
+// thread reads the status and republishes thresholds at ~1 kHz.
+namespace {
+class MonitoredGravComp : public ControlMode {
+ public:
+  MonitoredGravComp(JointTorqueMode& inner, ContactMonitor& mon) : inner_(inner), mon_(mon) {}
+  ActuatorModes required_modes() const override { return inner_.required_modes(); }
+  void on_enter(const JointFeedback& fb) override {
+    mon_.on_run_start();  // harness shortcut: production calls it at RtExecutor::run start
+    inner_.on_enter(fb);
+  }
+  void compute(const JointFeedback& fb, double dt_s, JointCommand& out) override {
+    mon_.step(fb, dt_s, false);
+    inner_.compute(fb, dt_s, out);
+  }
+  void on_exit() override { inner_.on_exit(); }
+
+ private:
+  JointTorqueMode& inner_;
+  ContactMonitor& mon_;
+};
+}  // namespace
+
+TEST(RtSafety, ContactMonitorNoMajorFaultsSteadyState) {
+  Dynamics dyn(URDF_PATH);
+  const JointVec sensitive = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
+  const JointVec normal = (JointVec() << 16, 16, 12, 12, 4, 4, 4).finished();
+  ContactMonitorConfig cfg;
+  cfg.initial_theta = normal;
+  cfg.ceiling = (JointVec() << 30, 30, 22, 22, 7, 7, 7).finished();
+  ContactMonitor mon(dyn, cfg);
+  JointTorqueMode grav(dyn);
+  MonitoredGravComp mode(grav, mon);
+
+  std::atomic<bool> stop_sup{false};
+  std::thread sup([&] {
+    ContactStatus st;
+    bool alt = false;
+    while (!stop_sup.load(std::memory_order_acquire)) {
+      mon.status(st);
+      mon.latched();
+      mon.set_thresholds(alt ? sensitive : normal);
+      alt = !alt;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  });
+  expect_mode_steady_state_rt_safe(mode);
+  stop_sup.store(true, std::memory_order_release);
+  sup.join();
+
+  // The monitor ran: settled after the measured run's start and saw no contact.
+  ContactStatus st;
+  ASSERT_TRUE(mon.status(st));
+  EXPECT_EQ(st.phase, ContactPhase::kArmed);
+  EXPECT_EQ(st.would_trips, 0u);
+  EXPECT_EQ(st.bad_samples, 0u);
+  EXPECT_FALSE(mon.latched());
 }
 
 TEST(RtSafety, ImpedanceModeNoMajorFaultsSteadyState) {

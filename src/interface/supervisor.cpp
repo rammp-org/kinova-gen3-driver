@@ -22,9 +22,16 @@ static const char* halt_reason_string(HaltReason r) {
       return "halted: operator request";
     case HaltReason::kArmUnavailable:
       return "halted: arm fault or connection lost";
+    case HaltReason::kContact:
+      return "halted: unexpected contact";
   }
   return "halted";
 }
+// A contact stop has its own code: its recovery is a clear, not a retry.
+static int halt_result_code(HaltReason r) {
+  return r == HaltReason::kContact ? result_code::kContactStop : result_code::kHalted;
+}
+static const char* const kContactRefusal = "stopped on unexpected contact; call /clear_faults";
 
 namespace {
 // Named so the throw says which field, not merely that something was null.
@@ -48,7 +55,19 @@ Supervisor::Supervisor(const SupervisorDeps& d)
       stream_(require(d.stream, "stream")),
       action_(require(d.action, "action")),
       grip_(d.grip),
+      contact_(d.contact),
+      contact_profiles_(d.contact_profiles),
       cfg_(d.cfg) {
+  if (contact_) {
+    const ThresholdCheck c = validate_profiles(contact_profiles_);
+    if (!c.ok) throw std::invalid_argument("SupervisorDeps::contact_profiles: " + c.message);
+    if (contact_profiles_.ceiling != contact_->ceiling())
+      throw std::invalid_argument(
+          "SupervisorDeps::contact_profiles.ceiling must equal the ContactMonitor's ceiling");
+    // The driver starts in kDefault, whatever the monitor was built with.
+    contact_theta_ = contact_profiles_.normal;
+    contact_->set_thresholds(contact_theta_);
+  }
   // Cache which joints wrap (and the limits themselves -- the sampler's
   // compliant-velocity integrate step clamps against them), once, from the same
   // URDF source JointPositionMode reads. The executor's divergence guard needs
@@ -141,6 +160,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
                                        // q_meas is still the Zero initializer before that,
                                        // and nothing downstream may treat it as a posture
   auto last_tick = clock::now();       // for the compliant-velocity integration dt
+  bool was_latched = false;            // the contact latch as of the last iteration
   while (running_.load(std::memory_order_acquire)) {
     // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
     // real period jitters above 1/sampler_hz under load; integrating with the
@@ -150,6 +170,15 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     const auto tick_now = clock::now();
     const double tick_dt = std::chrono::duration<double>(tick_now - last_tick).count();
     last_tick = tick_now;
+    // 0-) the RT loop latched a contact stop (and is already floating): one
+    //     kContact halt per rising edge, taken by step 0 in this same iteration.
+    //     A clear resets the edge: this thread can miss the unlatched spell (a
+    //     mode settle is longer than the 5/K re-settle), and a re-trip after a
+    //     clear is a new edge even if every sample here read latched.
+    if (contact_cleared_.exchange(false)) was_latched = false;
+    const bool latched = contact_latched();
+    if (latched && !was_latched) on_halt(HaltReason::kContact);
+    was_latched = latched;
     // 0) a halt jumps the queue: settle everything ACCEPTed, then hold where the arm IS.
     bool halt = false;
     HaltReason hr = HaltReason::kOwnershipRevoked;
@@ -163,7 +192,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     }
     if (halt) {
       TrajectoryResult r;
-      r.error_code = result_code::kHalted;
+      r.error_code = halt_result_code(hr);
       r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
       // A goal this thread started while the link was dropping may have requested
@@ -288,7 +317,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       }
       if (in.halted) {
         TrajectoryResult r;
-        r.error_code = result_code::kHalted;
+        r.error_code = halt_result_code(in.why);
         r.error_string = halt_reason_string(in.why);
         action_.settle(in.id, r);
         continue;
@@ -411,6 +440,27 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
             std::chrono::duration_cast<clock::duration>(
                 std::chrono::duration<double>(cfg_.mode_settle_s)));
       }
+      // A halt that landed since this goal was popped (above all during the mode
+      // settle, which can span a whole contact trip and clear) did not mark it.
+      // Settle it with the halt's reason rather than submit it: one tick would
+      // write its first sample into the mode now running, e.g. the post-clear hold
+      // at wherever the arm floated to. Step 0 does the rest next iteration.
+      {
+        bool halted = false;
+        HaltReason why = HaltReason::kOwnershipRevoked;
+        {
+          std::lock_guard<std::mutex> l(q_mtx_);
+          halted = halt_pending_;
+          why = halt_reason_;
+        }
+        if (halted) {
+          TrajectoryResult r;
+          r.error_code = halt_result_code(why);
+          r.error_string = halt_reason_string(why);
+          action_.settle(in.id, r);
+          continue;
+        }
+      }
       const SubmitResult sr =
           traj_->submit(in.goal.trajectory, in.goal.control_mode, in.goal.preemption,
                         in.goal.path_tolerance, in.goal.speed_scale);
@@ -476,6 +526,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
 // on_trajectory_goal (backend thread): fast pre-check only, no executor mutation.
 GoalResponse Supervisor::on_trajectory_goal(const TrajectoryGoal& g) {
   if (!ready_.load()) return GoalResponse::kReject;               // faulted or reconnecting
+  if (contact_latched()) return GoalResponse::kReject;            // stopped on contact
   if (stream_open_.load()) return GoalResponse::kReject;          // a stream owns the arm
   if (g.trajectory.points.empty()) return GoalResponse::kReject;  // INVALID_GOAL
   // Non-finite stamps, or waypoints under kMinSegmentSpanSec apart.
@@ -515,7 +566,11 @@ void Supervisor::on_trajectory_accepted(const GoalId& id, const TrajectoryGoal& 
   // them. on_link_state stores ready_ = false before on_halt takes q_mtx_, so
   // either this push lands first and on_halt marks it halted, or this sees the
   // link down. Either way the client gets a result and the arm never runs it.
-  if (!ready_.load())
+  // The contact latch works the same way (the sampler's edge halt takes q_mtx_)
+  // and is checked first: its recovery, a clear, is the one the client needs.
+  if (contact_latched())
+    inbox_.push_back({id, g, false, true, HaltReason::kContact});
+  else if (!ready_.load())
     inbox_.push_back({id, g, false, true, HaltReason::kArmUnavailable});
   else
     inbox_.push_back({id, g, false});
@@ -548,7 +603,9 @@ void Supervisor::on_link_state(kinova::LinkState s) {
 // traj_ and settle(), so the control action happens there -- which keeps
 // settle-exactly-once true by construction rather than by careful reasoning.
 void Supervisor::on_halt(HaltReason r) {
-  close_stream(StreamCloseCause::kHalted);  // stop admitting setpoints BEFORE the hold is latched
+  // Stop admitting setpoints BEFORE the hold is latched. A contact stop has its own
+  // cause: the client's recovery is a clear, not a re-open.
+  close_stream(r == HaltReason::kContact ? StreamCloseCause::kContact : StreamCloseCause::kHalted);
   // Spec decision 5: stop stamping, do NOT command open. Opening is a motion, and
   // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
   // grip. Deliberately not a "safe" open -- anything held stays held rather than
@@ -574,7 +631,9 @@ void Supervisor::on_halt(HaltReason r) {
       ++it;
     }
   }
-  halt_reason_ = r;
+  // A pending contact halt keeps its reason: a second halt landing before the
+  // sampler takes it (an ArmLink drop, an e-stop) must not turn -11 into -9.
+  if (!(halt_pending_ && halt_reason_ == HaltReason::kContact)) halt_reason_ = r;
   halt_pending_ = true;
 }
 
@@ -666,6 +725,49 @@ SpeedResult Supervisor::set_speed_override(double s, bool may_raise) {
   } while (!speed_override_.compare_exchange_weak(cur, s));
   return {true, ""};
 }
+ContactThresholdsResult Supervisor::on_set_contact_thresholds(const ContactThresholdsRequest& r) {
+  if (!contact_) return {false, "contact detection not available"};
+  std::lock_guard<std::mutex> l(contact_mtx_);
+  JointVec theta;
+  const ThresholdCheck c = resolve_contact(r, contact_profiles_, theta);
+  if (!c.ok) return {false, c.message, contact_profile_, contact_theta_};
+  contact_->set_thresholds(theta);
+  contact_profile_ = r.profile;
+  contact_theta_ = theta;
+  return {true, "", contact_profile_, contact_theta_};
+}
+ContactState Supervisor::on_query_contact() {
+  ContactState s;
+  if (!contact_) return s;
+  s.enabled = true;
+  ContactStatus st;
+  const bool whole = contact_->status(st);
+  std::lock_guard<std::mutex> l(contact_mtx_);
+  s.profile = contact_profile_;
+  // A torn read holds a mix of two cycles: report the last whole one.
+  if (whole) contact_status_ = st;
+  s.status = contact_status_;
+  return s;
+}
+// The executor adopts only a PENDING request after a clear, and requests made
+// before the trip were consumed or overwritten. Position is requested before
+// request_clear, so it is already pending when the monitor unlatches; requested
+// after, the RT loop could unlatch in between and run a stale request (or float) for
+// a cycle. The halt covers
+// a latch the sampler has not seen yet (it can be blind for a mode settle): without
+// it a goal ACCEPTed before the trip would start running after the clear.
+// Otherwise it is a no-op repeat.
+bool Supervisor::clear_contact() {
+  if (!contact_) return false;
+  std::lock_guard<std::mutex> l(contact_mtx_);
+  if (!contact_->latched()) return false;
+  on_halt(HaltReason::kContact);
+  active_mode_kind_.store(ControlModeKind::kPosition);
+  exec_.request_mode(&pos_);
+  contact_->request_clear();
+  contact_cleared_.store(true);
+  return true;
+}
 ArmState Supervisor::on_query_state() {
   ArmState s;
   state_snap_.load(s);
@@ -685,8 +787,9 @@ void Supervisor::on_gripper_setpoint(const GripperSetpoint& s) {
   std::lock_guard<std::mutex> l(stream_mtx_);
   // While the arm is down, a setpoint would re-arm stamping that the halt
   // released, and the gripper would move on its own at recovery. Dropped. Checked
-  // under the lock: on_link_state clears ready_ before on_halt's release.
-  if (!ready_.load()) return;
+  // under the lock: on_link_state clears ready_ before on_halt's release. The
+  // same while the contact latch is set: nothing moves until a clear.
+  if (!ready_.load() || contact_latched()) return;
   grip_->set_target(s.command);
 }
 
@@ -723,6 +826,7 @@ StreamStatus Supervisor::on_query_stream() {
 
 StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
   if (!ready_.load()) return {false, result_code::kStreamRejected, "arm not ready"};
+  if (contact_latched()) return {false, result_code::kContactStop, kContactRefusal};
   if (in_flight_.load())
     return {false, result_code::kStreamRejected, "a trajectory goal is in flight"};
   // The next three checks are DELIBERATELY duplicated in StreamingSession::open.
@@ -784,6 +888,10 @@ StreamOpenResult Supervisor::on_stream_open(const StreamOpenRequest& r) {
     exec_.request_mode(&pos_);
     return {false, result_code::kStreamRejected, "arm not ready"};
   }
+  // Same for a trip during the settle sleep: the edge halt found no stream to
+  // close. The executor ignores the switch while latched; clear_contact requests
+  // position. Checked under the lock: a trip after this point closes the session.
+  if (contact_latched()) return {false, result_code::kContactStop, kContactRefusal};
   if (active_mode_kind_.load() != want)  // a goal or another open switched it meanwhile
     return {false, result_code::kStreamRejected, "the mode changed during the open; retry"};
   // One deadline, pushed into the mode so it can make the OUTPUT safe at 1 kHz

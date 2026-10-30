@@ -139,6 +139,13 @@ void Dynamics::mass_matrix(const JointVec& q, JointMat& M_out) {
   for (int i = 0; i < impl_->model.nv; ++i)
     for (int j = 0; j < impl_->model.nv; ++j) M_out(i, j) = impl_->data.M(i, j);
 }
+void Dynamics::coriolis(const JointVec& q, const JointVec& qd, JointMat& C_out) {
+  impl_->pack(q);
+  // qd is in the tangent space (nv), so it needs no packing.
+  pinocchio::computeCoriolisMatrix(impl_->model, impl_->data, impl_->qcfg, qd);
+  for (int i = 0; i < impl_->model.nv; ++i)
+    for (int j = 0; j < impl_->model.nv; ++j) C_out(i, j) = impl_->data.C(i, j);
+}
 void Dynamics::velocity_limits(JointVec& v_max) const {
   const pinocchio::Model& m = impl_->model;
   for (int i = 0; i < m.nv; ++i) {

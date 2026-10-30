@@ -36,6 +36,13 @@ class CommandSink {
     return {false, "speed override not supported by this sink"};
   }
   virtual ArmState on_query_state() = 0;
+  // Contact-detection thresholds (gated, like every command) and state (never
+  // gated). Non-pure so existing implementers keep compiling; the defaults are
+  // honest for a sink with no contact monitor.
+  virtual ContactThresholdsResult on_set_contact_thresholds(const ContactThresholdsRequest&) {
+    return {false, "contact detection not available"};
+  }
+  virtual ContactState on_query_contact() { return {}; }
   // Stop the arm now. General primitive: ownership revocation and /estop both use it.
   virtual void on_halt(HaltReason) = 0;
 };

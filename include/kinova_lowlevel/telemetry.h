@@ -10,7 +10,9 @@ struct CycleSample {
   uint32_t comm_ns = 0;
   uint32_t compute_ns = 0;
   uint32_t cycle_ns = 0;
-  uint16_t flags = 0;  // bit0 overrun, bit1 fault, bit2 comm timeout (exchange missed)
+  // bit0 overrun, bit1 fault, bit2 comm timeout (exchange missed), bit3 contact
+  // latch set this cycle (RtExecutor::attach_contact)
+  uint16_t flags = 0;
 };
 class SampleRing {
  public:

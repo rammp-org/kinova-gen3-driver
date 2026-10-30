@@ -25,6 +25,7 @@ nav:
       - Gripper: guide/gripper.md
       - Arbitration: guide/arbitration.md
       - Streaming: guide/streaming.md
+      - Contact Detection: guide/contact-detection.md
   - Reference:
       - API: reference/api.md
   - Deep Dive:

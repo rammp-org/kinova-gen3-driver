@@ -9,9 +9,11 @@
 #include <thread>
 
 #include "kinova_lowlevel/arm_link.h"
+#include "kinova_lowlevel/contact_monitor.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
 #include "kinova_lowlevel/gripper_controller.h"
+#include "kinova_lowlevel/interface/contact.h"
 #include "kinova_lowlevel/interface/gains.h"
 #include "kinova_lowlevel/interface/ports.h"
 #include "kinova_lowlevel/interface/streaming_session.h"
@@ -80,6 +82,14 @@ struct SupervisorDeps {
   // GripperFeedback::present exists for exactly that. Gripper commands become no-ops
   // and on_query_gripper reports present=false. Not validated by require().
   GripperController* grip = nullptr;
+  // OPTIONAL. Null means contact detection is off: on_set_contact_thresholds
+  // refuses and on_query_contact reports enabled = false. When set, the
+  // constructor throws unless validate_profiles(contact_profiles) passes and
+  // contact_profiles.ceiling equals contact->ceiling(), and then applies the
+  // kDefault profile (contact_profiles.normal). The executor must have the same
+  // monitor attached (RtExecutor::attach_contact).
+  ContactMonitor* contact = nullptr;
+  ContactProfiles contact_profiles{};
   SupervisorConfig cfg{};
 };
 
@@ -101,6 +111,17 @@ class Supervisor : public CommandSink,
   SpeedResult on_set_speed_override(const SpeedOverrideRequest&) override;
   ArmState on_query_state() override;
   void on_halt(HaltReason) override;
+  // Validated against the ceiling, then handed to the monitor (adopted within one
+  // RT cycle). Works while latched. Refused without a monitor.
+  ContactThresholdsResult on_set_contact_thresholds(const ContactThresholdsRequest&) override;
+  ContactState on_query_contact() override;
+
+  // Clear a contact latch (any thread; /clear_faults). Returns true if a latch was
+  // set. Then: halts with kContact (a no-op repeat unless the sampler has not seen
+  // this latch yet), requests position mode, whose on_enter holds at the measured q
+  // once the executor leaves float, and then asks the monitor to clear. Returns
+  // false, and does nothing, when nothing is latched or there is no monitor.
+  bool clear_contact();
 
   // StreamSink (called on the backend thread):
   StreamOpenResult on_stream_open(const StreamOpenRequest&) override;
@@ -154,6 +175,7 @@ class Supervisor : public CommandSink,
   };
   void sampler_loop();
   void pump_loop();
+  bool contact_latched() const { return contact_ && contact_->latched(); }
   // The joint-target sink a control mode kind owns, EXPLICIT over all four kinds.
   // nullptr for the kinds that have no joint target (kTorque, kVelocity) so a
   // caller must decide what to do rather than silently writing into pos_.
@@ -182,6 +204,18 @@ class Supervisor : public CommandSink,
   ActionServerPort& action_;
   // Pointer, not a reference -- legitimately absent on a robot with no gripper.
   GripperController* grip_ = nullptr;
+  // Pointer, not a reference -- absent when contact detection is off.
+  ContactMonitor* contact_ = nullptr;
+  const ContactProfiles contact_profiles_;
+  // Serialises the monitor's single-writer calls (set_thresholds, request_clear)
+  // and guards the three fields below. Taken before stream_mtx_ / q_mtx_ (clear_contact
+  // halts under it); never taken under either. Never on the RT path.
+  std::mutex contact_mtx_;
+  ContactProfile contact_profile_ = ContactProfile::kDefault;  // last accepted
+  JointVec contact_theta_ = JointVec::Zero();                  // what it resolved to
+  ContactStatus contact_status_{};  // last whole status read, for a torn one
+  // Set by clear_contact, exchanged by the sampler: resets its latch edge detector.
+  std::atomic<bool> contact_cleared_{false};
   SupervisorConfig cfg_;
   // Which joints wrap into (-pi, pi]. Derived from the URDF in the constructor and
   // handed to every TrajectoryExecutor this class builds, so the divergence guard

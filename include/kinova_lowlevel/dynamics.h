@@ -36,6 +36,10 @@ class Dynamics {
   // Joint-space mass matrix M(q) via CRBA. RT-safe: no alloc after ctor. Returned
   // fully symmetric (CRBA fills only the upper triangle; this mirrors it).
   void mass_matrix(const JointVec& q, JointMat& M_out);
+  // Coriolis/centrifugal matrix C(q, qd) (Pinocchio computeCoriolisMatrix). RT-safe:
+  // no alloc after ctor. The Christoffel-consistent factorisation, so Mdot = C + C^T
+  // and Mdot - 2C is skew-symmetric -- what a momentum observer needs (C^T qd).
+  void coriolis(const JointVec& q, const JointVec& qd, JointMat& C_out);
   // Per-joint position limits [rad] from the URDF. Continuous joints report
   // +/-infinity: Pinocchio packs them (cos,sin) and their config-space limits are
   // [-1,1], which is meaningless as a joint angle. Reads the model only (never

@@ -182,6 +182,16 @@ SpeedResult Arbiter::on_set_speed_override(const SpeedOverrideRequest& r) {
   return down_.on_set_speed_override(req);
 }
 ArmState Arbiter::on_query_state() { return down_.on_query_state(); }
+ContactThresholdsResult Arbiter::on_set_contact_thresholds(const ContactThresholdsRequest& r) {
+  std::lock_guard<std::mutex> l(m_);
+  if (!admit(r.token)) {
+    ++rejected_;
+    const ContactState s = down_.on_query_contact();  // a refusal reports what is active
+    return {false, "not authorized", s.profile, s.status.theta};
+  }
+  return down_.on_set_contact_thresholds(r);
+}
+ContactState Arbiter::on_query_contact() { return down_.on_query_contact(); }
 // Ungated for the same reason on_query_state is: a read that requires ownership is a
 // read nobody can use to work out WHY they were refused.
 StreamStatus Arbiter::on_query_stream() { return down_stream_.on_query_stream(); }

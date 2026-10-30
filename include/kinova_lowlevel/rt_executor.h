@@ -7,6 +7,7 @@
 #include "kinova_lowlevel/telemetry.h"
 #include "kinova_lowlevel/transport.h"
 namespace kinova {
+class ContactMonitor;
 enum class Pacing { kSleepSpin, kClockNanosleep };
 struct ExecutorConfig {
   double rate_hz = 1000.0;
@@ -63,6 +64,22 @@ class RtExecutor {
   // outlive the executor (or at least remain valid until another mode is
   // requested and adopted). The executor never deletes or copies it.
   void request_mode(ControlMode* m) noexcept;  // supervisor sets; loop adopts at a cycle boundary
+  // Unexpected-contact stop. Call before run(); both MUST outlive the executor.
+  // The loop then calls monitor.on_run_start() at each run() start and
+  // monitor.step() every cycle (a missed exchange included) on the RT thread, with
+  // the measured time since the previous feedback read as dt, and flags latched
+  // cycles (CycleSample bit3). While monitor.latched() the loop runs on_contact and
+  // nothing else:
+  //   - the cycle that trips switches to it at once when its actuator modes match
+  //     the active mode's; otherwise that cycle's command is a freeze (the active
+  //     mode's actuator modes, position = measured q, zero velocity, no compute) and
+  //     the next boundary adopts on_contact through set_actuator_modes. A command
+  //     goes out on the next cycle's exchange, so the freeze is sent once, after
+  //     that handshake;
+  //   - a run() that starts latched adopts it at its first boundary;
+  //   - a request_mode() is left pending and adopted only after the clear.
+  // monitor shares the modes' Dynamics: it is only ever called on the RT thread.
+  void attach_contact(ContactMonitor& monitor, ControlMode& on_contact) noexcept;
   // Blocks on the calling thread and runs the RT loop. A TransportTimeout from
   // exchange() is survived: the cycle keeps the last good feedback, skips
   // compute() so the previous command is re-sent unchanged, and is flagged
@@ -81,5 +98,7 @@ class RtExecutor {
   SampleRing& ring_;
   ExecutorConfig cfg_;
   std::atomic<ControlMode*> requested_{nullptr};
+  ContactMonitor* contact_ = nullptr;  // set before run(); null = no contact stop
+  ControlMode* on_contact_ = nullptr;
 };
 }  // namespace kinova

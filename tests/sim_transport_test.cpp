@@ -230,3 +230,54 @@ TEST(SimTransport, ThrowOnExchangeHookRuns) {
   t.throw_on_exchange(nullptr);
   EXPECT_NO_THROW(t.exchange(c, fb));
 }
+
+TEST(SimTransport, ExternalTorqueSubtractsFromReportedTau) {
+  JointFeedback init;
+  init.tau.setConstant(3.0);
+  SimTransport t(init);
+  JointVec ext = JointVec::Zero();
+  ext[1] = 6.0;
+  t.set_external_torque(ext);
+
+  JointCommand pos;
+  pos.mode = ActuatorMode::kPosition;
+  JointFeedback fb;
+  t.exchange(pos, fb);  // position mode keeps the seeded tau
+  EXPECT_DOUBLE_EQ(fb.tau[0], 3.0);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 3.0 - 6.0);
+
+  JointCommand trq;  // kTorque: tau echoes the command
+  trq.torque.setConstant(1.0);
+  t.exchange(trq, fb);
+  EXPECT_DOUBLE_EQ(fb.tau[0], 1.0);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 1.0 - 6.0);
+
+  t.set_external_torque(JointVec::Zero());
+  t.receive(fb);
+  EXPECT_DOUBLE_EQ(fb.tau[1], 1.0);
+}
+
+TEST(SimTransport, GravityModelReportsGravityInPositionMode) {
+  JointFeedback init;
+  init.q << 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7;
+  SimTransport t(init);
+  t.set_gravity_model([](const JointVec& q, JointVec& tau) { tau = 10.0 * q; });
+  JointFeedback fb;
+
+  JointCommand seed;  // kTorque, zero torque: echoed as before
+  t.exchange(seed, fb);
+  EXPECT_TRUE(fb.tau.isZero());
+
+  JointCommand pos;
+  pos.mode = ActuatorMode::kPosition;
+  t.exchange(pos, fb);
+  EXPECT_TRUE(fb.tau.isApprox(10.0 * init.q));
+
+  JointCommand vel;
+  vel.mode = ActuatorMode::kVelocity;
+  JointVec ext = JointVec::Zero();
+  ext[1] = 6.0;
+  t.set_external_torque(ext);
+  t.exchange(vel, fb);
+  EXPECT_TRUE(fb.tau.isApprox(10.0 * init.q - ext));
+}

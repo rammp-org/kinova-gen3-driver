@@ -159,6 +159,35 @@ reverts to gravity-compensation hold. **With `tau_ff` never set, this mode
 zero-feedforward path. See the
 [guide](../guide/control-modes.md#gravity-compensation-jointtorquemode).
 
+### `FloatMode` — `float_mode.h`
+
+The contact-stop control law: what the arm switches to when the contact detector
+trips. It yields to any push, slows under joint damping, and stays where it is
+left; a weak spring on a dragged anchor resists only model-error creep.
+
+```cpp
+struct FloatParams {
+  JointVec damping = (JointVec() << 5, 5, 5, 5, 1.5, 1.5, 1.5).finished();          // N·m·s/rad
+  JointVec spring  = (JointVec() << 28.6, 28.6, 28.6, 28.6, 8.6, 8.6, 8.6).finished(); // N·m/rad
+  double drag_band_rad = 2.0 * kDeg2Rad;   // anchor trails q by at most this
+  JointVec torque_limit = (JointVec() << 39, 39, 39, 39, 9, 9, 9).finished();
+};
+FloatMode(Dynamics& dyn, FloatParams p = {});  // throws std::invalid_argument
+const JointVec& anchor() const noexcept;       // current dragged anchor q_a
+```
+
+Law: `tau = gravity(q) − D·q̇ − K_s·(q − q_a)`, clamped per joint to
+`torque_limit`. `on_enter` sets `q_a = fb.q`. Each cycle, per joint, if
+`|q − q_a| > drag_band_rad` the anchor is moved to stay `drag_band_rad` behind
+`q`, so the spring contributes at most `K_s·drag_band_rad` (about 1 N·m on
+joints 1-4, 0.3 N·m on 5-7). On continuous joints (both URDF limits infinite)
+`q − q_a` is wrapped to (−π, π] and the anchor kept there, as the transport wraps
+`q`. `required_modes()` is all torque; `command.position`
+passes `q` through. The constructor throws on non-finite or negative gains, a
+non-positive band, or a non-positive torque limit. The defaults are starting
+values, untuned on the arm. See the
+[guide](../guide/control-modes.md#float-floatmode).
+
 ### `CartesianImpedanceMode` — `cartesian_impedance_mode.h`
 
 ```cpp
@@ -311,6 +340,7 @@ class RtExecutor {
  public:
   RtExecutor(Transport& t, SampleRing& ring, ExecutorConfig cfg);  // invalid_argument if a miss limit or miss_window < 1
   void request_mode(ControlMode* m) noexcept;   // adopted at the next cycle boundary
+  void attach_contact(ContactMonitor& monitor, ControlMode& on_contact) noexcept;  // before run()
   void run(std::atomic<bool>& stop);            // blocks on the calling (RT) thread; may be called again
   const ExecutorConfig& config() const noexcept;
 };
@@ -355,6 +385,34 @@ class RtExecutor {
   requested in between is adopted by the new run (from a fresh seed read).
 - **Pacing:** `kSleepSpin` (sleep-then-spin, lower jitter) vs `kClockNanosleep`
   (simpler). Both selectable for benchmarking.
+- **Contact stop (`attach_contact`):** optional; call it before `run`, and keep
+  `monitor` and `on_contact` (a `FloatMode`) alive as long as the executor. With
+  none attached the loop is unchanged. Attached, `run` calls
+  `monitor.on_run_start()` once at its start (the observer re-settles; the latch
+  is kept unless a clear is pending, which it consumes) and `monitor.step(fb, dt, missed)` every cycle right after the
+  exchange, a missed one included, with `dt` the measured time since the
+  previous feedback read. The monitor shares the modes' `Dynamics`: it
+  only runs on the RT thread. While `monitor.latched()`, `on_contact` is the only
+  mode the loop runs:
+  - **Trip cycle.** If `on_contact`'s actuator modes match the active mode's
+    (every torque-controlled mode), the loop switches in that cycle and computes
+    `on_contact`. Otherwise that cycle's command is a freeze (the active mode's
+    actuator modes, `position` = measured `q`, zero `velocity`, no `compute`) and
+    the loop adopts `on_contact` at the next boundary through
+    `set_actuator_modes`. A cycle's command goes out on the next cycle's exchange,
+    which runs after that handshake, so the freeze is sent once, after the torque
+    switch. Through the switch the arm is held by the handshake's own pumps
+    (measured position, zero torque on KORTEX: the #92 window).
+  - **Requests.** A `request_mode` made while latched, or racing the trip, is left
+    pending, not dropped: the latest one is adopted at the first boundary after
+    the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or
+    by `on_run_start` when no run is going).
+  - **Re-running.** A `run` that starts latched (after comms loss or an arm
+    fault) adopts `on_contact` at its first boundary, not the pending request.
+    A clear requested between runs is consumed at the run start, so that run
+    adopts the pending request directly and never enters float.
+  - Each latched cycle sets `CycleSample` bit3. In `observe` the monitor never
+    latches, so the commands are never changed.
 
 ---
 
@@ -468,6 +526,14 @@ inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
   hardware. Test knobs for the link lifecycle: `fail_connects`, `set_arm_fault`,
   `set_fault_sticky`, `set_low_level_feedback`, `throw_on_exchange`,
   `fail_health`, `set_joint_positions`, and call counters.
+  `set_external_torque(tau_ext)` simulates a push: feedback `tau` reports what it
+  otherwise would minus `tau_ext`, so the contact observer reads `+tau_ext` (the
+  arm does not move). Lock-free; safe to call while the loop runs.
+  `set_gravity_model(g)` (before running): under a non-torque command, `tau`
+  reports `g(q)`, the torque holding the arm at rest, instead of the last
+  commanded torque (RtExecutor's seed sends zero torque, which a contact monitor
+  would read as an external `g(q)`). `g` must not allocate; give it its own
+  `Dynamics`. A kTorque command still echoes the commanded torque.
 - **`KortexTransport(ip, user = "admin", password = "admin", rx_priority = 0, rx_cpu = -1, cyclic_timeout_ms = kDefaultCyclicTimeoutMs)`**
   (`kortex_transport.h`, KORTEX build only) — the real Gen3 low-level handshake.
   Compiled in only with `-DKINOVA_ENABLE_KORTEX=ON`. `connect()` first checks the
@@ -519,8 +585,8 @@ same shape, forward everything, and hook the one call each cares about:
 ```cpp
 struct CycleSample {
   uint64_t cycle_index;
-  uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;
-  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout
+  uint32_t wake_jitter_ns, comm_ns, compute_ns, cycle_ns;  // compute_ns includes the contact monitor's step
+  uint16_t flags;          // bit0 overrun, bit1 fault, bit2 comm timeout, bit3 contact latched
 };
 
 class SampleRing {                       // lock-free SPSC, drop-don't-block
@@ -565,7 +631,8 @@ any coupling to control code. See the
 using Token = std::array<uint8_t, 16>;   // 128-bit capability token
 
 enum class ArbitrationMode { kEnforced, kDisabled };
-enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest };
+enum class HaltReason      { kOwnershipRevoked, kEmergencyStop, kOperatorRequest,
+                             kArmUnavailable, kContact };  // the last two: raised by the Supervisor
 
 Arbiter(CommandSink& downstream, StreamSink& downstream_stream, ArbitrationMode mode,
         uint64_t seed = 0);
@@ -716,7 +783,9 @@ of a moving arm, so an unauthenticated caller must not be able to do it.
 
 The general "stop the arm now" primitive — used by ownership revocation and
 `/estop` alike. The caller declares **why**; the `Supervisor` decides **how**.
-In v1 every reason produces the same action: cancel and hold.
+Every reason cancels and holds; every reason but `kContact` settles with
+`result_code::kHalted` (−9), and `kContact` with `result_code::kContactStop`
+(−11) — see [Contact stop](#contact-stop-haltreasonkcontact) below.
 
 `on_halt` **must be idempotent**: `estop()` delivers it twice — once immediately,
 before it contends for the arbiter's lock (so the arm stops without waiting on a
@@ -727,8 +796,11 @@ satisfies this by construction: it latches a flag and clears a deque.
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
-every goal still waiting in its inbox with `result_code::kHalted`, then holds
-the active mode's target at the last-good **measured** q.
+every goal still waiting in its inbox with `result_code::kHalted`
+(`result_code::kContactStop`, −11, for `kContact`), then holds the active mode's
+target at the last-good **measured** q. A goal the sampler had already taken from
+its inbox when the halt landed (for example while it slept through a mode settle)
+is settled the same way instead of being started.
 
 `HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
 raised by the `Supervisor` itself, never by a caller, from
@@ -741,10 +813,67 @@ after the drop is settled `kHalted` rather than run. Entering `kRunning`
 re-admits work. A `Supervisor` never told stays ready.
 
 A halt (any reason) settles goals still waiting in the inbox with `kHalted`
-rather than dropping them. The pump publishes `ArmState` only when the feedback
+(`kContactStop` for `kContact`) rather than dropping them. The pump publishes `ArmState` only when the feedback
 snapshot is new since its last publish (`Seqlock::version()`), so a frozen
 snapshot (link reconnecting, faulted polls unanswered, nothing read yet) is
 never republished as live.
+
+### Contact stop: `HaltReason::kContact`
+
+With a `ContactMonitor` in `SupervisorDeps::contact` (attached to the executor
+with `RtExecutor::attach_contact`), the RT loop latches a contact stop and
+floats the arm itself; the `Supervisor` reacts at sampler rate.
+
+- **Halt.** The sampler calls `on_halt(HaltReason::kContact)` once per rising
+  edge of `ContactMonitor::latched()`. A clear resets the edge, so a re-trip
+  after a clear halts again even if the sampler never saw the latch go down. The active goal and any goal still in the inbox settle
+  `result_code::kContactStop = -11` with `"halted: unexpected contact"`. A
+  second halt landing before the sampler takes a pending contact halt (an
+  ArmLink drop, an e-stop) keeps the contact reason.
+- **While latched.** `on_trajectory_goal` rejects; `on_trajectory_accepted`
+  settles −11; `on_stream_open` returns `{false, kContactStop, "stopped on
+  unexpected contact; call /clear_faults"}`; gripper setpoints are dropped.
+  `on_set_contact_thresholds` and `on_query_contact` still work. The latch
+  survives everything but a clear: `on_link_state(kRunning)` does not unlatch,
+  work stays refused, and the next executor run adopts float, not the position
+  hold.
+- **Clear.** `bool Supervisor::clear_contact()` (any thread; the node's
+  `/clear_faults`) returns false and does nothing if nothing is latched.
+  Otherwise it halts with `kContact` (a no-op repeat, unless the sampler has not
+  seen this latch yet, for example during a 250 ms mode settle: then it is what
+  settles a goal accepted before the trip), requests position mode, and then
+  calls `request_clear()`, so the hold is already pending when the latch drops.
+  The executor adopts only a pending request after a clear, and
+  `JointPositionMode::on_enter` holds at the measured q. Pressing
+  still when clearing re-trips after the observer settles (5/K).
+
+Thresholds, from `interface/contact.h` and `interface/value_types.h`:
+
+```cpp
+enum class ContactProfile { kDefault = 0, kSensitive = 1, kLoose = 2, kCustom = 3 };  // = PROFILE_* on the wire
+struct ContactProfiles { JointVec sensitive, normal, loose, ceiling; };  // N·m; all NaN by default
+ThresholdCheck validate_profiles(const ContactProfiles&);   // ceiling, then each named profile
+ThresholdCheck resolve_contact(const ContactThresholdsRequest&, const ContactProfiles&,
+                               JointVec& theta_out);        // unknown -> refused; then vs ceiling
+struct ContactThresholdsRequest { ContactProfile profile = kDefault; JointVec custom; Token token; };
+struct ContactThresholdsResult  { bool accepted; std::string message; ContactProfile profile; JointVec theta; };
+struct ContactState { bool enabled; ContactProfile profile; ContactStatus status; };
+
+virtual ContactThresholdsResult CommandSink::on_set_contact_thresholds(const ContactThresholdsRequest&);
+virtual ContactState CommandSink::on_query_contact();
+```
+
+`on_set_contact_thresholds` refuses an unknown profile, resolves a named one
+from `SupervisorDeps::contact_profiles` (`normal` is `kDefault`) or takes
+`custom`, then refuses anything non-finite, ≤ 0 or above the ceiling, naming the
+joint (1-based) and the limit. Nothing is clamped. A refusal leaves the active
+thresholds as they were; accepted or not, `profile` and `theta` in the result
+are what is active. An accepted set reaches the monitor within one RT cycle.
+The `CommandSink` defaults (no monitor) are `{false, "contact detection not
+available"}` and `ContactState{}` (`enabled = false`). `on_query_contact`
+reports `enabled` (a monitor is attached), the last accepted `profile`
+(`kDefault` at start: the constructor applies `contact_profiles.normal`), and
+the monitor's `ContactStatus` (on a torn read, the last whole one).
 
 ### Gating
 
@@ -759,10 +888,13 @@ lowering-a-speed-override reasoning: gating it would mean the arm could not be
 stopped by whoever does not currently hold the token. `on_trajectory_accepted()`
 re-checks the token on the goal rather than trusting that a matching
 `on_trajectory_goal()` preceded it. `CancelRequest` exists so that cancel
-carries a token too.
+carries a token too. `on_set_contact_thresholds()` is gated like `on_set_gains()`
+(retuning the detector is a command); `on_query_contact()` is a read and is
+not.
 
 Rejections return `GoalResponse::kRejectUnauthorized` (goals),
-`CancelResponse::kReject` (cancel), or `{accepted=false}` (gains), and increment
+`CancelResponse::kReject` (cancel), or `{accepted=false, "not authorized"}`
+(gains, contact thresholds), and increment
 `ArbitrationStatus::rejected_count`. `result_code::kNotAuthorized = -8` is the
 constant for backends that produce a result message.
 
@@ -844,11 +976,14 @@ an unbounded stream has no safe-stop if the client disappears mid-session.
 ### Why the last session ended — `StreamCloseCause`
 
 ```cpp
-enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
+enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault, kContact };
 StreamCloseCause Supervisor::stream_close_cause() const;   // the LAST close
 ```
 
-Every path through `Supervisor::close_stream()` records one of these. The
+Every path through `Supervisor::close_stream()` records one of these. A halt
+closes with `kContact` when it is a contact stop (`HaltReason::kContact`; the
+recovery is `clear_contact()`, not a re-open) and `kHalted` for every other
+reason. The
 distinction that matters operationally is `kDeadlineExpired` versus `kIkFault`:
 the first says the client went quiet and re-opening is the right response, the
 second says the driver could not solve for the poses being streamed, and
@@ -982,6 +1117,8 @@ struct SupervisorDeps {
   StreamPort*             stream   = nullptr;
   ActionServerPort*       action   = nullptr;
   GripperController*      grip     = nullptr;   // OPTIONAL — null on a robot with no gripper
+  ContactMonitor*         contact  = nullptr;   // OPTIONAL — null: contact detection off
+  ContactProfiles         contact_profiles{};   // read iff contact is set
   SupervisorConfig        cfg{};
 };
 ```
@@ -993,3 +1130,11 @@ is the one field that is legitimately absent: `GripperFeedback::present`
 already exists for a robot with no interconnect gripper attached, so a null
 `grip` makes gripper commands no-ops and `on_query_gripper()` report
 `present = false` rather than being a construction error.
+
+`contact` is optional too: null means no contact stop, with
+`on_set_contact_thresholds` refused and `on_query_contact().enabled == false`.
+When it is set, the constructor throws `std::invalid_argument` unless
+`validate_profiles(contact_profiles)` passes (the message names the profile,
+the joint and the limit) and `contact_profiles.ceiling` equals
+`contact->ceiling()`. It then applies the `kDefault` profile
+(`contact_profiles.normal`). Attach the same monitor to the executor.
