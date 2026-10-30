@@ -68,7 +68,9 @@ TEST(ContactReplay, DebounceMsConvertsToRows) {
 }
 
 // strtod reads "abc" as 0 and "1.5x" as 1.5; a field that is not a whole number must
-// be refused with the row and column, not replayed as a still arm.
+// be refused with the row and column, not replayed as a still arm. strtod also reads
+// "nan" and "inf": a non-finite t or tau poisons the observer for the rest of the
+// file and the replay reports no trips, so those are refused too.
 TEST(ContactReplay, NonNumericFieldThrows) {
   const std::string head =
       "t,q1,q2,q3,q4,q5,q6,q7,qd1,qd2,qd3,qd4,qd5,qd6,qd7,"
@@ -83,7 +85,7 @@ TEST(ContactReplay, NonNumericFieldThrows) {
   };
   // Good rows parse, including padding and a CRLF line end.
   EXPECT_EQ(load(row("3") + row(" 3.5 ", "\r\n")).tau[1][2], 3.5);
-  for (const char* bad : {"abc", "1.5x", "", "--1"}) {
+  for (const char* bad : {"abc", "1.5x", "", "--1", "nan", "-inf", "1e999"}) {
     try {
       load(row("3") + row(bad));
       ADD_FAILURE() << "accepted '" << bad << "'";

@@ -42,9 +42,9 @@ contact_replay --urdf arm.urdf --ee-frame arm_end_effector_link \
   columns are ignored). `tau` must be in command convention, where a still arm
   reads `tau = g(q)`. A raw core v1.2.0 recording has the opposite sign: pass
   `--tau-sign -1`.
-  Every `t, q, qd, tau` field must be a number: anything else stops the replay
-  with the row and the column. Rows further apart than `1/gain` are stepped as
-  `1/gain`, as the RT monitor steps a gap.
+  Every `t, q, qd, tau` field must be a finite number (no `nan`, no `inf`):
+  anything else stops the replay with the row and the column. Rows further apart
+  than `1/gain` are stepped as `1/gain`, as the RT monitor steps a gap.
 - **Output:** `r.csv` with `t, r1..r7`.
 - **Stdout:** per joint, RMS and peak `|r|` over the moving samples (max `|qd|` >
   0.02 rad/s, after the `5/gain` settle), the first would-be trip, and the total

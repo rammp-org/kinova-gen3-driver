@@ -17,7 +17,8 @@ struct ReplayInput {
 // CSV with a header row naming at least t, q1..q7, qd1..qd7, tau1..tau7 (other columns
 // are ignored). tau_sign = -1 turns a raw core v1.2.0 recording into command convention.
 // Throws std::runtime_error on an unreadable file, a missing column or a malformed row:
-// too few columns, or a used field that is not wholly a number (row and column named).
+// too few columns, or a used field that is not wholly a finite number (row and column
+// named).
 ReplayInput load_replay_csv(const std::string& path, double tau_sign = 1.0);
 
 // Median row spacing [s] (0 for fewer than two rows), and a time debounce as whole rows:
