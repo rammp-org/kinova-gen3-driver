@@ -369,7 +369,28 @@ TEST(ContactSupervisor, RetripTheSamplerNeverSawUnlatchStillHalts) {
   ASSERT_TRUE(wait_for([&] { return f.mon.latched(); }));  // the re-trip
   f.be.closed.store(false);
   ASSERT_TRUE(wait_for([&] { return !f.sup.stream_is_open(); }, 0.5));
-  EXPECT_EQ(f.sup.stream_close_cause(), StreamCloseCause::kHalted);
+  EXPECT_EQ(f.sup.stream_close_cause(), StreamCloseCause::kContact);
+}
+
+// A stream open at the trip closes with cause kContact, not kHalted: the client's
+// recovery is a clear, not a re-open. Any other halt still closes kHalted.
+TEST(ContactSupervisor, StreamOpenAtTripClosesWithCauseContact) {
+  ContactFix f;
+  f.sup.start();
+  f.run_rt();
+  sleep_ms(300);
+  StreamOpenRequest r;
+  r.timeout_s = 5.0;
+  ASSERT_TRUE(f.sup.on_stream_open(r).accepted);
+  f.trip();
+  ASSERT_TRUE(wait_for([&] { return !f.sup.stream_is_open(); }, 0.5));
+  EXPECT_EQ(f.sup.stream_close_cause(), StreamCloseCause::kContact);
+
+  ContactFix g;
+  ASSERT_TRUE(g.sup.on_stream_open(r).accepted);
+  g.sup.on_halt(HaltReason::kEmergencyStop);
+  EXPECT_FALSE(g.sup.stream_is_open());
+  EXPECT_EQ(g.sup.stream_close_cause(), StreamCloseCause::kHalted);
 }
 
 // Review Focus 1: a link outage while latched comes back in float, still latched,
@@ -473,6 +494,8 @@ TEST(ContactThresholds, UnauthorizedRefusedByArbiter) {
   ContactThresholdsResult res = arb.on_set_contact_thresholds(r);  // no grant, no token
   EXPECT_FALSE(res.accepted);
   EXPECT_EQ(res.message, "not authorized");
+  EXPECT_EQ(res.profile, ContactProfile::kDefault);  // a refusal reports what is active
+  EXPECT_EQ(res.theta, kNormal);
   EXPECT_EQ(arb.status().rejected_count, 1u);
   EXPECT_EQ(arb.on_query_contact().profile, ContactProfile::kDefault);  // reads are open
 

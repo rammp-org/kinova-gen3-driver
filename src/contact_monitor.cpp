@@ -72,6 +72,10 @@ void ContactMonitor::restart() noexcept {
 }
 
 void ContactMonitor::on_run_start() noexcept {
+  // A clear requested between runs is consumed here, before the executor picks its
+  // first mode: the run then adopts the requested mode directly, not float first.
+  if (clear_requested_.exchange(false, std::memory_order_acq_rel))
+    latched_.store(false, std::memory_order_release);
   restart();
   publish();
 }

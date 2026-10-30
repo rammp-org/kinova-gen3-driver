@@ -637,7 +637,9 @@ void Supervisor::on_link_state(kinova::LinkState s) {
 // traj_ and settle(), so the control action happens there -- which keeps
 // settle-exactly-once true by construction rather than by careful reasoning.
 void Supervisor::on_halt(HaltReason r) {
-  close_stream(StreamCloseCause::kHalted);  // stop admitting setpoints BEFORE the hold is latched
+  // Stop admitting setpoints BEFORE the hold is latched. A contact stop has its own
+  // cause: the client's recovery is a clear, not a re-open.
+  close_stream(r == HaltReason::kContact ? StreamCloseCause::kContact : StreamCloseCause::kHalted);
   // Spec decision 5: stop stamping, do NOT command open. Opening is a motion, and
   // e-stop means stop moving; the 2F-85 self-locks, so ceasing to command holds the
   // grip. Deliberately not a "safe" open -- anything held stays held rather than

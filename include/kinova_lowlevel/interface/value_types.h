@@ -30,7 +30,15 @@ enum class HaltReason {
 // suddenly has its setpoints refused needs to tell "you went quiet" apart from
 // "the driver could not solve for the pose you asked for" -- the second is a
 // tracking failure and re-opening the same session will just reproduce it.
-enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
+// kContact: closed by a contact stop (kHalted is every other halt).
+enum class StreamCloseCause {
+  kNone,
+  kClientRequest,
+  kDeadlineExpired,
+  kHalted,
+  kIkFault,
+  kContact
+};
 
 struct JointImpedanceGainValues {
   JointVec kq = JointVec::Zero();

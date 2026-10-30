@@ -94,8 +94,9 @@ back to the pose it tripped at.
   `K_s·drag_band_rad` of spring, and wherever the arm comes to rest the anchor is
   within the band, so there is no pull back toward the trip pose. The spring only
   resists slow creep from gravity-model error.
-- **`damping` (D)** — N·m·s/rad per joint. Chosen to stop the arm from demo
-  speeds in about 0.2 s. Defaults 5 on joints 1-4 and 1.5 on joints 5-7.
+- **`damping` (D)** — N·m·s/rad per joint. Intended to stop the arm from demo
+  speeds in about 0.2 s (not yet measured on the arm). Defaults 5 on joints 1-4
+  and 1.5 on joints 5-7.
 - **`spring` (K_s)** — N·m/rad per joint. With the 2 degree band the defaults
   give at most about 1 N·m on joints 1-4 and 0.3 N·m on joints 5-7.
 - **`drag_band_rad`** — the most the anchor may trail `q`. Default 2 degrees.

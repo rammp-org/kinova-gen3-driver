@@ -368,7 +368,7 @@ class RtExecutor {
   `monitor` and `on_contact` (a `FloatMode`) alive as long as the executor. With
   none attached the loop is unchanged. Attached, `run` calls
   `monitor.on_run_start()` once at its start (the observer re-settles; the latch
-  is kept) and `monitor.step(fb, dt, missed)` every cycle right after the
+  is kept unless a clear is pending, which it consumes) and `monitor.step(fb, dt, missed)` every cycle right after the
   exchange, a missed one included. The monitor shares the modes' `Dynamics`: it
   only runs on the RT thread. While `monitor.latched()`, `on_contact` is the only
   mode the loop runs:
@@ -379,9 +379,12 @@ class RtExecutor {
     adopts `on_contact` at the next boundary through `set_actuator_modes`.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
-    the clear (`ContactMonitor::request_clear`, consumed by the next `step`).
+    the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or
+    by `on_run_start` when no run is going).
   - **Re-running.** A `run` that starts latched (after comms loss or an arm
     fault) adopts `on_contact` at its first boundary, not the pending request.
+    A clear requested between runs is consumed at the run start, so that run
+    adopts the pending request directly and never enters float.
   - Each latched cycle sets `CycleSample` bit3. In `observe` the monitor never
     latches, so the commands are never changed.
 
@@ -917,11 +920,14 @@ an unbounded stream has no safe-stop if the client disappears mid-session.
 ### Why the last session ended — `StreamCloseCause`
 
 ```cpp
-enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault };
+enum class StreamCloseCause { kNone, kClientRequest, kDeadlineExpired, kHalted, kIkFault, kContact };
 StreamCloseCause Supervisor::stream_close_cause() const;   // the LAST close
 ```
 
-Every path through `Supervisor::close_stream()` records one of these. The
+Every path through `Supervisor::close_stream()` records one of these. A halt
+closes with `kContact` when it is a contact stop (`HaltReason::kContact`; the
+recovery is `clear_contact()`, not a re-open) and `kHalted` for every other
+reason. The
 distinction that matters operationally is `kDeadlineExpired` versus `kIkFault`:
 the first says the client went quiet and re-opening is the right response, the
 second says the driver could not solve for the poses being streamed, and
