@@ -265,30 +265,33 @@ TEST(Supervisor, LatestWinsPreemptionSettlesOldGoalPreempted) {
   EXPECT_TRUE(saw_preempt_a);
 }
 
-TEST(Supervisor, QueuedGoalPromotesAndBothSettleSuccessful) {
+TEST(Supervisor, QueueGoalWhileAnotherIsActiveIsRefused) {
+  // Queueing is disabled (#84): a QUEUE goal behind an active one is refused,
+  // and the active goal runs to completion untouched.
   SupFix f;
   f.sup.start();
   f.run_rt();
   interface::TrajectoryGoal ga;
-  ga.trajectory = ramp7(0.0, 0.05, 0.2);
+  ga.trajectory = ramp7(0.0, 0.05, 0.5);  // long enough that B lands while A runs
   ga.control_mode = interface::ControlModeKind::kPosition;
   ga.preemption = interface::Preemption::kLatestWins;
   ga.path_tolerance = JointVec::Constant(-1.0);
   interface::TrajectoryGoal gb = ga;
-  gb.preemption = interface::Preemption::kQueue;  // queued follow-on
+  gb.preemption = interface::Preemption::kQueue;
   interface::GoalId a{};
   a[0] = 1;
   interface::GoalId b{};
   b[0] = 2;
   ASSERT_EQ(f.sup.on_trajectory_goal(ga), interface::GoalResponse::kAccept);
   f.sup.on_trajectory_accepted(a, ga);
-  std::this_thread::sleep_for(std::chrono::milliseconds(60));                 // A still active
-  ASSERT_EQ(f.sup.on_trajectory_goal(gb), interface::GoalResponse::kAccept);  // kQueue now accepted
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));  // A still active
+  ASSERT_EQ(f.sup.on_trajectory_goal(gb), interface::GoalResponse::kAccept);
   f.sup.on_trajectory_accepted(b, gb);
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));  // A completes+promotes, B completes
+  std::this_thread::sleep_for(std::chrono::milliseconds(800));  // A completes
   f.sup.stop();
   f.teardown();
   int a_code = 999, b_code = 999, a_n = 0, b_n = 0;
+  std::string b_why;
   for (auto& pr : f.be.all_results()) {
     if (pr.first[0] == 1) {
       a_code = pr.second.error_code;
@@ -296,16 +299,85 @@ TEST(Supervisor, QueuedGoalPromotesAndBothSettleSuccessful) {
     }
     if (pr.first[0] == 2) {
       b_code = pr.second.error_code;
+      b_why = pr.second.error_string;
       ++b_n;
     }
   }
   EXPECT_EQ(f.be.result_count(), 2u);  // exactly two settlements, no double-settle
   EXPECT_EQ(a_n, 1);
-  EXPECT_EQ(b_n, 1);  // each id settled exactly once
-  EXPECT_EQ(a_code,
-            interface::result_code::kSuccessful);  // finished goal settles successful on promotion
-  EXPECT_EQ(b_code,
-            interface::result_code::kSuccessful);  // promoted goal settles successful on completion
+  EXPECT_EQ(b_n, 1);
+  EXPECT_EQ(a_code, interface::result_code::kSuccessful);
+  EXPECT_EQ(b_code, interface::result_code::kInvalidGoal);
+  EXPECT_NE(b_why.find("queueing is disabled"), std::string::npos) << b_why;
+}
+
+TEST(Supervisor, RefusedQueueGoalDoesNotSwitchTheMode) {
+  // A QUEUE goal asking for another mode, behind an active goal, is refused as
+  // a queue goal and leaves the running mode as it was. (Before #84 the
+  // in-flight mode guard refused it too, so the mode probe is a regression
+  // guard and the error string is what pins the queue refusal.)
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal gp;
+  gp.trajectory = ramp7(0.0, 0.05, 0.5);
+  gp.control_mode = interface::ControlModeKind::kPosition;
+  gp.preemption = interface::Preemption::kLatestWins;
+  gp.path_tolerance = JointVec::Constant(-1.0);
+  interface::TrajectoryGoal gi = gp;
+  gi.control_mode = interface::ControlModeKind::kImpedance;
+  gi.preemption = interface::Preemption::kQueue;
+  interface::GoalId p{};
+  p[0] = 1;
+  interface::GoalId i{};
+  i[0] = 2;
+  ASSERT_EQ(f.sup.on_trajectory_goal(gp), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(p, gp);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));  // gp running
+  // Straight to on_trajectory_accepted, its own entry point: the in_flight_
+  // pre-check would reject a cross-mode goal before it reached the drain.
+  f.sup.on_trajectory_accepted(i, gi);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));  // gi drained, gp mid-flight
+  // The pre-check reads the recorded running mode: position goals still pass,
+  // impedance goals are a mode change while moving.
+  EXPECT_EQ(f.sup.on_trajectory_goal(gp), interface::GoalResponse::kAccept);
+  EXPECT_EQ(f.sup.on_trajectory_goal(gi), interface::GoalResponse::kReject);
+  std::this_thread::sleep_for(std::chrono::milliseconds(700));
+  f.sup.stop();
+  f.teardown();
+  int p_code = 999, i_code = 999;
+  std::string i_why;
+  for (auto& pr : f.be.all_results()) {
+    if (pr.first[0] == 1) p_code = pr.second.error_code;
+    if (pr.first[0] == 2) {
+      i_code = pr.second.error_code;
+      i_why = pr.second.error_string;
+    }
+  }
+  EXPECT_EQ(f.be.result_count(), 2u);
+  EXPECT_EQ(p_code, interface::result_code::kSuccessful);
+  EXPECT_EQ(i_code, interface::result_code::kInvalidGoal);
+  EXPECT_NE(i_why.find("queueing is disabled"), std::string::npos) << i_why;
+}
+
+TEST(Supervisor, QueueGoalWhileIdleRunsAndSucceeds) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  interface::TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.05, 0.2);
+  g.control_mode = interface::ControlModeKind::kPosition;
+  g.preemption = interface::Preemption::kQueue;
+  g.path_tolerance = JointVec::Constant(-1.0);
+  interface::GoalId id{};
+  id[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), interface::GoalResponse::kAccept);
+  f.sup.on_trajectory_accepted(id, g);
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u);
+  EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kSuccessful);
 }
 
 TEST(Supervisor, RejectsCrossModeGoalThatSlipsInFlightPrecheck) {
@@ -324,7 +396,7 @@ TEST(Supervisor, RejectsCrossModeGoalThatSlipsInFlightPrecheck) {
   interface::TrajectoryGoal gi;
   gi.trajectory = ramp7(0.0, 0.05, 0.3);
   gi.control_mode = interface::ControlModeKind::kImpedance;
-  gi.preemption = interface::Preemption::kQueue;
+  gi.preemption = interface::Preemption::kLatestWins;  // kQueue is refused before the mode check
   gi.path_tolerance = JointVec::Constant(-1.0);
   gi.gains.profile = GainsProfile::kCustom;
   gi.gains.custom.kq = JointVec::Constant(60.0);
@@ -497,38 +569,6 @@ TEST(Supervisor, HaltSettlesTheActiveGoalAsHalted) {
   ASSERT_EQ(f.be.result_count(), 1u);
   EXPECT_EQ(f.be.last_result().error_code, interface::result_code::kHalted);
   EXPECT_EQ(f.be.last_result_id()[0], 3);
-}
-
-TEST(Supervisor, HaltSettlesTheQueuedGoalToo) {
-  SupFix f;
-  f.sup.start();
-  f.run_rt();
-  interface::TrajectoryGoal g;
-  g.trajectory = ramp7(0.0, 0.1, 2.0);
-  g.control_mode = interface::ControlModeKind::kPosition;
-  g.path_tolerance = JointVec::Constant(-1.0);
-  g.preemption = interface::Preemption::kLatestWins;
-  interface::GoalId a{};
-  a[0] = 1;
-  f.sup.on_trajectory_goal(g);
-  f.sup.on_trajectory_accepted(a, g);
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  interface::TrajectoryGoal q = g;
-  q.preemption = interface::Preemption::kQueue;
-  interface::GoalId b{};
-  b[0] = 2;
-  f.sup.on_trajectory_goal(q);
-  f.sup.on_trajectory_accepted(b, q);
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  f.sup.on_halt(interface::HaltReason::kEmergencyStop);
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  f.sup.stop();
-  f.teardown();
-  // Both were ACCEPTed, so both must settle -- dropping the queued one silently
-  // orphans a client that waits forever (the a835bf5 / d0791df bug class).
-  ASSERT_EQ(f.be.result_count(), 2u);
-  for (const auto& kv : f.be.all_results())
-    EXPECT_EQ(kv.second.error_code, interface::result_code::kHalted);
 }
 
 TEST(Supervisor, HaltLatchesTheTargetAtMeasuredQ) {
@@ -1860,11 +1900,9 @@ TEST(SupervisorGains, RejectsAnUnknownProfileByteOnEverySurface) {
   EXPECT_FALSE(f.sup.on_stream_open(r).accepted);
 }
 
-TEST(SupervisorGains, QueuedGoalGainsApplyAtPromotionNotAtDrain) {
-  // A queued goal's gains used to land the moment the goal was drained,
-  // mutating the RUNNING goal's compliance mid-motion (review finding). They
-  // must apply when the queued goal is promoted, and kSessionDefault must
-  // resolve at promotion time.
+TEST(SupervisorGains, RefusedQueueGoalLeavesTheRunningGoalsGains) {
+  // A QUEUE goal behind a running one is refused (#84); its gains must never
+  // reach the running goal, during the motion or after it finishes.
   SupFix f;
   f.sup.start();
   f.run_rt();
@@ -1889,13 +1927,19 @@ TEST(SupervisorGains, QueuedGoalGainsApplyAtPromotionNotAtDrain) {
   std::this_thread::sleep_for(std::chrono::milliseconds(200));  // g1 still running
   const JointImpedanceParams mid = profile_params(GainsProfile::kMedium);
   EXPECT_TRUE(f.imp.params().Kq.isApprox(mid.Kq))
-      << "queued goal's gains leaked into the running goal";
+      << "refused goal's gains leaked into the running goal";
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(1500));  // g1 done, g2 promoted + done
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));  // g1 done
   f.sup.stop();
   f.teardown();
-  EXPECT_TRUE(f.imp.params().Kq.isApprox(profile_params(GainsProfile::kStiff).Kq))
-      << "promotion did not apply the queued goal's gains";
+  EXPECT_TRUE(f.imp.params().Kq.isApprox(mid.Kq)) << "refused goal's gains applied after g1";
+  int code1 = 999, code2 = 999;
+  for (auto& pr : f.be.all_results()) {
+    if (pr.first[0] == 1) code1 = pr.second.error_code;
+    if (pr.first[0] == 2) code2 = pr.second.error_code;
+  }
+  EXPECT_EQ(code1, result_code::kSuccessful);
+  EXPECT_EQ(code2, result_code::kInvalidGoal);
 }
 
 TEST(SupervisorGains, ImpedanceStreamOpensWithRequestedProfile) {

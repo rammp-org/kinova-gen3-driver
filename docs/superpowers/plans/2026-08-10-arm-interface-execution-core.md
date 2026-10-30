@@ -481,6 +481,11 @@ git add -A && git commit -m "feat(interface): executor latest-wins preemption"
 
 ### Task 6: Preemption — gapless queue
 
+> **Superseded, 2026-10-29 (#84).** Queueing is disabled. A `QUEUE` goal sent
+> while another goal is active is refused with `kInvalidGoal`, and the gapless
+> promotion this task built was removed. A `QUEUE` goal sent to an idle arm runs
+> as before.
+
 **Files:**
 - Modify: `src/interface/trajectory_executor.cpp`, `tests/interface/trajectory_executor_test.cpp`
 

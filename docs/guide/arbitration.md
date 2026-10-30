@@ -71,7 +71,7 @@ a known state. Re-granting to a different owner is revoke-then-grant — never a
 silent swap under a moving arm.
 
 Every goal that was accepted and then dropped settles with
-`result_code::kHalted`, including goals still queued behind the active one.
+`result_code::kHalted`, including goals accepted but not yet started.
 Nothing is left orphaned waiting for a result.
 
 The orchestrator controls *when* this happens. If it wants a clean handover with

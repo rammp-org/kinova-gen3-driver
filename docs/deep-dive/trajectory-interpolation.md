@@ -154,13 +154,10 @@ A change in the effective scale **mid-goal** is slew-limited at
 `kScaleSlewPerSec` (2.0/s) rather than applied instantly, so the *commanded
 velocity* never steps the way a bare change of clock rate would. That
 guarantee is scoped to mid-goal changes: at a goal **boundary** — a fresh
-`submit()` (including a `kLatestWins` preemption) or a queued goal's gapless
-promotion — the applied scale latches to the new goal's own scale
-immediately, on its very first tick, including *upward*. A goal submitted
-while the override is already down starts at that slower scale from its
-first tick; a slow goal followed by a faster queued one promotes straight to
-the faster scale rather than ramping up from the outgoing goal's (see
-`PromotionLatchesToAFasterPromotedScaleTooNotRampingUp`). A step in the
+`submit()`, including a `kLatestWins` preemption — the applied scale latches
+to the new goal's own scale immediately, on its very first tick, including
+*upward*. A goal submitted while the override is already down starts at that
+slower scale from its first tick. A step in the
 commanded reference at a goal boundary is inherent to switching trajectories
 at all, scale aside — the slew limit only governs a change of scale *within*
 one running goal.

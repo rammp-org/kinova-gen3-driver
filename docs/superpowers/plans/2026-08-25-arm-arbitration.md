@@ -674,6 +674,10 @@ git commit -m "test(interface): Arbiter e-stop latch, clear, and status"
 
 Append to `tests/interface/supervisor_test.cpp` (uses the existing `SupFix` fixture and `ramp7` helper):
 
+> **Superseded in part, 2026-10-29 (#84).** Queueing is disabled, so no goal
+> waits behind the active one any more. `HaltSettlesTheQueuedGoalToo` below was
+> deleted. Goals accepted but not yet started still settle `kHalted`.
+
 ```cpp
 TEST(Supervisor, HaltSettlesTheActiveGoalAsHalted) {
   SupFix f; f.sup.start(); f.run_rt();

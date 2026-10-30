@@ -285,6 +285,11 @@ goal is running."
 
 - [ ] **Step 8: Write the promotion test (Review Focus 2)**
 
+> **Superseded, 2026-10-29 (#84).** Queueing is disabled. A `QUEUE` goal sent
+> while another goal is active is refused with `kInvalidGoal`, and the gapless
+> promotion this step tests was removed. A `QUEUE` goal sent to an idle arm runs
+> as before.
+
 ```cpp
 TEST(ExecutorSpeedScale, PromotedGoalStartsItsOwnClockAtItsOwnScale) {
   RecordingSink sink;

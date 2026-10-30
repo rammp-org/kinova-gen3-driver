@@ -102,24 +102,15 @@ SubmitResult TrajectoryExecutor::submit(const Trajectory& tr, ControlModeKind mo
     active_ = Active(tr, 0.0, 0.0, false);
     path_tol_ = path_tol;  // tolerance guards the adopted trajectory
     scale_ = speed_scale;
-    queued_.reset();
     return SubmitResult::kAccepted;
   }
-  // active, same mode: preempt per the caller's policy.
-  if (p == Preemption::kLatestWins) {
-    active_ = Active(tr, 0.0, 0.0, false);  // replace + reset clock (started=false)
-    path_tol_ = path_tol;                   // new trajectory's tolerance takes over
-    scale_ = speed_scale;
-    queued_.reset();
-    return SubmitResult::kAccepted;
-  }
-  // kQueue: store trajectory + its tolerance for gapless promotion on completion
-  // (promotion in Task 6). Do NOT touch path_tol_/scale_: the active trajectory
-  // keeps its own divergence guard and clock scale until the queued goal is
-  // actually promoted.
-  queued_ = tr;
-  queued_tol_ = path_tol;
-  queued_scale_ = speed_scale;
+  // active, same mode. Queueing is disabled (#84): a goal waiting behind the
+  // active one is refused, and the active goal is left exactly as it was.
+  if (p == Preemption::kQueue) return SubmitResult::kRejectedQueueWhileActive;
+  // kLatestWins: preempt.
+  active_ = Active(tr, 0.0, 0.0, false);  // replace + reset clock (started=false)
+  path_tol_ = path_tol;                   // new trajectory's tolerance takes over
+  scale_ = speed_scale;
   return SubmitResult::kAccepted;
 }
 
@@ -181,23 +172,11 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
     if (continuous_[i]) err = kinova::wrap_to_pi(err);
     if (path_tol_[i] > 0.0 && std::abs(err) > path_tol_[i]) {
       active_.reset();
-      queued_.reset();  // a fault aborts the whole chain — don't strand a queued follow-on
       return ExecStatus{false, true, frac, ExecStatus::kPathToleranceViolated};
     }
   }
 
   if (elapsed >= dur) {
-    if (queued_) {                                   // gapless promotion — no idle gap
-      active_ = Active(*queued_, 0.0, now_s, true);  // traj_t=0, last_now_s=now
-      path_tol_ = queued_tol_;                       // adopt the promoted goal's divergence guard
-      scale_ = queued_scale_;
-      // A promoted goal starts at ITS OWN scale, same as a fresh submit's
-      // !a.started latch — otherwise gapless promotion ramps from the
-      // outgoing goal's scale, the exact step this feature exists to avoid.
-      applied_ = effective_scale(scale_, override_scale);
-      queued_.reset();
-      return ExecStatus{true, false, 0.0, ExecStatus::kOk, true};  // promoted this tick
-    }
     active_.reset();
     return ExecStatus{false, true, 1.0, ExecStatus::kOk};  // time-based completion
   }

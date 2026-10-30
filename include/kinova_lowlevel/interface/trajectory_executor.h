@@ -40,6 +40,7 @@ kinova::JointVec sample(const Trajectory& tr, double t_s);
 // zero WITH has_velocity set.
 kinova::JointTarget sample_target(const Trajectory& tr, double t_s);
 
+// kQueue runs only on an idle executor; behind an active goal it is refused (#84).
 enum class Preemption { kQueue, kLatestWins };
 enum class ControlModeKind { kPosition, kImpedance, kVelocity, kTorque };
 enum class SubmitResult {
@@ -47,6 +48,7 @@ enum class SubmitResult {
   kRejectedModeChangeWhileMoving,
   kRejectedEmpty,
   kRejectedSpeedScale,
+  kRejectedQueueWhileActive,
 };
 
 // Floor for the effective scale. Zero would stop the clock and hang the goal
@@ -78,7 +80,6 @@ struct ExecStatus {
   bool completed;
   double fraction;
   int error_code;
-  bool promoted = false;
 };
 
 // The executor drives the driver's control modes through the core
@@ -96,7 +97,7 @@ class TrajectoryExecutor {
       : sink_(sink), continuous_(continuous) {}
   SubmitResult submit(const Trajectory& tr, ControlModeKind mode, Preemption p,
                       const kinova::JointVec& path_tol, double speed_scale = 1.0);
-  bool is_active() const { return active_.has_value() || queued_.has_value(); }
+  bool is_active() const { return active_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
   ExecStatus tick(double now_s, const kinova::JointVec& q_meas, double override_scale = 1.0);
   double applied_scale() const { return applied_; }
@@ -116,13 +117,9 @@ class TrajectoryExecutor {
   std::array<bool, kinova::kNumJoints> continuous_{};
   ControlModeKind mode_ = ControlModeKind::kPosition;
   std::optional<Active> active_;
-  std::optional<Trajectory> queued_;
   kinova::JointVec path_tol_ = kinova::JointVec::Zero();  // guards the ACTIVE trajectory
-  kinova::JointVec queued_tol_ =
-      kinova::JointVec::Zero();  // applied when queued_ is promoted (Task 6)
-  double scale_ = 1.0;           // the ACTIVE goal's own requested scale
-  double queued_scale_ = 1.0;    // adopted when queued_ is promoted
-  double applied_ = 1.0;         // the scale actually in force (slew-limited, Task 3)
+  double scale_ = 1.0;                                    // the ACTIVE goal's own requested scale
+  double applied_ = 1.0;  // the scale actually in force (slew-limited, Task 3)
 };
 
 }  // namespace kinova::interface

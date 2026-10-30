@@ -319,6 +319,11 @@ git commit -m "feat(interface): Layer A ports (Stream/ActionServer/CommandSink) 
 
 ### Task 3: `ExecStatus.promoted` signal (executor extension for correct queue results)
 
+> **Superseded, 2026-10-29 (#84).** Queueing is disabled. A `QUEUE` goal sent
+> while another goal is active is refused with `kInvalidGoal`, and the gapless
+> promotion (and `ExecStatus.promoted`) this task built was removed. A `QUEUE`
+> goal sent to an idle arm runs as before.
+
 **Files:**
 - Modify: `include/kinova_lowlevel/interface/trajectory_executor.h` (add `bool promoted` to `ExecStatus`)
 - Modify: `src/interface/trajectory_executor.cpp` (set it true on the tick a queued goal is promoted)

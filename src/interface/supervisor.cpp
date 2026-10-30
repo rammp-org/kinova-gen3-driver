@@ -140,10 +140,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
   bool have_q_meas = false;            // false until the FIRST successful snapshot read:
                                        // q_meas is still the Zero initializer before that,
                                        // and nothing downstream may treat it as a posture
-  GoalId queued_id{};
-  bool have_queued = false;
-  ImpedanceGains queued_gains{};  // the queued goal's spec, resolved and applied at promotion
-  auto last_tick = clock::now();  // for the compliant-velocity integration dt
+  auto last_tick = clock::now();       // for the compliant-velocity integration dt
   while (running_.load(std::memory_order_acquire)) {
     // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
     // real period jitters above 1/sampler_hz under load; integrating with the
@@ -169,9 +166,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       r.error_code = result_code::kHalted;
       r.error_string = halt_reason_string(hr);
       if (have_active) action_.settle(active_id, r);
-      if (have_queued)
-        action_.settle(queued_id, r);  // ACCEPTed already; dropping it orphans the client
-      // A goal this thread promoted while the link was dropping may have requested
+      // A goal this thread started while the link was dropping may have requested
       // its own mode after on_link_state lined position up. The next run must
       // still adopt position, so line it up again. Keyed on readiness, not on hr:
       // a second halt (an e-stop) arriving first overwrites the reason.
@@ -190,7 +185,6 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_), continuous_);
       traj_bound_kind_ = k;
       have_active = false;
-      have_queued = false;
       in_flight_.store(false);
       JointFeedback fb;
       const bool ok = snap_.load(fb);
@@ -300,24 +294,18 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         continue;
       }
       if (in.cancel) {
-        // Abort the whole chain and reset the executor to idle; the mode keeps
+        // Abort the active goal and reset the executor to idle; the mode keeps
         // commanding its last reference, so the arm holds where it was.
         if (have_active) {
           TrajectoryResult r;
           r.error_code = result_code::kPreempted;
           action_.settle(active_id, r);
         }
-        if (have_queued) {
-          TrajectoryResult r;
-          r.error_code = result_code::kPreempted;
-          action_.settle(queued_id, r);
-        }
         const ControlModeKind k = active_mode_kind_.load();  // ONE load: see the halt path
         kinova::JointTargetSink* sink = sink_for(k);
         traj_.emplace(sink ? *sink : static_cast<kinova::JointTargetSink&>(pos_), continuous_);
         traj_bound_kind_ = k;
         have_active = false;
-        have_queued = false;
         in_flight_.store(false);
         continue;
       }
@@ -374,10 +362,21 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       // both makes the rebind a no-op at worst.
       // NOTE: gains are applied when the goal STARTS RUNNING, after submit
       // accepts (below) -- not here at drain. Applying at drain mutated the
-      // RUNNING goal's compliance for a queued goal, and even for one rejected
-      // two checks later (review finding). A queued goal's spec is stashed and
-      // resolved at promotion, so kSessionDefault still means "the default
-      // when the goal runs".
+      // RUNNING goal's compliance for a goal rejected two checks later (review
+      // finding), so kSessionDefault means "the default when the goal runs".
+      //
+      // Queueing is disabled (#84): a QUEUE goal behind an active one is
+      // refused HERE, ahead of the mode block, so it is reported as a queue
+      // refusal whatever mode it asks for and never reaches submit().
+      if (have_active && in.goal.preemption == Preemption::kQueue) {
+        TrajectoryResult r;
+        r.error_code = result_code::kInvalidGoal;
+        r.error_string =
+            "queueing is disabled: wait for the active goal to finish, preempt it with "
+            "LATEST_WINS, or send one goal through all waypoints";
+        action_.settle(in.id, r);
+        continue;
+      }
       if (in.goal.control_mode != traj_bound_kind_ ||
           in.goal.control_mode != active_mode_kind_.load()) {
         if (have_active) {  // cross-mode goal slipped past the accept-time pre-check (in_flight_
@@ -424,36 +423,19 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         active_id = in.id;
         have_active = true;
         in_flight_.store(true);
-      } else if (in.goal.preemption == Preemption::kLatestWins) {
-        // Preempt the active goal; the executor also drops any queued follow-on.
+      } else {
+        // kLatestWins (kQueue behind an active goal was refused above):
+        // preempt the active goal.
         {
           TrajectoryResult r;
           r.error_code = result_code::kPreempted;
           action_.settle(active_id, r);
-        }
-        if (have_queued) {
-          TrajectoryResult r;
-          r.error_code = result_code::kPreempted;
-          action_.settle(queued_id, r);
-          have_queued = false;
         }
         // The latest-wins goal takes over at the next cycle boundary: its
         // gains are the running tuning from here.
         if (in.goal.control_mode == ControlModeKind::kImpedance)
           apply_impedance_gains(in.goal.gains);
         active_id = in.id;
-      } else {
-        // kQueue: this goal waits behind the active one. The executor overwrites any
-        // prior queued goal, so settle the displaced one as preempted before overwriting.
-        if (have_queued) {
-          TrajectoryResult r;
-          r.error_code = result_code::kPreempted;
-          action_.settle(queued_id, r);
-        }
-        queued_id = in.id;
-        queued_gains = in.goal.gains;  // applied at PROMOTION, not now: the
-                                       // active goal keeps its own tuning
-        have_queued = true;            // active_id / in_flight_ untouched
       }
     }
     // 2) tick the active trajectory
@@ -467,27 +449,6 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       fbk.actual = q_meas;
       fbk.fraction_complete = st.fraction;
       action_.publish_feedback(active_id, fbk);
-      if (st.promoted) {
-        // The active goal finished successfully and the queued goal took over gaplessly.
-        {
-          TrajectoryResult r;
-          r.error_code = result_code::kSuccessful;
-          action_.settle(active_id, r);
-        }
-        // The queued goal runs NOW, so its gains resolve now -- kSessionDefault
-        // means the default at promotion, and the finished goal's tuning dies
-        // with it. Queue promotion cannot cross modes (rejected at drain), so
-        // the running mode is the stashed goal's mode.
-        // Known window: st.promoted is reported AFTER the tick that executed
-        // the promoted goal's first sample, so that one sampler period runs
-        // under the finished goal's gains (the mode's gain ramp spans it).
-        // Closing it means promoting outside the executor's tick -- not worth
-        // the restructure for ~one period at a goal boundary.
-        if (active_mode_kind_.load() == ControlModeKind::kImpedance)
-          apply_impedance_gains(queued_gains);
-        active_id = queued_id;
-        have_queued = false;  // promoted goal is now active; have_active/in_flight_ stay true
-      }
       if (st.completed && have_active) {
         TrajectoryResult r;
         r.error_code = (st.error_code == ExecStatus::kPathToleranceViolated)
@@ -496,13 +457,6 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         action_.settle(active_id, r);
         have_active = false;
         in_flight_.store(false);
-        // A divergence abort drops any queued follow-on in the executor — settle it too.
-        if (st.error_code == ExecStatus::kPathToleranceViolated && have_queued) {
-          TrajectoryResult rq;
-          rq.error_code = result_code::kPreempted;
-          action_.settle(queued_id, rq);
-          have_queued = false;
-        }
       }
     }
     std::this_thread::sleep_for(std::chrono::duration_cast<clock::duration>(period));
