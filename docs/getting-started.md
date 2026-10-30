@@ -127,6 +127,32 @@ mode.set_gains(stiffer_params); // retune online
 See the [Control Modes guide](guide/control-modes.md) for what each mode does and
 the [API Reference](reference/api.md) for exact signatures.
 
+### Linking from your own CMake project
+
+Install the driver (`cmake --install build --prefix <prefix>`) and consume the
+exported package:
+
+```cmake
+find_package(kinova_lowlevel CONFIG REQUIRED)   # with <prefix> on CMAKE_PREFIX_PATH
+target_link_libraries(my_app PRIVATE kinova_lowlevel::kinova_lowlevel)
+```
+
+A KORTEX-enabled install (`-DKINOVA_ENABLE_KORTEX=ON`) needs the KORTEX SDK
+on your machine. `kinova_lowlevel` is a static library, so the KORTEX library
+is not inside it: it gets linked into your executable, and `find_package`
+locates it. The package looks for it in `KORTEX_HW_DIR`, the same
+variable the driver build takes. If you don't set it, the package uses the SDK
+path the driver was built with. If the SDK is somewhere else on your machine,
+pass its location:
+
+```sh
+cmake -S . -B build -DCMAKE_PREFIX_PATH="<prefix>;<cmeel prefix>" \
+  -DKORTEX_HW_DIR=/path/to/kortex_api_2.8.0_aarch64
+```
+
+When `<KORTEX_HW_DIR>/lib/release/libKortexApiCpp.a` doesn't exist,
+`find_package` stops with an error that names the path it tried.
+
 ## 4. Before real hardware: validate read-only
 
 Torque control on a real arm is **attended-only**. The impedance app has a

@@ -194,6 +194,15 @@ that heading to the new version and bumps `package.xml`.
   21 ms worth in one cycle per miss, at most the cap's worth: ~10 mrad per
   miss at the position mode's default 0.5 rad/s, up to ~29 mrad per miss in
   the velocity mode at a 1.4 rad/s `max_qd`. Their leashes still bound it.
+- A KORTEX-enabled install no longer hardcodes the build machine's SDK path
+  (#50). The exported `kinova_lowlevelTargets.cmake` used to list
+  `<KORTEX_HW_DIR>/lib/release/libKortexApiCpp.a` as an absolute path, so a
+  consumer whose SDK sat anywhere else failed at link time. The export now
+  names an imported target, `kinova_lowlevel::kortex_api`, and
+  `find_package(kinova_lowlevel)` creates it from the consumer's
+  `-DKORTEX_HW_DIR`, falling back to the build-time path. A missing SDK now
+  stops `find_package` with an error naming the path it tried. Sim-only
+  installs are unchanged, and consumers on the build machine need no change.
 - A single lost KORTEX UDP frame no longer kills the driver. `KortexTransport`
   bounds every cyclic call on the RT path (`exchange`, `send`, `receive`, and the
   pumps during a mode switch) at `cyclic_timeout_ms` (new constructor argument,

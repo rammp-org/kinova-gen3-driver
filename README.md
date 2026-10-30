@@ -156,6 +156,11 @@ cmake -S . -B build_kortex \
 box without the SDK still builds the sim. (Symptom of pointing at the x86-64 lib:
 `ld: ... Relocations in generic ELF (EM: 62) ... file in wrong format`.)
 
+A project that consumes a KORTEX-enabled install through
+`find_package(kinova_lowlevel)` also needs the SDK. It finds it via the same
+`-DKORTEX_HW_DIR`, defaulting to the build-time path; see
+[Getting Started](docs/getting-started.md#linking-from-your-own-cmake-project).
+
 > **Version vs firmware:** Kinova couples the API version to robot firmware.
 > 2.8.0 suits 2.x firmware; confirm the arm's firmware at bring-up (browse to the
 > robot IP) before locking it in. For our low-level cyclic use the control API is
