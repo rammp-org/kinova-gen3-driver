@@ -133,9 +133,9 @@ TEST(ExecutorSubmit, RejectsWaypointsUnder10nsApart) {
   const double nan = std::numeric_limits<double>::quiet_NaN();
   for (auto [t1, t2] : {std::pair{0.0, 1.0}, std::pair{1.0, 1.0}, std::pair{1.0, 0.5},
                         std::pair{1e-9, 1.0}, std::pair{9e-9, 1.0}, std::pair{nan, 1.0}}) {
-    EXPECT_EQ(ex.submit(plan(t1, t2), ControlModeKind::kPosition, Preemption::kLatestWins,
-                        vec7(-1.0)),
-              SubmitResult::kRejectedShortSegment)
+    EXPECT_EQ(
+        ex.submit(plan(t1, t2), ControlModeKind::kPosition, Preemption::kLatestWins, vec7(-1.0)),
+        SubmitResult::kRejectedShortSegment)
         << "t1 " << t1 << " t2 " << t2;
     EXPECT_FALSE(ex.is_active()) << "t1 " << t1 << " t2 " << t2;
   }

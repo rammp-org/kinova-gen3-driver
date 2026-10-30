@@ -407,12 +407,11 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       if (sr != SubmitResult::kAccepted) {
         TrajectoryResult r;
         r.error_code = result_code::kInvalidGoal;
-        r.error_string =
-            sr == SubmitResult::kRejectedSpeedScale
-                ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
-            : sr == SubmitResult::kRejectedShortSegment
-                ? "waypoints less than 10 ns apart, duplicated or out of order"
-                : "rejected by executor";
+        r.error_string = sr == SubmitResult::kRejectedSpeedScale
+                             ? "speed_scale outside [kMinSpeedScale, 1.0]: refused, not clamped"
+                         : sr == SubmitResult::kRejectedShortSegment
+                             ? "waypoints less than 10 ns apart, duplicated or out of order"
+                             : "rejected by executor";
         action_.settle(in.id, r);
         continue;
       }
