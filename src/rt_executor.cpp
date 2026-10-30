@@ -178,9 +178,9 @@ void RtExecutor::run(std::atomic<bool>& stop) {
   // no mode may see fb before one real read.
   while (!exchange_ok()) {
   }
-  // When the last feedback read returned: the contact observer integrates the measured
-  // time between reads, not the nominal period (a miss blocks for its timeout, a mode
-  // switch for the set_actuator_modes handshake, an overrun runs long).
+  // When the last feedback read returned. The contact monitor is stepped over the
+  // measured time between reads: a miss, a mode-switch handshake or an overrun takes
+  // longer than one period.
   int64_t last_read_ns = ns_now();
 
   uint64_t cycle_index = 0;

@@ -74,8 +74,8 @@ class RtExecutor {
   //     the active mode's; otherwise that cycle's command is a freeze (the active
   //     mode's actuator modes, position = measured q, zero velocity, no compute) and
   //     the next boundary adopts on_contact through set_actuator_modes. A command
-  //     goes out on the next cycle's exchange, after that handshake, so the freeze
-  //     is sent after the torque switch, once;
+  //     goes out on the next cycle's exchange, so the freeze is sent once, after
+  //     that handshake;
   //   - a run() that starts latched adopts it at its first boundary;
   //   - a request_mode() is left pending and adopted only after the clear.
   // monitor shares the modes' Dynamics: it is only ever called on the RT thread.

@@ -91,18 +91,15 @@ ThresholdCheck validate_contact_thresholds(const JointVec& theta, const JointVec
 // debounce_cycles, so a sustained push is one would-trip, and it re-arms only after it
 // drops back under θ.
 //
-// Samples. dt_s is the time since the previous step(): the executor passes the measured
-// time between feedback reads, not the nominal period. A missed cycle (missed = true) or
-// one with any non-finite q/qd/tau does not step the observer or touch the counters; its
-// dt is carried into the next good step. Non-finite samples are counted in bad_samples;
-// a missed cycle is not (its feedback is stale, not bad).
-// A good step integrates the carried dt plus its own, capped at 1/K, so a longer gap
-// (timeouts back to back, a set_actuator_modes handshake) is one step of 1/K. At
-// K*dt = 1 the Euler step drops the previous r and lands on the external torque of a
-// still arm, plus K times the momentum change across the gap; uncapped, K*dt > 1 would
-// scale the previous r by (1 - K*dt) and overshoot. The observer is not re-seeded on a
-// gap: that would blind it for 5/K at every mode switch. Observer time (and so the
-// settling window) advances by the capped step.
+// Samples. dt_s is the time since the previous step(); the executor measures it between
+// feedback reads. A missed cycle (missed = true) or one with any non-finite q/qd/tau does
+// not step the observer or touch the counters; its dt is carried into the next good step.
+// Non-finite samples are counted in bad_samples; a missed cycle is not (its feedback is
+// stale, not bad). A good step integrates the carried dt plus its own, capped at 1/K: at
+// K*dt = 1 a still arm reads its external torque exactly, above it the Euler step
+// overshoots. A long gap (back-to-back timeouts, a set_actuator_modes handshake) does
+// not re-seed the observer: that would blind the monitor for 5/K at every mode switch.
+// The settling window counts observer time, i.e. the capped steps.
 class ContactMonitor {
  public:
   // Throws std::invalid_argument naming the field: gain not finite and > 0,

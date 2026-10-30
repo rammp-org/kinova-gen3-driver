@@ -29,7 +29,7 @@ using namespace kinova::interface;
 
 namespace {
 
-// The profile numbers from the design (N·m, j1..j7).
+// The threshold profiles (N·m, j1..j7).
 const JointVec kSensitive = (JointVec() << 8, 8, 6, 6, 2, 2, 2).finished();
 const JointVec kNormal = (JointVec() << 16, 16, 12, 12, 4, 4, 4).finished();
 const JointVec kLoose = (JointVec() << 24, 24, 18, 18, 6, 6, 6).finished();

@@ -336,9 +336,9 @@ TEST(ContactMonitor, MissedFramesDoNotStepObserver) {
   }
 }
 
-// A gap longer than 1/K (a mode-switch handshake, back-to-back timeouts) is stepped
-// as 1/K: at K*dt = 1 the step lands r on the external torque of a still arm instead
-// of overshooting by (1 - K*dt) * r. Missed cycles count toward the gap. No re-settle.
+// A step longer than 1/K is stepped as 1/K, so a still arm reads the push exactly
+// (to 1e-6) after a 0.2 s step, still armed. The same when the gap is made of missed
+// cycles.
 TEST(ContactMonitor, LongGapStepCappedAtOneOverK) {
   Rig rig(config(ContactDetection::kObserve));
   const JointVec press = push(1, 6.0);

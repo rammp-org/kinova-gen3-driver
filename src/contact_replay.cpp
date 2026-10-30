@@ -54,9 +54,9 @@ ReplayInput load_replay_csv(const std::string& path, double tau_sign) {
       throw std::runtime_error(path + ":" + std::to_string(row) + ": expected " +
                                std::to_string(header.size()) + " columns, got " +
                                std::to_string(c.size()));
-    // The whole field must be a finite number (surrounding whitespace, a CRLF '\r', is
-    // fine): plain strtod reads "abc" as 0 and "1.5x" as 1.5, and accepts "nan" and
-    // "inf", which would poison the observer for the rest of the file.
+    // The whole field must be a finite number; surrounding whitespace (a CRLF '\r') is
+    // fine. strtod alone reads "abc" as 0 and "1.5x" as 1.5, and passes nan/inf, which
+    // poison the observer for the rest of the file.
     auto num = [&](size_t i) {
       const char* s = c[i].c_str();
       char* end = nullptr;

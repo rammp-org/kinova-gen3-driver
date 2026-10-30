@@ -45,9 +45,8 @@ void FloatMode::on_enter(const JointFeedback& fb) { anchor_ = fb.q; }
 
 void FloatMode::compute(const JointFeedback& fb, double, JointCommand& out) {
   const double band = p_.drag_band_rad;
-  // On a continuous joint q is wrapped to (-pi, pi], so q - q_a is wrapped too: home's
-  // j3 = pi dithers across the wrap, and the raw difference would flip the anchor to
-  // the far side every crossing.
+  // q is wrapped to (-pi, pi]: on a continuous joint wrap q - q_a too, or a joint at
+  // +-pi (home's j3) flips the anchor to the far side each time it crosses the wrap.
   for (int i = 0; i < kNumJoints; ++i) {
     const double raw = fb.q[i] - anchor_[i];
     err_[i] = continuous_[i] ? wrap_to_pi(raw) : raw;

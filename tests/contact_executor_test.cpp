@@ -441,11 +441,11 @@ TEST(ContactExecutor, RunStartResettlesObserver) {
   EXPECT_EQ(early, ContactPhase::kSettling);
 }
 
-// Two missed exchanges that each block 50 ms (a KORTEX timeout takes real time):
-// the observer is stepped over the measured elapsed time, capped at 1/K. The push
-// lands during the gap; at K*dt = 1 the first good sample after it reads the push
-// exactly (the arm is still), where nominal 1 ms steps would read ~7% of it and an
-// uncapped 100 ms step (K*dt = 2.5) would overshoot to ~2.5x. No re-settle.
+// Two missed exchanges that each block 50 ms (a KORTEX timeout takes real time),
+// with a 6 N·m push landing in the gap. The observer steps the measured gap capped
+// at 1/K, so the first good sample after it reads the push (within 0.05 N·m; 1 ms
+// per cycle read 0.45). Still armed (no re-settle), no overshoot in any status read
+// after the gap, and one would-trip.
 TEST(ContactExecutor, MissGapStepsMeasuredTimeCapped) {
   World w;
   w.attach(ContactDetection::kObserve);

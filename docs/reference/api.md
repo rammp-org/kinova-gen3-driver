@@ -391,7 +391,7 @@ class RtExecutor {
   `monitor.on_run_start()` once at its start (the observer re-settles; the latch
   is kept unless a clear is pending, which it consumes) and `monitor.step(fb, dt, missed)` every cycle right after the
   exchange, a missed one included, with `dt` the measured time since the
-  previous feedback read (not the nominal period). The monitor shares the modes' `Dynamics`: it
+  previous feedback read. The monitor shares the modes' `Dynamics`: it
   only runs on the RT thread. While `monitor.latched()`, `on_contact` is the only
   mode the loop runs:
   - **Trip cycle.** If `on_contact`'s actuator modes match the active mode's

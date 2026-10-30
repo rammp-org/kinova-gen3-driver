@@ -744,17 +744,16 @@ ContactState Supervisor::on_query_contact() {
   const bool whole = contact_->status(st);
   std::lock_guard<std::mutex> l(contact_mtx_);
   s.profile = contact_profile_;
-  // A torn read (the RT thread kept publishing through every retry) holds a mix of
-  // two cycles: report the last whole one instead.
+  // A torn read holds a mix of two cycles: report the last whole one.
   if (whole) contact_status_ = st;
   s.status = contact_status_;
   return s;
 }
 // The executor adopts only a PENDING request after a clear, and requests made
-// before the trip were consumed or overwritten: position is requested here, before
-// request_clear (a request stays pending while latched), so the hold is already
-// pending when the monitor unlatches. Requested after, the RT loop could unlatch in
-// between and adopt a stale request, or stay in float, for a cycle. The halt covers
+// before the trip were consumed or overwritten. Position is requested before
+// request_clear, so it is already pending when the monitor unlatches; requested
+// after, the RT loop could unlatch in between and run a stale request (or float) for
+// a cycle. The halt covers
 // a latch the sampler has not seen yet (it can be blind for a mode settle): without
 // it a goal ACCEPTed before the trip would start running after the clear.
 // Otherwise it is a no-op repeat.
