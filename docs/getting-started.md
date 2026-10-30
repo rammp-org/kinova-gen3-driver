@@ -138,8 +138,9 @@ target_link_libraries(my_app PRIVATE kinova_lowlevel::kinova_lowlevel)
 ```
 
 A KORTEX-enabled install (`-DKINOVA_ENABLE_KORTEX=ON`) needs the KORTEX SDK
-when your project links, because the SDK is a static library linked into
-`kinova_lowlevel`. The package looks for it in `KORTEX_HW_DIR`, the same
+on your machine. `kinova_lowlevel` is a static library, so the KORTEX library
+is not inside it: it gets linked into your executable, and `find_package`
+locates it. The package looks for it in `KORTEX_HW_DIR`, the same
 variable the driver build takes. If you don't set it, the package uses the SDK
 path the driver was built with. If the SDK is somewhere else on your machine,
 pass its location:
