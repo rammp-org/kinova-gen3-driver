@@ -335,7 +335,8 @@ TEST(ContactExecutor, ClearBetweenRunsAdoptsTheRequestNotFloat) {
 }
 
 TEST(ContactExecutor, ObserveNeverChangesCommand) {
-  auto run = [](bool pushed, std::vector<JointCommand>& sent, uint64_t& would_trips) {
+  auto run = [](bool pushed, std::vector<JointCommand>& sent, uint64_t& would_trips,
+                size_t& switches) {
     World w;
     w.attach(ContactDetection::kObserve);
     w.bench.on_call = [&](uint64_t i) {
@@ -349,18 +350,26 @@ TEST(ContactExecutor, ObserveNeverChangesCommand) {
     while (w.ring.pop(s)) ASSERT_EQ(s.flags & 8u, 0u);
     sent = w.bench.sent;
     would_trips = w.status().would_trips;
+    switches = w.bench.switches.size();
   };
   std::vector<JointCommand> quiet, pushed;
   uint64_t trips_quiet = 0, trips_pushed = 0;
-  run(false, quiet, trips_quiet);
-  run(true, pushed, trips_pushed);
+  size_t switches_quiet = 0, switches_pushed = 0;
+  run(false, quiet, trips_quiet, switches_quiet);
+  run(true, pushed, trips_pushed, switches_pushed);
   EXPECT_EQ(trips_quiet, 0u);
-  EXPECT_EQ(trips_pushed, 1u);  // it saw the push
+  EXPECT_EQ(trips_pushed, 1u);                 // it saw the push
+  EXPECT_EQ(switches_pushed, switches_quiet);  // no actuator-mode switch: float never adopted
   ASSERT_EQ(quiet.size(), pushed.size());
+  // compute() integrates the measured wall dt (#103), so two runs differ by scheduling
+  // jitter alone: position and velocity match to well under a freeze or a float.
+  constexpr double kJitterTol = 1e-3;
   for (size_t i = 0; i < quiet.size(); ++i) {
     ASSERT_EQ(quiet[i].mode, pushed[i].mode) << "call " << i;
-    ASSERT_EQ(quiet[i].position, pushed[i].position) << "call " << i;
-    ASSERT_EQ(quiet[i].velocity, pushed[i].velocity) << "call " << i;
+    ASSERT_LT((quiet[i].position - pushed[i].position).cwiseAbs().maxCoeff(), kJitterTol)
+        << "call " << i;
+    ASSERT_LT((quiet[i].velocity - pushed[i].velocity).cwiseAbs().maxCoeff(), kJitterTol)
+        << "call " << i;
     ASSERT_EQ(quiet[i].torque, pushed[i].torque) << "call " << i;
   }
 }
