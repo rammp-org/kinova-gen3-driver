@@ -77,6 +77,14 @@ if(KINOVA_ENABLE_KORTEX)
         ${KORTEX_HW_DIR}/include/google
     )
     set(KORTEX_LIB ${KORTEX_HW_DIR}/lib/release/libKortexApiCpp.a)
+    # The library links KORTEX through this IMPORTED target, not the bare path.
+    # A static library's PRIVATE link deps are exported with it, so a path here
+    # would be baked into the installed kinova_lowlevelTargets.cmake. The target
+    # name is exported instead, and the installed config re-creates it from the
+    # consumer's KORTEX_HW_DIR (#50).
+    add_library(kinova_lowlevel::kortex_api STATIC IMPORTED)
+    set_target_properties(kinova_lowlevel::kortex_api PROPERTIES
+        IMPORTED_LOCATION ${KORTEX_LIB})
 endif()
 
 # --- pinocchio ----------------------------------------------------------------
@@ -128,7 +136,7 @@ if(KINOVA_ENABLE_KORTEX)
     # headers inside the KORTEX transport headers.
     target_include_directories(kinova_lowlevel PRIVATE ${KORTEX_INCLUDE_DIRS})
     target_compile_definitions(kinova_lowlevel PRIVATE _OS_UNIX)
-    target_link_libraries(kinova_lowlevel PRIVATE ${KORTEX_LIB} dl)
+    target_link_libraries(kinova_lowlevel PRIVATE kinova_lowlevel::kortex_api dl)
 endif()
 
 # --- install / export (b1: find_package(kinova_lowlevel CONFIG) support) ------

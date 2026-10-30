@@ -80,7 +80,7 @@ green amd64 build alone would be testing a machine nobody runs.
 | `unit_tests --gtest_filter='RtSafety*'` | **Allocation-freedom** — zero major page faults and zero dropped telemetry samples in steady state. |
 | Install + consume | The exported package resolves at the current major.minor, refuses the next major, and `package.xml` agrees with `project(VERSION)`. |
 | Sim smoke | The executor, transport, dynamics and telemetry run a 1 kHz loop together. |
-| **KORTEX build** | The real-arm transport still compiles and links, and the symbol is actually in the binary. The SDK is fetched from Kinova's public artifactory, per architecture. |
+| **KORTEX build** | The real-arm transport still compiles and links, and the symbol is actually in the binary. The SDK is fetched from Kinova's public artifactory, per architecture. The KORTEX-enabled install is consumed with the SDK moved: `find_package` refuses without `KORTEX_HW_DIR`, and a consumer pointed at the new location links. |
 | KORTEX guard | With the option on and no SDK, configure fails loudly and for the documented reason. |
 
 The KORTEX job matters more than it looks: `src/kortex_transport.cpp` compiles

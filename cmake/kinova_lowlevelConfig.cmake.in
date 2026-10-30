@@ -1,4 +1,28 @@
 @PACKAGE_INIT@
 include(CMakeFindDependencyMacro)
 find_dependency(pinocchio)
+
+# A KORTEX-enabled install exports a link to kinova_lowlevel::kortex_api, not to
+# a path on the machine that built it (#50). Re-create that target here from the
+# consumer's KORTEX_HW_DIR, falling back to where the SDK was at build time.
+# A missing SDK fails at find_package, not later at link time.
+if(@KINOVA_ENABLE_KORTEX@ AND NOT TARGET kinova_lowlevel::kortex_api)
+    set(_kinova_kortex_dir "${KORTEX_HW_DIR}")
+    if(NOT _kinova_kortex_dir)
+        set(_kinova_kortex_dir "@KORTEX_HW_DIR@")
+    endif()
+    set(_kinova_kortex_lib "${_kinova_kortex_dir}/lib/release/libKortexApiCpp.a")
+    if(NOT EXISTS "${_kinova_kortex_lib}")
+        message(FATAL_ERROR
+            "kinova_lowlevel was built with KORTEX, but the KORTEX SDK library "
+            "is not at ${_kinova_kortex_lib}. Pass -DKORTEX_HW_DIR=/path/to/sdk "
+            "(the directory holding lib/release/libKortexApiCpp.a).")
+    endif()
+    add_library(kinova_lowlevel::kortex_api STATIC IMPORTED)
+    set_target_properties(kinova_lowlevel::kortex_api PROPERTIES
+        IMPORTED_LOCATION "${_kinova_kortex_lib}")
+    unset(_kinova_kortex_dir)
+    unset(_kinova_kortex_lib)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/kinova_lowlevelTargets.cmake")

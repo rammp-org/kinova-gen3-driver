@@ -246,6 +246,51 @@ jobs:
       - name: Tests, with KORTEX compiled in
         run: ctest --test-dir build-kortex --output-on-failure
 
+      # The sim job's install/consume gate, for the configuration it cannot
+      # reach: a KORTEX-enabled install, which once baked the build machine's SDK
+      # path into the exported target (#50). The SDK is moved after the build, so
+      # the consumer only works if the installed package resolves KORTEX at
+      # consume time. The consumer constructs a KortexTransport, which pulls the
+      # KORTEX symbols into its link.
+      - name: Install, and consume the package with the SDK moved
+        run: |
+          set -euo pipefail
+          cmake --install build-kortex --prefix /tmp/inst > /dev/null
+          MOVED=/opt/kortex/moved
+          sudo mv "$KORTEX_HW_DIR" "$MOVED"
+
+          mkdir -p /tmp/consumer
+          cat > /tmp/consumer/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          find_package(kinova_lowlevel CONFIG REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE kinova_lowlevel::kinova_lowlevel)
+          EOF
+          cat > /tmp/consumer/main.cpp <<'EOF'
+          #include <kinova_lowlevel/kortex_transport.h>
+          int main() { kinova::KortexTransport t("0.0.0.0"); return 0; }
+          EOF
+
+          echo "--- with the SDK gone from the build path, find_package must refuse"
+          if cmake -S /tmp/consumer -B /tmp/consumer/b-missing \
+               -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" > missing.log 2>&1; then
+            echo "::error::find_package(kinova_lowlevel) SUCCEEDED with the KORTEX SDK moved -- the installed package still points at the build-time path"
+            exit 1
+          fi
+          grep -q "KORTEX SDK library is not at" missing.log || {
+            echo "::error::configure failed, but not with the documented missing-SDK message"
+            cat missing.log
+            exit 1
+          }
+
+          echo "--- pointed at the moved SDK, the consumer must configure and link"
+          cmake -S /tmp/consumer -B /tmp/consumer/b \
+            -DCMAKE_PREFIX_PATH="/tmp/inst;$CMEEL_PREFIX" -DKORTEX_HW_DIR="$MOVED" > /dev/null
+          cmake --build /tmp/consumer/b
+          echo "The KORTEX-enabled install is relocatable."
+
   # The error path: with the option ON and no SDK, configure must fail loudly and
   # for the documented reason. One runner is enough -- this tests CMake logic,
   # which is architecture-independent.
