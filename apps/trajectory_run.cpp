@@ -222,6 +222,10 @@ int main(int argc, char** argv) {
     std::cerr << "--speed must be > 0\n";
     return 2;
   }
+  if (duration_set && duration_s <= 0.0) {
+    std::cerr << "--duration must be > 0\n";
+    return 2;
+  }
   if (!no_guard && path_tol <= 0.0) {
     std::cerr << "--path-tol must be > 0 (or pass --no-guard)\n";
     return 2;
