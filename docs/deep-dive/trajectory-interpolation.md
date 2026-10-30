@@ -80,8 +80,71 @@ c₄ = −15d + 8v₀ + 7v₁ + 1.5A₀ −     A₁
 c₅ =   6d − 3v₀ − 3v₁ − 0.5A₀ + 0.5A₁
 ```
 
-Degenerate segments (duplicate timestamps, `T ≤ 0`) return the left waypoint
-rather than dividing by zero.
+Duplicate timestamps never produce a zero-span segment: the segment search
+brackets every query with `a.t_s ≤ t < b.t_s`, so it skips the zero-width
+pair and the reference steps from the first duplicate's position to the
+second's at that instant. The `T ≤ 0` guard in `sample_target` is defensive;
+no query reaches it.
+
+## Hermite is not hull-preserving
+
+Linear interpolation never leaves the interval between a segment's two
+endpoint positions. Cubic and quintic Hermite can: the curve follows the
+endpoint tangents `v = qd·T` (and `A = qdd·T²`), and nothing confines it to
+`[min(a.q, b.q), max(a.q, b.q)]`. `sample()` can therefore command a joint
+position outside the segment its waypoints bound. That is a configuration the
+planner never collision-checked. Both control modes clamp to joint limits
+downstream, so this is not a limits hazard. The risk is leaving the corridor
+the planner checked.
+
+It happens in two cases:
+
+- **Direction reversals.** When a joint turns around between two waypoints,
+  the plan's own curve peaks between them, and the interpolant follows it.
+- **Derivatives that don't match the timestamps.** If a plan is re-timed
+  (timestamps stretched by `k`) without recomputing its derivatives, every
+  tangent is `k` times too long and every `A` is `k²` times too large, and
+  the curve swings past its endpoints. A realistic source is a client that
+  dilates `t` but forgets `v·s` and `a·s²` (RAMMP-CuRobo's `scaled_msg`
+  does all three). Compressing the timestamps (`k < 1`) makes the tangents
+  too short instead. In the measurement below that stays inside the hull
+  (8.5e-5 rad cubic at ×0.5), but the result no longer follows the plan's
+  path either.
+
+**The path-tolerance guard will not report it.** `TrajectoryExecutor::tick`
+compares the measured `q` against `q_desired = sample(...)`, the interpolated
+value, not against the planner's waypoints. If the interpolant overshoots, the
+guard measures tracking error relative to the overshoot.
+
+Measured by
+`TrajectorySample.HermiteCanLeaveTheWaypointHullWhenDerivativesMismatchTimestamps`:
+the worst excursion beyond the endpoint hull, on any joint, scanning each
+segment at 1/200 of its span. The plan is 144 points over 2.88 s (20 ms, a
+cuRobo-sized plan) of per-joint sines with amplitudes of 0.5–1.1 rad and
+peak velocities up to 2.75 rad/s, so every joint reverses at least once. That
+is faster than a real Gen3 plan, so treat the numbers as an upper bound.
+
+| plan | cubic | quintic |
+| --- | --- | --- |
+| derivatives consistent | 2.1e-4 rad (0.012°) | 2.1e-4 rad (0.012°) |
+| re-timed ×2, derivatives kept | 4.8e-4 rad (0.027°) | 3.4e-4 rad (0.020°) |
+| re-timed ×4, derivatives kept | 1.2e-3 rad (0.066°) | 3.2e-4 rad (0.018°) |
+| re-timed ×10, derivatives kept | 5.8e-3 rad (0.33°) | 3.2e-2 rad (1.8°) |
+| re-timed ×20, derivatives kept | 5.8e-2 rad (3.3°) | 0.11 rad (6.5°) |
+
+With consistent derivatives the excursion equals the analytic curve's own
+peak between samples (2.1e-4 rad), so Hermite adds nothing measurable on top
+of the plan. With mismatched derivatives it grows fast, and quintic grows
+fastest because its acceleration error scales with `k²`. At ×10, which is a
+0.1 speed scale applied to the timestamps only, the quintic reference
+leaves the checked corridor by 1.8° on the worst joint.
+
+**Re-timing a plan without recomputing its derivatives is unsafe.** If you
+stretch the timestamps by `k`, divide `qd` by `k` and `qdd` by `k²`, or drop
+the profile flags and accept linear interpolation. To slow a goal down,
+use `speed_scale` or the runtime override (see [Speed scale](#speed-scale)).
+They dilate the executor's clock and leave the plan untouched, so they are
+safe. `submit()` does not check for this case.
 
 ## Cost
 

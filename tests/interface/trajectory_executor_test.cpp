@@ -2,8 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 #include "kinova_lowlevel/units.h"
@@ -324,6 +326,22 @@ double max_abs_err(const Trajectory& tr, double dur) {  // vs the analytic refer
   }
   return worst;
 }
+// Worst excursion of sample() beyond [min, max] of each segment's two endpoint
+// positions, any joint, scanned at 1/200 of each span (issue #19).
+double hull_excursion(const Trajectory& tr) {
+  double worst = 0.0;
+  for (size_t k = 0; k + 1 < tr.points.size(); ++k) {
+    const JointWaypoint &a = tr.points[k], &b = tr.points[k + 1];
+    for (int i = 0; i <= 200; ++i) {
+      const kinova::JointVec q = sample(tr, a.t_s + (b.t_s - a.t_s) * i / 200.0);
+      for (int j = 0; j < kinova::kNumJoints; ++j) {
+        const double lo = std::min(a.q[j], b.q[j]), hi = std::max(a.q[j], b.q[j]);
+        worst = std::max({worst, q[j] - hi, lo - q[j]});
+      }
+    }
+  }
+  return worst;
+}
 
 }  // namespace
 
@@ -374,20 +392,32 @@ TEST(TrajectorySample, CubicHermiteIsC1WhereLinearIsNot) {
 }
 
 TEST(TrajectorySample, QuinticMatchesEndpointPositionVelocityAndAcceleration) {
-  const double dur = 2.0;
-  const Trajectory tr = analytic_traj(6, dur, /*order=*/2);
-  const double h = 1e-4;
-  for (const auto& w : tr.points) {
-    if (w.t_s <= 0.0 || w.t_s >= dur) continue;
-    for (int j = 0; j < kinova::kNumJoints; ++j) {
-      EXPECT_NEAR(sample(tr, w.t_s)[j], w.q[j], 1e-9);
-      EXPECT_NEAR(vel_left(tr, w.t_s, j), w.qd[j], 1e-3);
-      EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3);
-      // second derivative, one-sided, must match the planner's qdd
-      const double acc_r =
-          (sample(tr, w.t_s + 2 * h)[j] - 2 * sample(tr, w.t_s + h)[j] + sample(tr, w.t_s)[j]) /
-          (h * h);
-      EXPECT_NEAR(acc_r, w.qdd[j], 5e-2) << "right accel j=" << j;
+  // Acceleration is checked against the analytic p''(u)/span^2 (sample_target's
+  // qdd; DerivativesMatchFiniteDifferencesOfSample ties it to q), from both
+  // sides of every knot. This replaces a one-sided second difference of
+  // sample() whose tolerance had to be tuned to its step h (#22). The analytic
+  // value needs no h, so the check is exact at any spacing: n = 6 is the
+  // original fixture (span 0.4 s), n = 55 the span-0.037 s case #22 raised, and
+  // n = 144 over 2.88 s a 20 ms cuRobo plan.
+  struct Case {
+    int n;
+    double dur;
+  };
+  for (const Case c : {Case{6, 2.0}, Case{55, 2.0}, Case{144, 2.88}}) {
+    const Trajectory tr = analytic_traj(c.n, c.dur, /*order=*/2);
+    for (const auto& w : tr.points) {
+      if (w.t_s <= 0.0 || w.t_s >= c.dur) continue;
+      // At a knot the search picks the right-hand segment (u = 0); one ulp
+      // earlier is the left-hand segment at u -> 1.
+      const kinova::JointTarget right = sample_target(tr, w.t_s);
+      const kinova::JointTarget left = sample_target(tr, std::nextafter(w.t_s, 0.0));
+      for (int j = 0; j < kinova::kNumJoints; ++j) {
+        EXPECT_NEAR(right.q[j], w.q[j], 1e-9);
+        EXPECT_NEAR(vel_left(tr, w.t_s, j), w.qd[j], 1e-3);
+        EXPECT_NEAR(vel_right(tr, w.t_s, j), w.qd[j], 1e-3);
+        EXPECT_NEAR(right.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " right accel j=" << j;
+        EXPECT_NEAR(left.qdd[j], w.qdd[j], 1e-6) << "n=" << c.n << " left accel j=" << j;
+      }
     }
   }
 }
@@ -414,6 +444,89 @@ TEST(TrajectorySample, HigherOrderDegeneraciesAreSafe) {
   single.has_velocities = true;
   single.points = {{vec7(0.3), 0.0}};
   EXPECT_NEAR(sample(single, 2.0)[0], 0.3, 1e-9);
+}
+
+TEST(TrajectorySample, QuinticDegeneraciesAreSafe) {
+  // Duplicate timestamps mid-plan, with distinct positions and a full profile.
+  // upper_bound brackets every query with a.t_s <= t < b.t_s, so the
+  // zero-width segment is never selected (nor is the span <= 0 guard reached):
+  // the reference steps from wA to wB at t = 1.
+  JointWaypoint w0{vec7(0.0), 0.0}, wA{vec7(0.5), 1.0}, wB{vec7(0.6), 1.0}, w2{vec7(1.0), 2.0};
+  wA.qd = vec7(0.8);
+  wA.qdd = vec7(-0.4);
+  wB.qd = vec7(0.3);
+  wB.qdd = vec7(1.2);
+  Trajectory tr;
+  tr.has_velocities = true;
+  tr.has_accelerations = true;
+  tr.points = {w0, wA, wB, w2};
+  for (double t = -0.1; t <= 2.1; t += 1e-3) {
+    const kinova::JointTarget ref = sample_target(tr, t);
+    EXPECT_TRUE(ref.q.allFinite() && ref.qd.allFinite() && ref.qdd.allFinite()) << "t=" << t;
+  }
+  EXPECT_NEAR(sample(tr, 1.0)[0], 0.6, 1e-12);                       // wB's segment, u = 0
+  EXPECT_NEAR(sample(tr, std::nextafter(1.0, 0.0))[0], 0.5, 1e-12);  // wA's segment, u -> 1
+  EXPECT_NEAR(sample_target(tr, 1.0).qdd[0], 1.2, 1e-9);
+
+  // The shortest span a ROS message can express (1 ns): the span^2 scaling of
+  // qdd must stay finite. (Below ~1e-154 s span*span underflows to 0 and qdd is
+  // NaN; no ROS timestamp can express that.)
+  JointWaypoint n0{vec7(0.3), 0.0}, n1{vec7(0.3 + 5e-10), 1e-9}, n2{vec7(1.0), 1.0};
+  n0.qd = n1.qd = vec7(0.5);
+  n0.qdd = n1.qdd = vec7(1.0);
+  Trajectory ns;
+  ns.has_velocities = true;
+  ns.has_accelerations = true;
+  ns.points = {n0, n1, n2};
+  const kinova::JointTarget mid = sample_target(ns, 5e-10);
+  EXPECT_TRUE(mid.q.allFinite() && mid.qd.allFinite() && mid.qdd.allFinite());
+  EXPECT_NEAR(mid.q[0], 0.3 + 2.5e-10, 1e-12);
+  EXPECT_NEAR(mid.qd[0], 0.5, 1e-3);
+}
+
+TEST(TrajectorySample, AccelerationsWithoutVelocitiesFallBackToLinear) {
+  // Pins today's behaviour, not an endorsement: accelerations are honoured
+  // only together with velocities, so this combination interpolates linearly
+  // and reports no profile, silently dropping the qdd the caller supplied.
+  // That silence is #20; when it is resolved, update this test with it.
+  Trajectory tr = analytic_traj(6, 2.0, /*order=*/2);
+  tr.has_velocities = false;
+  Trajectory linear = tr;
+  linear.has_accelerations = false;
+  for (double t : {0.1, 0.55, 1.3, 1.9}) {
+    const kinova::JointTarget ref = sample_target(tr, t);
+    EXPECT_FALSE(ref.has_velocity);
+    EXPECT_FALSE(ref.has_acceleration);
+    for (int j = 0; j < kinova::kNumJoints; ++j)
+      EXPECT_EQ(ref.q[j], sample(linear, t)[j]) << "t=" << t << " j=" << j;
+  }
+}
+
+TEST(TrajectorySample, HermiteCanLeaveTheWaypointHullWhenDerivativesMismatchTimestamps) {
+  // #19: cubic/quintic Hermite are not hull-preserving, and the path-tolerance
+  // guard measures against the interpolant, so it cannot see an excursion.
+  // These are the numbers quoted in docs/deep-dive/trajectory-interpolation.md.
+  // (a) a 20 ms cuRobo-like plan (144 points / 2.88 s) whose qd/qdd match its
+  // timestamps: the only excursion is at direction reversals, where the
+  // analytic curve itself peaks between samples by 2.1e-4 rad.
+  const Trajectory lin = analytic_traj(144, 2.88, 0), cub = analytic_traj(144, 2.88, 1),
+                   quin = analytic_traj(144, 2.88, 2);
+  EXPECT_LT(hull_excursion(lin), 1e-12) << "linear is hull-preserving";
+  EXPECT_LT(hull_excursion(cub), 3e-4);
+  EXPECT_LT(hull_excursion(quin), 3e-4);
+  // (b) the same plan re-timed (timestamps x s) without recomputing qd/qdd, as
+  // when a client dilates t but forgets v*s and a*s^2. At s = 10 (a 0.1 speed
+  // scale) the excursion is ~27x (cubic) and ~150x (quintic) the consistent
+  // plan's: quintic is worse because its acceleration error grows as s^2.
+  auto retimed = [](Trajectory tr, double s) {
+    for (auto& w : tr.points) w.t_s *= s;
+    return tr;
+  };
+  for (double s : {1.0, 2.0, 4.0, 10.0, 20.0})
+    std::printf("hull excursion, re-timed x%g: cubic %.3g rad, quintic %.3g rad\n", s,
+                hull_excursion(retimed(cub, s)), hull_excursion(retimed(quin, s)));
+  EXPECT_GT(hull_excursion(retimed(cub, 10.0)), 5e-3);
+  EXPECT_GT(hull_excursion(retimed(quin, 10.0)), 3e-2);
 }
 
 TEST(EffectiveScale, TakesTheSlowerOfGoalAndOverride) {
