@@ -242,6 +242,7 @@ The supervisor runs a **non-RT sampler thread** per active goal.
   abort with `PATH_TOLERANCE_VIOLATED`. Optionally check `goal_tolerance` at the
   end and report `GOAL_TOLERANCE_VIOLATED` in the result (informational; still
   time-completed).
+
 > **Superseded, 2026-10-29 (#84).** Queueing is disabled. A `QUEUE` goal sent
 > while another goal is active is refused with `kInvalidGoal`, and the gapless
 > promotion described below was removed. A `QUEUE` goal sent to an idle arm runs

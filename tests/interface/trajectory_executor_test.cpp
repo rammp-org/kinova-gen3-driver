@@ -483,6 +483,31 @@ TEST(ExecutorSpeedScale, LatestWinsResetsTheScaledClock) {
       << "the replacement starts from zero, not from the old elapsed time";
 }
 
+// A goal boundary latches the applied scale to the new goal's own scale, in
+// both directions, instead of slewing from the outgoing goal's. Ticks are
+// 0.01 s apart, so a slew (kScaleSlewPerSec * 0.01 = 0.02) could not cover
+// the 0.1 <-> 1.0 gap and would show up here.
+TEST(ExecutorSpeedScale, LatestWinsLatchesToTheNewGoalsScaleBothWays) {
+  RecordingSink sink;
+  TrajectoryExecutor ex(sink);
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.1);  // slow
+  ex.tick(0.0, vec7(0.0));
+  ex.tick(0.01, vec7(0.0));
+  ASSERT_NEAR(ex.applied_scale(), 0.1, 1e-9);
+
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 1.0);  // preempt with a fast goal
+  ex.tick(0.02, vec7(0.0));
+  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9) << "must latch up, not ramp from 0.1";
+
+  ex.tick(0.03, vec7(0.0));
+  ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
+            kinova::JointVec::Constant(-1.0), 0.1);  // preempt with a slow goal
+  ex.tick(0.04, vec7(0.0));
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-9) << "must latch down, not ramp from 1.0";
+}
+
 TEST(ExecutorSpeedScale, AnOverrideChangeRampsRatherThanSteps) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);

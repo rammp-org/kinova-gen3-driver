@@ -649,7 +649,7 @@ at `on_trajectory_goal` (`GoalResponse::kReject`) and again by
 accepting a below-floor request and silently running it at the floor would be
 *faster* than asked for, not slower.
 
-### `TrajectoryGoal::preemption` — `interface/trajectory_executor.h`
+### `TrajectoryGoal::preemption` — `interface/value_types.h`
 
 `Preemption` says what a goal does to a goal that is already running:
 
@@ -662,7 +662,9 @@ accepting a below-floor request and silently running it at the floor would be
   is disabled: …") before any mode switch, and the active goal runs on
   untouched. To chain motions, wait for the active goal to finish, preempt it,
   or plan one goal through all the waypoints. `TrajectoryExecutor::submit`
-  refuses the same case with `SubmitResult::kRejectedQueueWhileActive`.
+  refuses a same-mode `kQueue` goal behind an active one with
+  `SubmitResult::kRejectedQueueWhileActive` (a cross-mode one gets
+  `kRejectedModeChangeWhileMoving`, checked first).
 
 ### `CommandSink::on_set_speed_override(const SpeedOverrideRequest&)` / `Supervisor::set_speed_override(double)`
 
@@ -715,8 +717,8 @@ satisfies this by construction: it latches a flag and clears a deque.
 `Supervisor::on_halt` latches on the caller's thread and clears the queue; the
 sampler thread performs the control action, which keeps `settle()`
 single-threaded and therefore exactly-once. It settles the active goal **and**
-every goal still waiting in its inbox with `result_code::kHalted`, then holds the active mode's
-target at the last-good **measured** q.
+every goal still waiting in its inbox with `result_code::kHalted`, then holds
+the active mode's target at the last-good **measured** q.
 
 `HaltReason::kArmUnavailable` ("halted: arm fault or connection lost") is
 raised by the `Supervisor` itself, never by a caller, from

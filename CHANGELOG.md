@@ -95,8 +95,10 @@ that heading to the new version and bumps `package.xml`.
 - **Behaviour change:** a `Preemption::kQueue` trajectory goal sent while
   another goal is active is now refused (#84): it settles `kInvalidGoal` with
   "queueing is disabled: …", before any mode switch, and the active goal runs
-  on untouched. Queued goals jerked the arm at the handover, and a planner can
-  now plan through all waypoints in one goal. A `kQueue` goal sent to an idle
+  on untouched. Queueing was unsafe as built: nothing checked that a queued
+  goal starts where its predecessor ends, goals complete on time rather than on
+  arrival (#17), and cancelling either goal cancelled both. A planner can plan
+  through all waypoints in one goal instead. A `kQueue` goal sent to an idle
   arm runs exactly as before, so callers that send `preemption = 0` one goal
   at a time are unaffected. `kQueue` stays in the enum and on the wire.
   `TrajectoryExecutor::submit` returns the new
