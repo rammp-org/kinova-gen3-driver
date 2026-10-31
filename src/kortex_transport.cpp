@@ -392,10 +392,12 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   // (reaction-signed, so negated, as the seed does) rather than 0: an actuator
   // in TORQUE mode takes a pump's torque as its command, so one left in TORQUE
   // would drop until its own turn, one switched to it until the switch ends
-  // (#92). Not re-read each pump: in TORQUE the actuator drives its own sensor
-  // to the command, so feeding the reading back would let the sensor offset
-  // accumulate. Uncalibrated, the hold is off by each joint's sensor offset for
-  // the length of the switch. In POSITION mode the field is ignored. One pump
+  // (#92). The actuator's torque loop tracks its own biased sensor (measured in
+  // the gravity-model campaign, #91), so echoing the reading reproduces the
+  // torque the joint was applying, sensor offset included: do not add a torque
+  // offset here. Not re-read each pump: a hold that follows the reading has
+  // nothing pulling it back, so it would keep any disturbance or tracking error
+  // it picked up. In POSITION mode the field is ignored. One pump
   // goes out before the first switch, so actuator 1 also switches holding it
   // rather than the previous command's torque.
   std::array<float, kNumJoints> hold{};
