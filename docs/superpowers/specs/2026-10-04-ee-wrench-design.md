@@ -129,3 +129,45 @@ matching parts above:
   residuals and the wrench read ≈0 under grav comp / impedance in sim. An idle
   (zero-torque) sim arm reads τ = 0 — a limp arm — which the estimator reports
   as the support wrench, faithfully.
+
+## Addendum (2026-10-31, [#112](https://github.com/rammp-org/kinova-gen3-driver/issues/112)): the observer's wrench
+
+This section supersedes "One quasi-static estimator" under Design wherever
+contact detection runs. The wrench now comes from the momentum observer of the contact monitor (#109)
+once it is trusted, and falls back to the quasi-static estimate otherwise.
+
+- **Source.** With a `ContactMonitor` attached and `ContactStatus::settled` (the
+  observer is past 5/K since its last re-init; not the same as `kArmed` or
+  `kLatched`, since a run that restarts latched re-settles), the pump maps the observer residual: `F = ee_wrench_from_residual(J, r)`,
+  `r` read from `ContactMonitor::status()` (the Seqlock the RT loop already
+  stores each cycle; nothing new on the RT thread, no new lock). `J` is still
+  the pump's Jacobian at `fb.q`, so the frame, model and λ above are unchanged.
+- **Fallback.** No monitor (`contact_detection: off`), not settled (5/K = 200 ms
+  after each `RtExecutor::run` start and each contact clear), a status not
+  stored since the pump's previous iteration (`ContactMonitor::status_version()`
+  unchanged: the RT loop is stopped, e.g. ArmLink in `kFaulted`, which still
+  delivers feedback, so a frozen `r` would be published as live), or a torn
+  status read: `ee_wrench_from_residual(J, g(q) − τ)`, exactly as before. Under a fault,
+  NaN whichever the source. Neither `ArmState` nor `EeState` says which estimate
+  a state carries: the conditions above decide it.
+- **Sign.** Both are the external torque, positive as the environment applies
+  it. The observer's dynamics are `M q̈ + C q̇ + g = τ + τ_ext`
+  (`momentum_observer.h`), so at rest `r → g − τ`, the quasi-static residual.
+  `ContactWrench.EstimatesAgreeOnAStaticPush` pins this on the sim.
+- **Accuracy.** The quasi-static estimate drops `M q̈ + C q̇`, which reads as
+  external force in motion; the observer models it. Force error at the flange,
+  2026-10-30, position-mode tour at speed 0.6, nobody touching:
+
+  | estimate | median | p95 | max |
+  | --- | --- | --- | --- |
+  | quasi-static | 3.3 N | 8.0 N | 13.7 N |
+  | observer | 1.9 N | 5.4 N | 6.2 N |
+
+  Model error is still there in both as a slow pose-dependent bias, and both
+  read a held payload as external force (#111).
+- **Lag.** The observer is a first-order filter at K = 25 rad/s (time constant
+  1/K = 40 ms). On hand taps
+  it trailed the quasi-static estimate by 23–25 ms (50 Hz data, ±10 ms). Fine for
+  monitoring and thresholds at 50 Hz; a client doing fast force control that
+  wants the zero-lag quasi-static estimate computes `g(q) − τ` from
+  `/joint_states` effort (the normalized `τ`), or needs a faster source.

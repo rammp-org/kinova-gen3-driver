@@ -27,6 +27,9 @@ struct ContactTrip {
 struct ContactStatus {
   ContactDetection detection = ContactDetection::kEnforce;
   ContactPhase phase = ContactPhase::kSettling;
+  // The observer is past its 5/K settle since the last (re)init, so r is trusted.
+  // Not the same as phase != kSettling: a run that restarts latched re-settles too.
+  bool settled = false;
   JointVec r = JointVec::Zero();      // observer residual, external joint torque [N·m]
   JointVec theta = JointVec::Zero();  // active thresholds [N·m]
   uint64_t would_trips = 0;           // crossings that reached the debounce count (both modes)
@@ -117,6 +120,9 @@ class ContactMonitor {
   bool latched() const noexcept { return latched_.load(std::memory_order_acquire); }
   // Latest published status; false on a torn read (retry later).
   bool status(ContactStatus& out) const noexcept { return status_pub_.load(out); }
+  // Advances on every status store. Unchanged across a reader's polls means the RT
+  // loop is not stepping (no run, or ArmLink waiting for a clear): the status is frozen.
+  uint32_t status_version() const noexcept { return status_pub_.version(); }
   const JointVec& ceiling() const noexcept { return cfg_.ceiling; }
   ContactDetection detection() const noexcept { return cfg_.detection; }
 

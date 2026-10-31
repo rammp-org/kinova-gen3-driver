@@ -15,6 +15,7 @@
 
 #include "../fixtures.h"
 #include "fake_backend.h"
+#include "kinova_lowlevel/cartesian.h"  // ee_wrench_from_residual
 #include "kinova_lowlevel/contact_monitor.h"
 #include "kinova_lowlevel/dynamics.h"
 #include "kinova_lowlevel/feedback_tap.h"
@@ -206,6 +207,36 @@ GoalId id_of(uint8_t n) {
   GoalId id{};
   id[0] = n;
   return id;
+}
+
+// The pump end of the /ee_state wrench, without the RT loop: the test thread is
+// the monitor's RT thread (on_run_start + `cycles` 1 ms steps at rest under
+// `tau_ext`), then stores `fb` for the pump and returns what it published. The
+// observer saw tau_ext and the pump sees fb, so the two estimates differ and the
+// published value shows which one was used.
+ArmState publish_after(ContactFix& f, const JointVec& tau_ext, int cycles,
+                       const JointFeedback& fb) {
+  JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  seen.tau -= tau_ext;
+  f.mon.on_run_start();
+  for (int i = 0; i < cycles; ++i) f.mon.step(seen, 0.001, false);
+  // Before start: the pump's first iteration must see both this sample and the
+  // monitor's last status as new (nothing steps the monitor after this).
+  f.snap.store(fb);
+  f.sup.start();
+  sleep_ms(80);
+  const ArmState s = f.sup.on_query_state();
+  f.sup.stop();
+  EXPECT_GT(s.stamp_s, 0.0) << "no pump tick landed";
+  return s;
+}
+
+// ee_wrench_from_residual on the pump's inputs: J and g at fb.q.
+Vector6 wrench_of(const JointVec& q, const JointVec& residual) {
+  Dynamics d{URDF_PATH};
+  Jacobian6 J;
+  d.jacobian(q, J);
+  return ee_wrench_from_residual(J, residual);
 }
 
 }  // namespace
@@ -420,6 +451,146 @@ TEST(ContactSupervisor, LatchSurvivesLinkOutage) {
   f.sup.stop();
   f.teardown();
   EXPECT_EQ(f.sim.last_command().mode, ActuatorMode::kTorque);  // float, not the hold
+}
+
+// /ee_state's wrench (#112). Once the observer is trusted (armed or latched) the
+// pump publishes ee_wrench_from_residual(J, r) from the monitor's status; before
+// that, or with no monitor (supervisor_test.cpp), the quasi-static g(q) - tau.
+// 600 cycles = the 5/K = 200 ms settle plus 400 ms (10/K) of convergence.
+TEST(ContactWrench, ArmedPublishesTheObserverResidual) {
+  ContactFix f;
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  const ArmState s = publish_after(f, push_j2(8.0), 600, fb);  // under θ: armed, not latched
+  const ContactStatus st = f.status();
+  ASSERT_EQ(st.phase, ContactPhase::kArmed);
+  EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, st.r), 1e-12))
+      << s.ee_wrench.transpose() << " != " << wrench_of(fb.q, st.r).transpose();
+  // fb carries no push, so the quasi-static estimate would be ~0.
+  EXPECT_GT(s.ee_wrench.norm(), 1.0);
+}
+
+TEST(ContactWrench, LatchedPublishesTheObserverResidual) {
+  ContactFix f;
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  const ArmState s = publish_after(f, push_j2(24.0), 600, fb);  // over θ: latches
+  const ContactStatus st = f.status();
+  ASSERT_EQ(st.phase, ContactPhase::kLatched);
+  EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, st.r), 1e-12));
+  EXPECT_GT(s.ee_wrench.norm(), 1.0);
+}
+
+TEST(ContactWrench, SettlingPublishesQuasiStatic) {
+  ContactFix f;
+  JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  fb.tau -= push_j2(8.0);
+  const ArmState s = publish_after(f, push_j2(8.0), 10, fb);  // 10 ms into the 200 ms settle
+  ASSERT_EQ(f.status().phase, ContactPhase::kSettling);
+  EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, push_j2(8.0)), 1e-9))
+      << s.ee_wrench.transpose() << " != " << wrench_of(fb.q, push_j2(8.0)).transpose();
+}
+
+// A run that restarts latched (no clear) re-settles its observer: r restarts
+// from 0 and is not trusted for 5/K, though the phase stays kLatched.
+TEST(ContactWrench, LatchedRestartPublishesQuasiStaticUntilSettled) {
+  ContactFix f;
+  JointFeedback pushed = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  pushed.tau -= push_j2(24.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(pushed, 0.001, false);
+  ASSERT_TRUE(f.mon.latched());
+  const ArmState s = publish_after(f, push_j2(24.0), 10, pushed);  // 10 ms into the re-settle
+  ASSERT_EQ(f.status().phase, ContactPhase::kLatched);
+  EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(pushed.q, push_j2(24.0)), 1e-9));
+}
+
+// The RT loop stopped (ArmLink in kFaulted keeps feedback flowing, but nothing
+// steps the monitor): its last status is frozen, so the pump falls back. The
+// monitor's last step comes after the last publish, as when feedback stops
+// before the loop does: that status is no fresher at the next publish.
+TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
+  ContactFix f;
+  JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  seen.tau -= push_j2(8.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(seen, 0.001, false);
+  // The pump sees no push, the observer a push: the value says which was used.
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  f.snap.store(fb);  // before start, as in publish_after
+  f.sup.start();
+  sleep_ms(80);
+  const ArmState live = f.sup.on_query_state();
+  f.mon.step(seen, 0.001, false);  // the last step, with no feedback published after it
+  sleep_ms(80);
+  f.snap.store(fb);  // fresh feedback, no monitor step since
+  sleep_ms(80);
+  const ArmState stalled = f.sup.on_query_state();
+  f.sup.stop();
+
+  EXPECT_GT(live.ee_wrench.norm(), 1.0) << "live: not the observer";
+  EXPECT_LT(stalled.ee_wrench.norm(), 1e-9) << stalled.ee_wrench.transpose();
+}
+
+// While the monitor is stepped at 1 kHz (the running case) the pump keeps using
+// the observer. Most, not all, of the samples: a starved test thread can skip a
+// pump period, and that one publish then falls back, as it should.
+TEST(ContactWrench, SteppingMonitorPublishesTheObserverResidual) {
+  ContactFix f;
+  JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  seen.tau -= push_j2(8.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(seen, 0.001, false);
+  // The pump sees no push, the observer a push: the value says which was used.
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  f.sup.start();
+  int observer = 0;
+  for (int i = 0; i < 400; ++i) {
+    f.mon.step(seen, 0.001, false);
+    f.snap.store(fb);
+    std::this_thread::sleep_for(std::chrono::microseconds(1000));
+    if (i % 40 == 39 && f.sup.on_query_state().ee_wrench.norm() > 1.0) ++observer;
+  }
+  f.sup.stop();
+  EXPECT_GE(observer, 6) << "of 10 samples, observer in " << observer;
+}
+
+// A fault is NaN whichever estimate is selected, as before #112.
+TEST(ContactWrench, FaultPublishesNaN) {
+  ContactFix f;
+  JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  fb.fault = true;
+  const ArmState s = publish_after(f, push_j2(8.0), 600, fb);
+  ASSERT_EQ(f.status().phase, ContactPhase::kArmed);
+  EXPECT_TRUE(s.fault);
+  EXPECT_TRUE(s.ee_wrench.array().isNaN().all()) << s.ee_wrench.transpose();
+}
+
+// End to end on the RT loop: a static push read both ways. Both are "external
+// torque, positive as applied by the environment": the sim reports
+// tau = g - tau_ext, the quasi-static g - tau is +tau_ext, and the observer
+// converges to the same +tau_ext.
+TEST(ContactWrench, EstimatesAgreeOnAStaticPush) {
+  ContactFix f;
+  f.sim.set_external_torque(push_j2(8.0));  // under θ: no trip
+  f.sup.start();
+  f.run_rt();
+  ASSERT_TRUE(wait_for([&] {
+    const ContactStatus st = f.status();
+    return st.phase == ContactPhase::kArmed && std::abs(st.r[1] - 8.0) < 1e-4;
+  })) << "observer never converged";
+  sleep_ms(50);  // a pump tick after convergence
+  const ArmState s = f.sup.on_query_state();
+  const ContactStatus st = f.status();
+  f.sup.stop();
+  f.teardown();
+
+  ASSERT_EQ(st.phase, ContactPhase::kArmed);
+  const JointVec quasi_static = test_fixtures::gravity(f.sim_dyn, s.q) - s.tau;
+  EXPECT_NEAR(quasi_static[1], 8.0, 1e-6);
+  EXPECT_NEAR(st.r[1], 8.0, 1e-3);  // same sign: the observer reads +push too
+  const Vector6 qs_wrench = wrench_of(s.q, quasi_static);
+  EXPECT_GT(qs_wrench.norm(), 1.0);
+  EXPECT_LT((s.ee_wrench - qs_wrench).norm(), 1e-2)
+      << "observer " << s.ee_wrench.transpose() << " vs quasi-static " << qs_wrench.transpose();
 }
 
 TEST(ContactThresholds, NamedProfileApplied) {

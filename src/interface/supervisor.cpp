@@ -108,7 +108,13 @@ void Supervisor::pump_loop() {
   const auto period = std::chrono::duration<double>(1.0 / cfg_.pump_hz);
   const auto t0 = clock::now();
   uint32_t published_version = 0;  // the snapshot version last published
+  uint32_t contact_version = 0;    // the contact status version seen last iteration
   while (running_.load(std::memory_order_acquire)) {
+    // Checked every iteration, published or not: the RT loop stores a status every
+    // cycle, so one that has not moved since the last iteration is frozen.
+    const uint32_t cv = contact_ ? contact_->status_version() : 0;
+    const bool contact_live = cv != contact_version;
+    contact_version = cv;
     JointFeedback fb;
     // Only feedback new since the last publish. While the link reconnects
     // nothing refreshes the snapshot, and while faulted ArmLink's polls may get
@@ -133,13 +139,22 @@ void Supervisor::pump_loop() {
         pump_dyn_.gravity(fb.q, pump_g_);
       }
       s.ee_twist = pump_J_ * fb.qd;
-      // Quasi-statics in the one normalized convention (JointFeedback::tau):
-      // motor + external = gravity, so the externally applied joint torque is
-      // g(q) - tau. See ArmState::ee_wrench. Under a fault the torque feedback
-      // may be stale or zeroed, so publish NaN -- a runtime-checkable "no
+      // The external joint torque, from the observer once it has settled: its
+      // residual r, read through the status Seqlock the RT loop already publishes.
+      // Only a status stored since the last iteration counts: with the RT loop
+      // stopped (ArmLink faulted still delivers feedback) it is frozen, and its r
+      // would be a stale push presented as live. Otherwise quasi-statics in the one normalized
+      // convention (JointFeedback::tau): motor + external = gravity, so the
+      // externally applied joint torque is g(q) - tau. Both are positive as the
+      // environment applies it. See ArmState::ee_wrench. Under a fault the torque
+      // feedback may be stale or zeroed, so publish NaN -- a runtime-checkable "no
       // measurement", not a confident garbage number beside a fault flag.
+      ContactStatus cs;
+      const bool observer = contact_ && contact_live && contact_->status(cs) && cs.settled;
       if (fb.fault)
         s.ee_wrench.setConstant(std::numeric_limits<double>::quiet_NaN());
+      else if (observer)
+        s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, cs.r);
       else
         s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ - fb.tau);
       s.speed_override = speed_override_.load();

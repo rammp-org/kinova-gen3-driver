@@ -71,6 +71,7 @@ void ContactMonitor::restart() noexcept {
   for (int& c : count_) c = 0;
   pending_dt_ = 0.0;
   status_.r = observer_.residual();
+  status_.settled = false;
   status_.phase =
       latched_.load(std::memory_order_relaxed) ? ContactPhase::kLatched : ContactPhase::kSettling;
 }
@@ -110,12 +111,13 @@ bool ContactMonitor::step(const JointFeedback& fb, double dt_s, bool missed) noe
   // 3. Step the observer over the elapsed time, at most 1/K (see the header).
   status_.r = observer_.step(fb.q, fb.qd, fb.tau, std::min(pending_dt_ + dt_s, max_step_s_));
   pending_dt_ = 0.0;
+  status_.settled = observer_.time_since_reset() >= settle_s_;
   if (latched) {
     status_.phase = ContactPhase::kLatched;
     publish();
     return true;
   }
-  if (observer_.time_since_reset() < settle_s_) {
+  if (!status_.settled) {
     status_.phase = ContactPhase::kSettling;
     publish();
     return false;
