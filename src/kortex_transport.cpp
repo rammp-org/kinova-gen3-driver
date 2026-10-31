@@ -9,6 +9,7 @@
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -135,12 +136,12 @@ struct KortexTransport::Impl {
     }
   }
 
-  // Refresh that re-sends current measured positions + zero torque, keeping the
-  // cyclic channel alive (used between per-actuator control-mode switches).
-  void pump() {
+  // Refresh that re-sends current measured positions + the given torque, keeping
+  // the cyclic channel alive (used between per-actuator control-mode switches).
+  void pump(const std::array<float, kNumJoints>& torque) {
     for (int i = 0; i < n_; ++i) {
       cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
-      cmd_.mutable_actuators(i)->set_torque_joint(0.0f);
+      cmd_.mutable_actuators(i)->set_torque_joint(torque[i]);
     }
     refresh(cyclic_timeout_);
   }
@@ -371,7 +372,7 @@ void KortexTransport::set_servoing_low_level() {
   // than 0: after a link loss the revert may never have reached the arm, and an
   // actuator still in TORQUE mode would take this seed as "apply nothing" and
   // drop. In POSITION mode the field is ignored. The pumps that follow during a
-  // mode switch still send 0 (#92).
+  // mode switch hold the same way (set_actuator_modes).
   for (int i = 0; i < I.n_; ++i) {
     auto* a = I.cmd_.add_actuators();
     a->set_position(I.fb_.actuators(i).position());
@@ -386,10 +387,21 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   // channel between each call so it does not time out during the switch. A pump
   // only keeps the channel alive, so a lost one is skipped;
   // kMaxConsecutiveTimeouts in a row rethrows the TransportTimeout.
+  //
+  // Every pump commands the torque measured once, here, before the first switch
+  // (reaction-signed, so negated, as the seed does) rather than 0: an actuator
+  // in TORQUE mode takes a pump's torque as its command, so one left in TORQUE
+  // would drop until its own turn, one switched to it until the switch ends
+  // (#92). Not re-read each pump: in TORQUE the actuator drives its own sensor
+  // to the command, so feeding the reading back would let the sensor offset
+  // accumulate. Uncalibrated, the hold is off by each joint's sensor offset for
+  // the length of the switch. In POSITION mode the field is ignored.
+  std::array<float, kNumJoints> hold{};
+  for (int i = 0; i < I.n_; ++i) hold[i] = -I.fb_.actuators(i).torque();
   int misses = 0;
   auto pump = [&] {
     try {
-      I.pump();
+      I.pump(hold);
       misses = 0;
     } catch (const TransportTimeout&) {
       if (++misses >= kMaxConsecutiveTimeouts) throw;

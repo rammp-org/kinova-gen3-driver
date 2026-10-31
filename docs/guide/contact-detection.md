@@ -90,8 +90,8 @@ the node's [interface doc](https://github.com/rammp-org/kinova-gen3-ros2/blob/de
    against the `/ee_state` wrench, which is exact at rest. This maps `θ` to force.
 4. `enforce`, slow move, hand push: trip, float, latch, `-11` on the goal,
    `/clear_faults`, hold. Then at demo speed.
-5. After a trip: force build-up, the position-mode to float window (look for the
-   #92 droop), and the RT cycle time with and without the monitor (`--rt-csv`).
+5. After a trip: force build-up, the position-mode to float window (look for what
+   is left of the #92 droop), and the RT cycle time with and without the monitor (`--rt-csv`).
    Also measure the observer transient at position↔impedance mode switches:
    the monitor steps the observer once over the `set_actuator_modes` handshake,
    capped at `1/K` (40 ms), so look at `r` across each switch.

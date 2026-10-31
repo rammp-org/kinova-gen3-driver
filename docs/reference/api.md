@@ -402,7 +402,8 @@ class RtExecutor {
     `set_actuator_modes`. A cycle's command goes out on the next cycle's exchange,
     which runs after that handshake, so the freeze is sent once, after the torque
     switch. Through the switch the arm is held by the handshake's own pumps
-    (measured position, zero torque on KORTEX: the #92 window).
+    (measured position, and on KORTEX the torque measured at the start of the
+    switch, the #92 window).
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
     the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or

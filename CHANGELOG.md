@@ -215,6 +215,18 @@ that heading to the new version and bumps `package.xml`.
 
 ### Fixed
 
+- **Actuator-mode switches no longer command zero torque** (#92).
+  `KortexTransport::set_actuator_modes` switches one actuator at a time and
+  keeps the cyclic channel alive with a frame after each switch. Those frames
+  sent torque 0, so an actuator in TORQUE mode went limp until its own switch:
+  on POSITION → TORQUE (entering impedance or joint torque), each actuator
+  after its switch; on the reconnect after a link loss in a torque mode, the
+  actuators the lost revert left in TORQUE. The frames now hold each joint's
+  torque measured once, before the first switch, as the seed frame in
+  `set_servoing_low_level()` already did. Without sensor-offset calibration the
+  hold is off by each joint's offset (up to ~1.9 N·m on joint 3) for the length
+  of the switch. Actuators already in POSITION ignore the torque field and see
+  no change.
 - **Mode timers now count the time lost to missed exchanges** (#103).
   `RtExecutor` passed `compute()` a fixed `1 / rate_hz`, so each ~20 ms miss
   went uncounted and a 100 ms `cmd_timeout_s` could stretch to ~180 ms before
