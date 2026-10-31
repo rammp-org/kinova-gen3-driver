@@ -229,7 +229,7 @@ configuration, then runs an independent spring-damper on every joint.
 > as a working starting point rather than characterised values —
 > [issue #6](https://github.com/rammp-org/kinova-gen3-driver/issues/6).
 
-### Gain profiles and the `ImpedanceGains` contract (v1.3)
+### Gain profiles and the `ImpedanceGains` contract (v2.0)
 
 Through the interface layer (trajectory goals, stream opens, `set_gains`), a
 caller does not pass `JointImpedanceParams` — it passes an **`ImpedanceGains`**:
@@ -255,9 +255,9 @@ caller does not pass `JointImpedanceParams` — it passes an **`ImpedanceGains`*
 
 **Switching to impedance requires no tuning**: a goal with `control_mode =
 impedance` and no gains runs the medium profile, which is the deliverable the
-v1.3 on-arm pass tunes and documents.
+v2.0 on-arm pass tunes and documents.
 
-### Target feedforward (v1.3)
+### Target feedforward (v2.0)
 
 A joint target may carry the planner's profile (`JointTarget{q, qd, qdd}`).
 When it does, the damper acts on the velocity **error** — against the

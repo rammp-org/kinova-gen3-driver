@@ -1827,7 +1827,7 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
       << "not meaningfully stretched -- the override may not be reaching tick()";
 }
 
-// ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----
+// ---- v2.0.0 gains contract: per-command gains, no leakage, loud rejection ----
 namespace {
 interface::TrajectoryGoal imp_goal(double to, interface::ImpedanceGains spec = {}) {
   interface::TrajectoryGoal g;
