@@ -17,6 +17,8 @@ namespace kinova {
 //  - Into position/velocity, a switched joint becomes stiff while an unswitched
 //    torque-mode joint keeps the outgoing torque open-loop, so the joints with the
 //    largest |outgoing_torque| switch FIRST.
+// Position keys are <= 0 and torque keys >= 0, so on a mixed switch every joint
+// going into position/velocity switches before any going into torque/current.
 // Ties keep joint order. Returns 0-based joint indices. No allocation.
 inline std::array<int, kNumJoints> actuator_switch_order(const ActuatorModes& modes,
                                                          const JointVec& hold_torque,

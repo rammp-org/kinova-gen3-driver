@@ -8,6 +8,7 @@
 
 #include "kinova_lowlevel/cartesian_impedance_mode.h"
 #include "kinova_lowlevel/dynamics.h"
+#include "kinova_lowlevel/float_mode.h"
 #include "kinova_lowlevel/joint_impedance_mode.h"
 #include "kinova_lowlevel/joint_position_mode.h"
 #include "kinova_lowlevel/joint_torque_mode.h"
@@ -170,4 +171,34 @@ TEST(RtExecutor, ModeComputesItsHoldBeforeTheActuatorsSwitch) {
   EXPECT_EQ(log[1], "compute");
   EXPECT_EQ(log[2], "switch");
   EXPECT_EQ(log[3], "compute");  // then the normal cycle, on fresh feedback
+}
+
+// The hold is applied open-loop for up to ~165 ms, so a damper in it would keep
+// braking at the switch-time velocity after the joint stops, then push it back.
+// The hold is computed at rest: a moving arm gets gravity from every mode with a
+// damper (float on a contact trip, joint torque with damping, both impedance
+// modes with the entry ramp off).
+TEST(RtExecutor, HoldLeavesOutDampersWhenTheArmIsMoving) {
+  Dynamics dyn(URDF_PATH);
+  JointVec g;
+  dyn.gravity(home(), g);
+  FloatMode flt(dyn);
+  JointTorqueParams jtp;
+  jtp.damping = 2.0;
+  JointTorqueMode torque(dyn, jtp);
+  CartesianImpedanceParams cp;
+  cp.gain_ramp_s = 0.0;
+  CartesianImpedanceMode cart(dyn, cp);
+  JointImpedanceParams jp;
+  jp.gain_ramp_s = 0.0;
+  JointImpedanceMode joint(dyn, jp);
+  for (ControlMode* m : {static_cast<ControlMode*>(&flt), static_cast<ControlMode*>(&torque),
+                         static_cast<ControlMode*>(&cart), static_cast<ControlMode*>(&joint)}) {
+    RecordingTransport t;
+    t.state.q = home();
+    t.state.qd << 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0;
+    run_with(t, *m);
+    ASSERT_EQ(t.holds.size(), 1u);
+    EXPECT_TRUE(t.holds[0].torque.isApprox(g, 1e-9)) << t.holds[0].torque.transpose();
+  }
 }

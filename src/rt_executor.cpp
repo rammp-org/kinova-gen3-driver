@@ -221,12 +221,16 @@ void RtExecutor::run(std::atomic<bool>& stop) {
       // The incoming mode computes its first command BEFORE the actuators switch
       // (#92): it is the hold for each actuator once switched, and this cycle's
       // exchange sends it, not the outgoing mode's last command (or, at run
-      // start, the zero seed). On a contact trip the hold is the float mode's
-      // command (gravity, damped at the trip velocity), not the measured torque,
-      // which carries the contact. That compute
-      // ticks the mode's dt-driven state one extra cycle.
+      // start, the zero seed). It is computed at rest (qd = 0): the hold is
+      // open-loop for up to ~165 ms, and a damper term would keep braking at the
+      // switch-time velocity after the joint stops, then push it back. On a
+      // contact trip the hold is the float mode's command (gravity), not the
+      // measured torque, which carries the contact. That compute ticks the
+      // mode's dt-driven state one extra cycle.
       req->on_enter(fb);
-      req->compute(fb, dt_s, cmd);
+      JointFeedback at_rest = fb;
+      at_rest.qd.setZero();
+      req->compute(at_rest, dt_s, cmd);
       // set_actuator_modes performs the pumping handshake; acceptable at a
       // boundary on a mode change only. It survives isolated lost pumps itself,
       // so a TransportTimeout out of it is comms loss.

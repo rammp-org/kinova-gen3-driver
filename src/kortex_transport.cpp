@@ -402,7 +402,8 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const Joint
   //    pulling it back, so it would keep any disturbance or tracking error it
   //    picked up.
   //  - switched: the hold's torque, converted as write_command converts a
-  //    torque command's, so the joint already applies the incoming mode's first
+  //    kTorque command's (a kCurrent one would need current_motor; no mode uses
+  //    it), so the joint already applies the incoming mode's first
   //    command (RtExecutor computes it before the switch). That command is
   //    model-based and does not cancel the sensor offset the way the reading
   //    does. Without a hold, the measured torque, as for one not yet switched.

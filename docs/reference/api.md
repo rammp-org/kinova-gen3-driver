@@ -133,11 +133,15 @@ using ActuatorModes = std::array<ActuatorMode, 7>;
 
 Implement this to add a control law. `compute()` must be RT-safe. `dt_s` is
 the wall time since the mode's previous `compute()`, not a constant: see
-`RtExecutor` below. The first `compute()` runs right after `on_enter`, on the
-same feedback, before the actuators switch to `required_modes()`: its command is
-the switch's hold, sent open-loop to each actuator as it switches (~165 ms on
-KORTEX), so it must be safe as a fixed command. Both impedance modes ramp their
-spring in from zero, so their first command is gravity.
+`RtExecutor` below. The first `compute()` runs right after `on_enter`, before
+the actuators switch to `required_modes()`, on the same feedback with `qd`
+zeroed: its command is the switch's hold, sent open-loop to each actuator as it
+switches (~165 ms on KORTEX), so it must be safe as a fixed command. The zeroed
+`qd` keeps damper terms out of it. Both impedance modes ramp their spring in
+from zero, so with the ramp on (the default) their first command is gravity.
+With `gain_ramp_s <= 0` it also carries any spring that is not zero at the entry
+state, such as `CartesianImpedanceMode`'s nullspace pull toward a fixed rest
+posture.
 
 ### `JointTorqueMode` — `joint_torque_mode.h`
 
@@ -417,8 +421,8 @@ class RtExecutor {
     and the exchange after the handshake sends it, so the freeze is never sent.
     Through the switch (~165 ms on KORTEX, the #92 window) each pump sends the
     measured position; each joint already switched to TORQUE holds float's first
-    command (gravity, minus `FloatMode`'s damping at the trip-cycle velocity),
-    and each one not yet switched, still in POSITION, ignores
+    command, computed at rest (gravity: its damper is left out, its spring is
+    zero at the anchor), and each one not yet switched, still in POSITION, ignores
     the torque field. The torque measured on the trip cycle includes the contact
     torque the position loop was resisting, so it is not used as the hold.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
@@ -541,7 +545,8 @@ inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 
 - **`set_actuator_modes(modes, hold)`** switches the actuators one at a time.
   `RtExecutor` calls it at every mode change with `hold` = the incoming mode's
-  first command, computed on the boundary's feedback before the switch; that
+  first command, computed on the boundary's feedback with `qd` zeroed, before
+  the switch; that
   command is also the first one exchanged after it. `ArmLink`'s re-entry passes
   no hold. On KORTEX the switch takes ~165 ms, and every keep-alive pump sends
   measured positions plus, per actuator:

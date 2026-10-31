@@ -253,7 +253,9 @@ that heading to the new version and bumps `package.xml`.
   the loaded joints in load order** (#92; carries #94's switch order and
   compute-first hold onto `dev` without #88). On a mode change `RtExecutor` now
   runs the incoming mode's `on_enter` and one `compute` before
-  `set_actuator_modes`, and passes that command as the hold. Through the switch
+  `set_actuator_modes`, and passes that command as the hold. That `compute` gets
+  the feedback with `qd` zeroed, so no damper term is held open-loop at the
+  switch-time velocity. Through the switch
   each actuator already switched gets the hold's torque, and each one not yet
   switched keeps its measured torque, as above. The exchange after the switch
   sends the same command, so a run that starts in a torque mode no longer sends
@@ -261,8 +263,8 @@ that heading to the new version and bumps `package.xml`.
   the outgoing mode's last command. The actuators switch in the order
   `actuator_switch_order` gives: into TORQUE the most loaded switch last, into
   POSITION (including `ArmLink`'s re-entry) first. On a contact trip from a
-  position-type mode the hold is `FloatMode`'s first command (gravity, minus its
-  damping at the trip velocity), not the measured torque, which included the
+  position-type mode the hold is `FloatMode`'s first command (gravity), not the
+  measured torque, which included the
   contact torque, so the joints no longer push toward the contact through the
   switch. Tradeoff: the model-based hold does not cancel the
   actuator's sensor offset the way the measured torque did, so a joint entering
