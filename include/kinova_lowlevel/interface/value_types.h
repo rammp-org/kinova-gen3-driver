@@ -171,11 +171,12 @@ struct ArmState {
   // [force; torque] in N / N*m, same frame/model/sample doctrine as ee_twist above.
   // F = pinv(J^T) tau_ext, with tau_ext from one of two estimates (ee_wrench_source):
   //   - kObserver: the contact monitor's momentum-observer residual r, whenever a
-  //     monitor is attached and armed or latched. Models the arm's own inertia, so
-  //     it stays accurate in motion; first-order, K = 25 rad/s (~25 ms behind).
+  //     monitor is attached, its observer has settled and the RT loop is stepping
+  //     it. Models the arm's own inertia, so it stays accurate in motion; first-
+  //     order (1/K = 40 ms), measured ~25 ms behind the quasi-static on hand taps.
   //   - kQuasiStatic: g(q) - tau, otherwise (no monitor, the 5/K settle after each
-  //     run start and clear, or a torn status read). Exact at rest, no lag, but
-  //     M qdd + C qd reads as external force while the arm moves.
+  //     run start and clear, the RT loop stopped, or a torn status read). Exact at
+  //     rest, no lag, but M qdd + C qd reads as external force while the arm moves.
   // Both read a held payload as external force. Contact-detection grade, not
   // force-control grade; NaN while the arm reports a fault, whichever the source.
   // Derivation, accuracy floor, and why KORTEX's own wrench is unusable (kortex#52):

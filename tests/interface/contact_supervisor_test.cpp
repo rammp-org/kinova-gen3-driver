@@ -490,6 +490,44 @@ TEST(ContactWrench, SettlingPublishesQuasiStatic) {
       << s.ee_wrench.transpose() << " != " << wrench_of(fb.q, push_j2(8.0)).transpose();
 }
 
+// A run that restarts latched (no clear) re-settles its observer: r restarts
+// from 0 and is not trusted for 5/K, though the phase stays kLatched.
+TEST(ContactWrench, LatchedRestartPublishesQuasiStaticUntilSettled) {
+  ContactFix f;
+  JointFeedback pushed = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  pushed.tau -= push_j2(24.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(pushed, 0.001, false);
+  ASSERT_TRUE(f.mon.latched());
+  const ArmState s = publish_after(f, push_j2(24.0), 10, pushed);  // 10 ms into the re-settle
+  ASSERT_EQ(f.status().phase, ContactPhase::kLatched);
+  EXPECT_EQ(s.ee_wrench_source, WrenchSource::kQuasiStatic);
+  EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(pushed.q, push_j2(24.0)), 1e-9));
+}
+
+// The RT loop stopped (ArmLink in kFaulted keeps feedback flowing, but nothing
+// steps the monitor): its last status is frozen, so the pump falls back.
+TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
+  ContactFix f;
+  JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  seen.tau -= push_j2(8.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(seen, 0.001, false);
+  f.sup.start();
+  f.snap.store(seen);
+  sleep_ms(80);
+  const ArmState live = f.sup.on_query_state();
+  JointFeedback later = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  f.snap.store(later);  // fresh feedback, no monitor step since
+  sleep_ms(80);
+  const ArmState stalled = f.sup.on_query_state();
+  f.sup.stop();
+
+  EXPECT_EQ(live.ee_wrench_source, WrenchSource::kObserver);
+  EXPECT_EQ(stalled.ee_wrench_source, WrenchSource::kQuasiStatic);
+  EXPECT_LT(stalled.ee_wrench.norm(), 1e-9) << stalled.ee_wrench.transpose();
+}
+
 // A fault is NaN whichever estimate is selected, as before #112.
 TEST(ContactWrench, FaultPublishesNaN) {
   ContactFix f;
@@ -510,7 +548,11 @@ TEST(ContactWrench, EstimatesAgreeOnAStaticPush) {
   f.sim.set_external_torque(push_j2(8.0));  // under θ: no trip
   f.sup.start();
   f.run_rt();
-  sleep_ms(800);  // 200 ms settle, then 15/K of convergence
+  ASSERT_TRUE(wait_for([&] {
+    const ContactStatus st = f.status();
+    return st.phase == ContactPhase::kArmed && std::abs(st.r[1] - 8.0) < 1e-4;
+  })) << "observer never converged";
+  sleep_ms(50);  // a pump tick after convergence
   const ArmState s = f.sup.on_query_state();
   const ContactStatus st = f.status();
   f.sup.stop();

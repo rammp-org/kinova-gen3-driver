@@ -105,12 +105,12 @@ Supervisor's pump uses it to fill `ArmState::ee_wrench` with one of two
 
 | `WrenchSource` | `τ_ext` | when |
 | --- | --- | --- |
-| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached and its phase is `kArmed` or `kLatched` |
-| `kQuasiStatic = 0` | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, `kSettling` (5/K after each run start and clear), or a torn status read |
+| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached, `ContactStatus::settled`, and the status was stored since the pump's last publish |
+| `kQuasiStatic = 0` | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, the 5/K settle after each run start and clear (latched or not), the RT loop stopped (`status_version()` unchanged), or a torn status read |
 
 Both are external torque, positive as the environment applies it. The observer
-models `M q̈ + C q̇`, so it stays accurate in motion, and lags by about 25 ms
-(first-order, K = 25 rad/s); the quasi-static estimate is exact at rest with no
+models `M q̈ + C q̇`, so it stays accurate in motion, and trails by about 25 ms
+on hand taps (first-order, time constant 1/K = 40 ms); the quasi-static estimate is exact at rest with no
 lag. NaN under a fault, whichever the source. Derivation, accuracy floor, and
 the λ trade: `docs/superpowers/specs/2026-10-04-ee-wrench-design.md`.
 

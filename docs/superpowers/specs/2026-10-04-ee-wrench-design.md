@@ -136,14 +136,18 @@ This section supersedes "One quasi-static estimator" under Design wherever
 contact detection runs. The wrench now comes from the momentum observer of the contact monitor (#109)
 once it is trusted, and falls back to the quasi-static estimate otherwise.
 
-- **Source.** With a `ContactMonitor` attached and its status phase `kArmed` or
-  `kLatched`, the pump maps the observer residual: `F = ee_wrench_from_residual(J, r)`,
+- **Source.** With a `ContactMonitor` attached and `ContactStatus::settled` (the
+  observer is past 5/K since its last re-init; not the same as `kArmed` or
+  `kLatched`, since a run that restarts latched re-settles), the pump maps the observer residual: `F = ee_wrench_from_residual(J, r)`,
   `r` read from `ContactMonitor::status()` (the Seqlock the RT loop already
   stores each cycle; nothing new on the RT thread, no new lock). `J` is still
   the pump's Jacobian at `fb.q`, so the frame, model and λ above are unchanged.
-- **Fallback.** No monitor (`contact_detection: off`), `kSettling` (5/K = 200 ms
-  after each `RtExecutor::run` start and each contact clear), or a torn status
-  read: `ee_wrench_from_residual(J, g(q) − τ)`, exactly as before. Under a fault,
+- **Fallback.** No monitor (`contact_detection: off`), not settled (5/K = 200 ms
+  after each `RtExecutor::run` start and each contact clear), a status not
+  stored since the pump's last publish (`ContactMonitor::status_version()`
+  unchanged: the RT loop is stopped, e.g. ArmLink in `kFaulted`, which still
+  delivers feedback, so a frozen `r` would be published as live), or a torn
+  status read: `ee_wrench_from_residual(J, g(q) − τ)`, exactly as before. Under a fault,
   NaN whichever the source. `ArmState::ee_wrench_source` (`kQuasiStatic = 0`,
   `kObserver = 1`) records which one a state carries; the ROS message carries it
   as `EeState.wrench_source`.
@@ -162,7 +166,8 @@ once it is trusted, and falls back to the quasi-static estimate otherwise.
 
   Model error is still there in both as a slow pose-dependent bias, and both
   read a held payload as external force (#111).
-- **Lag.** The observer is a first-order filter at K = 25 rad/s. On hand taps
+- **Lag.** The observer is a first-order filter at K = 25 rad/s (time constant
+  1/K = 40 ms). On hand taps
   it trailed the quasi-static estimate by 23–25 ms (50 Hz data, ±10 ms). Fine for
   monitoring and thresholds at 50 Hz; a client doing fast force control would
   want the quasi-static estimate or a faster source.
