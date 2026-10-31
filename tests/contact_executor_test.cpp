@@ -55,9 +55,10 @@ class Bench : public Transport {
   Bench(SimTransport& sim, std::atomic<bool>& stop) : sim_(sim), stop_(stop) { sent.reserve(8192); }
   void connect() override { sim_.connect(); }
   void set_servoing_low_level() override { sim_.set_servoing_low_level(); }
-  void set_actuator_modes(const ActuatorModes& m) override {
+  void set_actuator_modes(const ActuatorModes& m, const JointCommand* hold) override {
     switches.emplace_back(calls, m);
-    sim_.set_actuator_modes(m);
+    holds.push_back(hold ? *hold : JointCommand{});
+    sim_.set_actuator_modes(m, hold);
   }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     const uint64_t i = calls++;
@@ -75,6 +76,7 @@ class Bench : public Transport {
   uint64_t calls = 0, stop_at = UINT64_MAX;
   std::vector<JointCommand> sent;                            // sent[i] = call i's command
   std::vector<std::pair<uint64_t, ActuatorModes>> switches;  // (calls made so far, modes)
+  std::vector<JointCommand> holds;                           // holds[n] = switch n's hold
   std::function<void(uint64_t)> on_call;
 
  private:
@@ -161,8 +163,8 @@ TEST(ContactExecutor, PositionModeTripAdoptsFloat) {
   const ContactStatus st = w.status();
   ASSERT_TRUE(st.has_trip);
   EXPECT_EQ(st.last.joint, 1);
-  // Trip cycle k computes the freeze, sent by call k+2; cycle k+1 adopts float,
-  // whose first command goes out on call k+3.
+  // Trip cycle k freezes (no compute); cycle k+1 adopts float, computing its
+  // first command before the switch, so call k+2 already sends it.
   const uint64_t k = st.last.cycle;
   ASSERT_GE(k + 1, kPushAt);  // cycle kPushAt-1 is the first to see the push
   ASSERT_LT(k + 3, w.bench.sent.size());
@@ -172,11 +174,7 @@ TEST(ContactExecutor, PositionModeTripAdoptsFloat) {
     ASSERT_EQ(w.bench.sent[i].mode, ActuatorMode::kPosition) << "call " << i;
     ASSERT_GT(w.bench.sent[i].position[0], w.q0[0]) << "call " << i;  // the mode is moving
   }
-  const JointCommand& freeze = w.bench.sent[k + 2];
-  EXPECT_EQ(freeze.mode, ActuatorMode::kPosition);
-  EXPECT_EQ(freeze.position, w.q0);  // fb.q; compute was skipped
-  EXPECT_TRUE(freeze.velocity.isZero());
-  for (uint64_t i = k + 3; i < w.bench.sent.size(); ++i)
+  for (uint64_t i = k + 2; i < w.bench.sent.size(); ++i)
     ASSERT_TRUE(w.is_float(w.bench.sent[i])) << "call " << i;
 
   // Adopted through set_actuator_modes, at the boundary after the trip.
@@ -184,6 +182,12 @@ TEST(ContactExecutor, PositionModeTripAdoptsFloat) {
   EXPECT_EQ(w.bench.switches[0].second, all(ActuatorMode::kPosition));
   EXPECT_EQ(w.bench.switches[1].first, k + 2);
   EXPECT_EQ(w.bench.switches[1].second, all(ActuatorMode::kTorque));
+  // The switch holds with float's first command: gravity alone at rest (the sim
+  // does not move, so FloatMode's damping adds nothing). The measured
+  // torque (g0 - push here) carries the contact, so holding it would keep
+  // pushing toward the contact through the switch.
+  ASSERT_EQ(w.bench.holds.size(), 2u);
+  EXPECT_TRUE(w.is_float(w.bench.holds[1])) << w.bench.holds[1].torque.transpose();
 }
 
 TEST(ContactExecutor, TorqueModeTripSwitchesSameCycle) {
@@ -238,11 +242,11 @@ TEST(ContactExecutor, RequestWhileLatchedDeferredUntilClear) {
   ASSERT_GE(k + 1, kPushAt);
   ASSERT_LT(k + 3, kRequestsEnd);
   // From float's first command to the clear, float only.
-  for (uint64_t i = k + 3; i <= kClear + 1; ++i)
+  for (uint64_t i = k + 2; i <= kClear; ++i)
     ASSERT_TRUE(w.is_float(w.bench.sent[i])) << "call " << i;
   // The clear is consumed in cycle kClear-1 (after call kClear's exchange); cycle
-  // kClear adopts the pending request, whose first command goes out on kClear+2.
-  for (uint64_t i = kClear + 2; i < w.bench.sent.size(); ++i)
+  // kClear adopts the pending request, whose first command goes out on kClear+1.
+  for (uint64_t i = kClear + 1; i < w.bench.sent.size(); ++i)
     ASSERT_EQ(w.bench.sent[i].mode, ActuatorMode::kPosition) << "call " << i;
   // pos, hold (requested before the trip), float, then hold again after the clear.
   ASSERT_EQ(w.bench.switches.size(), 4u);
@@ -267,9 +271,9 @@ void expect_restart_in_float(World& w) {
   ASSERT_GT(w.bench.switches.size(), switches_before);
   EXPECT_EQ(w.bench.switches[switches_before].second, all(ActuatorMode::kTorque));
   EXPECT_EQ(w.bench.switches.size(), switches_before + 1);  // float only
-  // first_call (the seed) and first_call+1 carry the run's benign default
-  // command; from cycle 0's compute on, every command is float's.
-  for (uint64_t i = first_call + 2; i < w.bench.sent.size(); ++i)
+  // first_call (the seed) carries the run's benign default command; from cycle
+  // 0's exchange on, computed before the switch, every command is float's.
+  for (uint64_t i = first_call + 1; i < w.bench.sent.size(); ++i)
     ASSERT_TRUE(w.is_float(w.bench.sent[i])) << "call " << i;
 }
 
@@ -330,7 +334,7 @@ TEST(ContactExecutor, ClearBetweenRunsAdoptsTheRequestNotFloat) {
   EXPECT_FALSE(w.mon->latched());
   ASSERT_EQ(w.bench.switches.size(), switches_before + 1);
   EXPECT_EQ(w.bench.switches[switches_before].second, all(ActuatorMode::kPosition));
-  for (uint64_t i = first_call + 2; i < w.bench.sent.size(); ++i)
+  for (uint64_t i = first_call + 1; i < w.bench.sent.size(); ++i)
     ASSERT_EQ(w.bench.sent[i].mode, ActuatorMode::kPosition) << "call " << i;
 }
 

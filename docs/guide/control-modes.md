@@ -18,6 +18,10 @@ Every mode implements the same small interface (`ControlMode`):
   The executor applies these before the loop starts.
 - **`on_enter(feedback)`** — runs once, on the RT thread, when the mode is adopted.
   Every shipped mode uses it to "hold where you are" by capturing the entry state.
+  The first `compute()` follows at once, before the actuators switch to
+  `required_modes()`, on the same feedback with the joint velocities set to zero:
+  the arm is held with that command, open-loop, while the actuators switch one at
+  a time (~165 ms on the arm). The zeroed velocities keep damping out of it.
 - **`compute(feedback, dt, command)`** — the control law, every cycle. It must be
   RT-safe: no allocation, no locks, no blocking. `dt` is the measured wall time
   since the mode's previous `compute()`: nominal (`1 / rate_hz`) on the first
@@ -432,7 +436,10 @@ way and is the most recent worked example:
 
 1. Implement `ControlMode` in a new `*_mode.h` / `.cpp`. Capture entry state in
    `on_enter`; keep `compute()` allocation-free (preallocate all scratch as
-   members; use fixed-size Eigen types).
+   members; use fixed-size Eigen types). Make the first `compute()` after
+   `on_enter` safe to hold open-loop for the mode switch (see above): it gets
+   zero joint velocities, so damping drops out, but ramp in spring terms, as
+   both impedance modes do.
 2. Get the rigid-body quantities you need from `Dynamics` (extend it if you need a
    new quantity such as the mass matrix — it's the one place Pinocchio lives).
 3. Add a unit test that recomputes the law independently (see the

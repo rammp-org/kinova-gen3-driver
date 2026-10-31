@@ -32,7 +32,7 @@ class DroppingTransport : public Transport {
   }
   void connect() override {}
   void set_servoing_low_level() override {}
-  void set_actuator_modes(const ActuatorModes&) override {
+  void set_actuator_modes(const ActuatorModes&, const JointCommand*) override {
     std::this_thread::sleep_for(std::chrono::milliseconds(modes_delay_ms));
     if (modes_timeout) throw TransportTimeout("timeout detected: fake pump");
   }
@@ -130,7 +130,8 @@ TEST(RtExecutorMiss, IsolatedMissesAreSurvivedAndCounted) {
   EXPECT_EQ(samples, 59u);
   EXPECT_EQ(missed, drops.size());
   EXPECT_NE(sink.console_line().find("comm_timeouts=4"), std::string::npos) << sink.console_line();
-  EXPECT_EQ(mode.seen_frames.size(), 59u - drops.size());
+  // + 1: the mode's first compute runs before the switch, on the seed's feedback.
+  EXPECT_EQ(mode.seen_frames.size(), 59u - drops.size() + 1);
 }
 
 // (b) max_consecutive_misses in a row is comms loss: run() throws CommsLost right
@@ -144,8 +145,8 @@ TEST(RtExecutorMiss, ConsecutiveMissesThrowCommsLost) {
   ex.request_mode(&mode);
 
   EXPECT_THROW(ex.run(stop), CommsLost);
-  EXPECT_EQ(t.calls, 13u);                 // calls 10, 11, 12 missed; no 4th try
-  EXPECT_EQ(mode.seen_frames.size(), 9u);  // computes only after good calls 1..9
+  EXPECT_EQ(t.calls, 13u);                  // calls 10, 11, 12 missed; no 4th try
+  EXPECT_EQ(mode.seen_frames.size(), 10u);  // the pre-switch one, then after good calls 1..9
 }
 
 // A lost seed read is retried; the mode first sees a real one.
@@ -175,8 +176,9 @@ TEST(RtExecutorMiss, CommandAfterMissIsResentUnchanged) {
   ASSERT_NO_THROW(ex.run(stop));
 
   // Expected: the command sent at call i carries the number of computes so far,
-  // i.e. the good loop exchanges in [1, i). A miss adds no compute.
-  double computes = 0.0;
+  // i.e. the pre-switch one plus the good loop exchanges in [1, i). A miss adds
+  // no compute.
+  double computes = 1.0;
   for (uint64_t i = 1; i < t.calls; ++i) {
     EXPECT_EQ(t.sent[i].torque[0], computes) << "call " << i;
     if (!in(drops, i)) computes += 1.0;
@@ -280,7 +282,7 @@ TEST(RtExecutorMiss, ModeSwitchTimeoutIsCommsLost) {
   ex.request_mode(&mode);
 
   EXPECT_THROW(ex.run(stop), CommsLost);
-  EXPECT_EQ(mode.entered_frame, UINT64_MAX);  // never entered
+  EXPECT_EQ(mode.entered_frame, 0u);  // entered on the seed's feedback, before the switch
 }
 
 // Miss limits below 1 are rejected, not clamped.
@@ -533,8 +535,8 @@ TEST(RtExecutorDt, ComputeAfterAMissGetsTheElapsedTime) {
   ex.request_mode(&mode);
 
   ASSERT_NO_THROW(ex.run(stop));
-  ASSERT_EQ(mode.dts.size(), 8u);  // good calls 1-4 and 6-9
-  EXPECT_GE(mode.dts[4], 0.025);   // call 6's compute, after the miss
+  ASSERT_EQ(mode.dts.size(), 9u);  // the pre-switch compute, then good calls 1-4 and 6-9
+  EXPECT_GE(mode.dts[5], 0.025);   // call 6's compute, after the miss
 }
 
 // A gap longer than max_consecutive_misses x (cyclic timeout + period), 3 x
@@ -552,8 +554,8 @@ TEST(RtExecutorDt, DtIsCappedAtTheConsecutiveMissSpan) {
   ex.request_mode(&mode);
 
   ASSERT_NO_THROW(ex.run(stop));
-  ASSERT_EQ(mode.dts.size(), 9u);
-  EXPECT_DOUBLE_EQ(mode.dts[4], 3 * (0.020 + kNominalDt));  // call 5's compute, after the stall
+  ASSERT_EQ(mode.dts.size(), 10u);  // the pre-switch compute, then calls 1-9
+  EXPECT_DOUBLE_EQ(mode.dts[5], 3 * (0.020 + kNominalDt));  // call 5's compute, after the stall
 }
 
 // The first compute() in a mode, after run() starts or a switch, gets the nominal
@@ -571,8 +573,11 @@ TEST(RtExecutorDt, FirstComputeInAModeGetsTheNominalDt) {
   };
 
   ASSERT_NO_THROW(ex.run(stop));
-  ASSERT_FALSE(first.dts.empty());
-  ASSERT_FALSE(second.dts.empty());
-  EXPECT_DOUBLE_EQ(first.dts.front(), kNominalDt);
-  EXPECT_DOUBLE_EQ(second.dts.front(), kNominalDt);
+  // [0] is the compute before the switch, [1] the first one after its pumps.
+  ASSERT_GE(first.dts.size(), 2u);
+  ASSERT_GE(second.dts.size(), 2u);
+  EXPECT_DOUBLE_EQ(first.dts[0], kNominalDt);
+  EXPECT_DOUBLE_EQ(first.dts[1], kNominalDt);
+  EXPECT_DOUBLE_EQ(second.dts[0], kNominalDt);
+  EXPECT_DOUBLE_EQ(second.dts[1], kNominalDt);
 }

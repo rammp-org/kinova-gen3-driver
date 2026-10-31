@@ -72,7 +72,9 @@ class Probe : public Transport {
   explicit Probe(SimTransport& s) : sim_(s) {}
   void connect() override { sim_.connect(); }
   void set_servoing_low_level() override { sim_.set_servoing_low_level(); }
-  void set_actuator_modes(const ActuatorModes& m) override { sim_.set_actuator_modes(m); }
+  void set_actuator_modes(const ActuatorModes& m, const JointCommand* hold) override {
+    sim_.set_actuator_modes(m, hold);
+  }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
     if (watch.load() && c.mode == ActuatorMode::kPosition &&
         (c.position - q_moved).cwiseAbs().maxCoeff() > 1e-6)

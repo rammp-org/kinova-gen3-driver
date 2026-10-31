@@ -133,7 +133,15 @@ using ActuatorModes = std::array<ActuatorMode, 7>;
 
 Implement this to add a control law. `compute()` must be RT-safe. `dt_s` is
 the wall time since the mode's previous `compute()`, not a constant: see
-`RtExecutor` below.
+`RtExecutor` below. The first `compute()` runs right after `on_enter`, before
+the actuators switch to `required_modes()`, on the same feedback with `qd`
+zeroed: its command is the switch's hold, sent open-loop to each actuator as it
+switches (~165 ms on KORTEX), so it must be safe as a fixed command. The zeroed
+`qd` keeps damper terms out of it. Both impedance modes ramp their spring in
+from zero, so with the ramp on (the default) their first command is gravity.
+With `gain_ramp_s <= 0` it also carries any spring that is not zero at the entry
+state, such as `CartesianImpedanceMode`'s nullspace pull toward a fixed rest
+posture.
 
 ### `JointTorqueMode` — `joint_torque_mode.h`
 
@@ -408,14 +416,15 @@ class RtExecutor {
     `on_contact`. Otherwise that cycle's command is a freeze (the active mode's
     actuator modes, `position` = measured `q`, zero `velocity`, no `compute`) and
     the loop adopts `on_contact` at the next boundary through
-    `set_actuator_modes`. A cycle's command goes out on the next cycle's exchange,
-    which runs after that handshake, so the freeze is sent once, after the torque
-    switch. Through the switch the arm is held by the handshake's own pumps
-    (measured position, and on KORTEX the torque measured at the start of the
-    switch, the #92 window). That torque is read on the trip cycle, so it
-    includes the contact torque the position loop was resisting: each switched
-    joint keeps pushing toward the contact for the switch (~165 ms) and the freeze
-    cycle after it, and pushes the arm on if the contact goes away.
+    `set_actuator_modes`. Like every mode switch, that boundary computes
+    `on_contact`'s first command before the handshake and passes it as the hold,
+    and the exchange after the handshake sends it, so the freeze is never sent.
+    Through the switch (~165 ms on KORTEX, the #92 window) each pump sends the
+    measured position; each joint already switched to TORQUE holds float's first
+    command, computed at rest (gravity: its damper is left out, its spring is
+    zero at the anchor), and each one not yet switched, still in POSITION, ignores
+    the torque field. The torque measured on the trip cycle includes the contact
+    torque the position loop was resisting, so it is not used as the hold.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
     the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or
@@ -513,7 +522,8 @@ class Transport {
  public:
   virtual void connect() = 0;
   virtual void set_servoing_low_level() = 0;
-  virtual void set_actuator_modes(const ActuatorModes&) = 0;
+  // hold: the incoming mode's first command; nullptr = hold the measured torque
+  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand* hold = nullptr) = 0;
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;
@@ -533,6 +543,29 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
 inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 ```
 
+- **`set_actuator_modes(modes, hold)`** switches the actuators one at a time.
+  `RtExecutor` calls it at every mode change with `hold` = the incoming mode's
+  first command, computed on the boundary's feedback with `qd` zeroed, before
+  the switch; that
+  command is also the first one exchanged after it. `ArmLink`'s re-entry passes
+  no hold. On KORTEX the switch takes ~165 ms, and every keep-alive pump sends
+  measured positions plus, per actuator:
+  - **not yet switched:** the torque it was measured applying, read once before
+    the first switch. The actuator's torque loop tracks its own biased sensor,
+    so echoing the reading cancels the sensor offset; never add a torque offset
+    to it.
+  - **already switched:** `hold`'s torque, or without a hold the measured torque.
+    `hold` comes from the dynamics model, so for a joint entering TORQUE it does
+    not cancel the sensor offset (up to ~1.9 N·m on j3 before offset calibration,
+    #88).
+
+  Actuators in POSITION ignore the torque field. The order comes from
+  `actuator_switch_order(modes, hold_torque, outgoing_torque)`
+  (`actuator_switch_order.h`, header-only): into TORQUE/CURRENT the largest
+  `|hold torque|` switches last, so the loaded joints stay stiff in POSITION
+  longest; into POSITION/VELOCITY the largest `|outgoing torque|` (the measured
+  torque) switches first, so they stop holding open-loop soonest. Ties keep joint
+  order. Without a hold the measured torque stands in for the hold torque.
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No

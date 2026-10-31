@@ -218,15 +218,27 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     }
     if (req && req != active) {
       if (active) active->on_exit();
+      // The incoming mode computes its first command BEFORE the actuators switch
+      // (#92): it is the hold for each actuator once switched, and this cycle's
+      // exchange sends it, not the outgoing mode's last command (or, at run
+      // start, the zero seed). It is computed at rest (qd = 0): the hold is
+      // open-loop for up to ~165 ms, and a damper term would keep braking at the
+      // switch-time velocity after the joint stops, then push it back. On a
+      // contact trip the hold is the float mode's command (gravity), not the
+      // measured torque, which carries the contact. That compute ticks the
+      // mode's dt-driven state one extra cycle.
+      req->on_enter(fb);
+      JointFeedback at_rest = fb;
+      at_rest.qd.setZero();
+      req->compute(at_rest, dt_s, cmd);
       // set_actuator_modes performs the pumping handshake; acceptable at a
       // boundary on a mode change only. It survives isolated lost pumps itself,
       // so a TransportTimeout out of it is comms loss.
       try {
-        t_.set_actuator_modes(req->required_modes());
+        t_.set_actuator_modes(req->required_modes(), &cmd);
       } catch (const TransportTimeout& e) {
         comms_lost("cyclic pumps timed out during a mode switch", e.what());
       }
-      req->on_enter(fb);
       active = req;
       last_compute_ns = -1;  // the pumps are not time the new mode lived through
     }
