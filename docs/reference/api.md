@@ -100,10 +100,19 @@ Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext,
 
 Eigen-only. Maps an external joint-torque residual to the EE wrench that
 explains it, with a hard amplification cap of `1/(2λ)` near singular poses. The
-Supervisor's pump uses it to fill `ArmState::ee_wrench` with `τ_ext = g(q) − τ`
-(the normalized convention — see `JointFeedback::tau`); NaN under a fault.
-Derivation, accuracy floor, and the λ trade:
-`docs/superpowers/specs/2026-10-04-ee-wrench-design.md`.
+Supervisor's pump uses it to fill `ArmState::ee_wrench` with one of two
+`τ_ext` estimates, and records which in `ArmState::ee_wrench_source`:
+
+| `WrenchSource` | `τ_ext` | when |
+| --- | --- | --- |
+| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached and its phase is `kArmed` or `kLatched` |
+| `kQuasiStatic = 0` | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, `kSettling` (5/K after each run start and clear), or a torn status read |
+
+Both are external torque, positive as the environment applies it. The observer
+models `M q̈ + C q̇`, so it stays accurate in motion, and lags by about 25 ms
+(first-order, K = 25 rad/s); the quasi-static estimate is exact at rest with no
+lag. NaN under a fault, whichever the source. Derivation, accuracy floor, and
+the λ trade: `docs/superpowers/specs/2026-10-04-ee-wrench-design.md`.
 
 ---
 

@@ -133,13 +133,23 @@ void Supervisor::pump_loop() {
         pump_dyn_.gravity(fb.q, pump_g_);
       }
       s.ee_twist = pump_J_ * fb.qd;
-      // Quasi-statics in the one normalized convention (JointFeedback::tau):
-      // motor + external = gravity, so the externally applied joint torque is
-      // g(q) - tau. See ArmState::ee_wrench. Under a fault the torque feedback
-      // may be stale or zeroed, so publish NaN -- a runtime-checkable "no
+      // The external joint torque, from the observer once the monitor trusts it
+      // (armed or latched): its residual r, read through the status Seqlock the RT
+      // loop already publishes. Otherwise quasi-statics in the one normalized
+      // convention (JointFeedback::tau): motor + external = gravity, so the
+      // externally applied joint torque is g(q) - tau. Both are positive as the
+      // environment applies it. See ArmState::ee_wrench. Under a fault the torque
+      // feedback may be stale or zeroed, so publish NaN -- a runtime-checkable "no
       // measurement", not a confident garbage number beside a fault flag.
+      ContactStatus cs;
+      const bool observer =
+          contact_ && contact_->status(cs) &&
+          (cs.phase == ContactPhase::kArmed || cs.phase == ContactPhase::kLatched);
+      s.ee_wrench_source = observer ? WrenchSource::kObserver : WrenchSource::kQuasiStatic;
       if (fb.fault)
         s.ee_wrench.setConstant(std::numeric_limits<double>::quiet_NaN());
+      else if (observer)
+        s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, cs.r);
       else
         s.ee_wrench = kinova::ee_wrench_from_residual(pump_J_, pump_g_ - fb.tau);
       s.speed_override = speed_override_.load();

@@ -87,7 +87,10 @@ the node's [interface doc](https://github.com/rammp-org/kinova-gen3-ros2/blob/de
    and expect `would_trips == 0`. When replaying a 50 Hz recording, pass
    `--debounce-ms 5`.
 3. `observe`, still arm, slow hand pushes on the forearm and the tool: record `r`
-   against the `/ee_state` wrench, which is exact at rest. This maps `θ` to force.
+   against the `/ee_state` wrench. This maps `θ` to force. While the monitor runs,
+   that wrench is `r` mapped through the Jacobian (`wrench_source` observer, #112);
+   for the quasi-static estimate, which is exact at rest, compute `g(q) − τ` from
+   `/joint_states`.
 4. `enforce`, slow move, hand push: trip, float, latch, `-11` on the goal,
    `/clear_faults`, hold. Then at demo speed.
 5. After a trip: force build-up, the position-mode to float window (look for the

@@ -1634,6 +1634,8 @@ TEST(Supervisor, QueryStateRecoversAnAppliedEeWrench) {
   // in cartesian_test (DefaultDampingBiasIsSmallAtAWorkingPose).
   EXPECT_TRUE(s.ee_wrench.isApprox(F, 0.1))
       << "ee_wrench " << s.ee_wrench.transpose() << " != applied " << F.transpose();
+  // No contact monitor attached (contact_detection: off): always quasi-static.
+  EXPECT_EQ(s.ee_wrench_source, interface::WrenchSource::kQuasiStatic);
 }
 
 // A faulted arm may deliver stale or zeroed torque; a confident wrench next to

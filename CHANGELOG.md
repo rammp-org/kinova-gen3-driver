@@ -117,6 +117,20 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
+- **`ArmState::ee_wrench` comes from the momentum observer when one runs**
+  (#112). With a `ContactMonitor` attached and its status armed or latched, the
+  pump maps the observer residual `r` (read from `ContactMonitor::status()`)
+  instead of the quasi-static `g(q) − τ`. The observer models the arm's own
+  inertia, so far less of the arm's own motion reads as force: on a position-mode
+  tour at speed 0.6 with nobody touching, the force error at the flange fell
+  from median 3.3 / p95 8.0 / max 13.7 N to 1.9 / 5.4 / 6.2 N. It lags the
+  quasi-static estimate by about 25 ms (first-order, K = 25 rad/s). With no
+  monitor, during the 5/K settle after each run start and clear, and on a torn
+  status read, the pump publishes the quasi-static estimate as before. NaN under
+  a fault either way. New `ArmState::ee_wrench_source` (`WrenchSource`
+  `kQuasiStatic = 0` / `kObserver = 1`, the `EeState.WRENCH_SOURCE_*` wire
+  values) says which one a state carries.
+
 - **Behaviour change:** a `Preemption::kQueue` trajectory goal sent while
   another goal is active is now refused (#84): it settles `kInvalidGoal` with
   "queueing is disabled: …", before any mode switch, and the active goal runs
