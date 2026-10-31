@@ -399,6 +399,29 @@ TEST(ContactMonitor, OnRunStartResettlesButKeepsLatch) {
   EXPECT_EQ(armed.status().phase, ContactPhase::kSettling);
 }
 
+// settled (r trusted) follows the observer's re-inits, not the phase: false from
+// construction, false again the moment a run restarts latched or a clear is
+// consumed on a skipped sample, true only after 5/K of good steps.
+TEST(ContactMonitor, SettledFollowsTheObserverNotThePhase) {
+  Rig rig(config(ContactDetection::kEnforce, kThetaLow));
+  EXPECT_FALSE(rig.status().settled);
+  ASSERT_GE(rig.run(kSettleCycles + kDebounce + 2, push(1, 6.0)), 0);
+  EXPECT_TRUE(rig.status().settled);
+
+  rig.mon().on_run_start();  // restarts latched
+  EXPECT_EQ(rig.status().phase, ContactPhase::kLatched);
+  EXPECT_FALSE(rig.status().settled);
+  rig.step_fb(rig.feedback(), /*missed=*/true);
+  EXPECT_FALSE(rig.status().settled);
+  rig.run(kSettleCycles + 2);
+  EXPECT_EQ(rig.status().phase, ContactPhase::kLatched);
+  EXPECT_TRUE(rig.status().settled);
+
+  rig.mon().request_clear();
+  rig.step_fb(rig.feedback(), /*missed=*/true);  // the clear lands on a skipped sample
+  EXPECT_FALSE(rig.status().settled);
+}
+
 // A clear requested while no run is going (the link down, latched) is consumed by
 // the next run start, so that run starts unlatched and settling.
 TEST(ContactMonitor, OnRunStartConsumesAPendingClear) {

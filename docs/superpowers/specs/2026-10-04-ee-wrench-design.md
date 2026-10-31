@@ -168,5 +168,6 @@ once it is trusted, and falls back to the quasi-static estimate otherwise.
 - **Lag.** The observer is a first-order filter at K = 25 rad/s (time constant
   1/K = 40 ms). On hand taps
   it trailed the quasi-static estimate by 23–25 ms (50 Hz data, ±10 ms). Fine for
-  monitoring and thresholds at 50 Hz; a client doing fast force control would
-  want the quasi-static estimate or a faster source.
+  monitoring and thresholds at 50 Hz; a client doing fast force control that
+  wants the zero-lag quasi-static estimate computes `g(q) − τ` from
+  `/joint_states` effort (the normalized `τ`), or needs a faster source.

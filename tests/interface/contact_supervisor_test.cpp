@@ -530,6 +530,29 @@ TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
   EXPECT_LT(stalled.ee_wrench.norm(), 1e-9) << stalled.ee_wrench.transpose();
 }
 
+// While the monitor is stepped at 1 kHz (the running case) the pump keeps using
+// the observer. Most, not all, of the samples: a starved test thread can skip a
+// pump period, and that one publish then falls back, as it should.
+TEST(ContactWrench, SteppingMonitorPublishesTheObserverResidual) {
+  ContactFix f;
+  JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  seen.tau -= push_j2(8.0);
+  f.mon.on_run_start();
+  for (int i = 0; i < 600; ++i) f.mon.step(seen, 0.001, false);
+  // The pump sees no push, the observer a push: the value says which was used.
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  f.sup.start();
+  int observer = 0;
+  for (int i = 0; i < 400; ++i) {
+    f.mon.step(seen, 0.001, false);
+    f.snap.store(fb);
+    std::this_thread::sleep_for(std::chrono::microseconds(1000));
+    if (i % 40 == 39 && f.sup.on_query_state().ee_wrench.norm() > 1.0) ++observer;
+  }
+  f.sup.stop();
+  EXPECT_GE(observer, 6) << "of 10 samples, observer in " << observer;
+}
+
 // A fault is NaN whichever estimate is selected, as before #112.
 TEST(ContactWrench, FaultPublishesNaN) {
   ContactFix f;
