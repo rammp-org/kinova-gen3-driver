@@ -117,6 +117,16 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
+- **Breaking (`Transport`):** `set_actuator_modes(const ActuatorModes&, const
+  JointCommand* hold)` takes the command to hold through the switch, or
+  `nullptr` (#92; see Fixed). Implementers and callers must pass it. No
+  downstream repo implements or calls it.
+- **Impedance entry ramp default 0.5 s → 0.1 s** (`gain_ramp_s`, both impedance
+  modes; #92, from #94). With the compute-first switch the entry error is about
+  0.1 mm, and the long fade left the spring too weak to stop slow creep. Joint
+  impedance startup creep on dojo: 3.6 mm → 0.2 mm, measured with #88's sensor
+  offsets on; expect more on `dev` until #88 merges.
+
 - **`ArmState::ee_wrench` comes from the momentum observer when one runs**
   (#112). With a `ContactMonitor` attached, its observer settled and the RT loop
   stepping it, the pump maps the observer residual `r` (read from `ContactMonitor::status()`)
@@ -242,10 +252,15 @@ that heading to the new version and bumps `package.xml`.
   torque loop tracks its own sensor, so echoing the reading should hold the
   torque the joint was applying without a sensor-offset correction (unverified
   on the arm). Actuators already in POSITION ignore the torque field and see
-  no change. On a contact trip from a position-type mode the hold includes the
-  contact torque, so through the switch to `FloatMode` the joints keep pushing
-  toward the contact instead of dropping (see `RtExecutor` in
-  `docs/reference/api.md`).
+  no change. Into TORQUE, the joints already switched now hold the incoming
+  mode's first command instead (next entry).
+- **A mode switch holds with the incoming mode's first command, and switches
+  the least loaded joints first** (#92; #94's compute-first hold and switch
+  order, without #88). `RtExecutor` computes that command, with `qd` zeroed,
+  before `set_actuator_modes` and sends it on the exchange after, so a
+  torque-mode start no longer sends zero torque for a cycle and a contact trip
+  holds float's gravity, not the contact torque. The model-based hold does not
+  cancel sensor offsets (~1.9 N·m on j3) until #88.
 - **Mode timers now count the time lost to missed exchanges** (#103).
   `RtExecutor` passed `compute()` a fixed `1 / rate_hz`, so each ~20 ms miss
   went uncounted and a 100 ms `cmd_timeout_s` could stretch to ~180 ms before

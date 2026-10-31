@@ -9,14 +9,17 @@
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include "kinova_lowlevel/arm_route.h"
 #include "kinova_lowlevel/rt_system.h"
@@ -138,10 +141,16 @@ struct KortexTransport::Impl {
 
   // Refresh that re-sends current measured positions + the given torque, keeping
   // the cyclic channel alive (used between per-actuator control-mode switches).
+  // Bumps frame_id_ and the command_ids as write_command does: the torque
+  // changes partway through a switch, and a frame id the arm has already seen
+  // could be dropped.
   void pump(const std::array<float, kNumJoints>& torque) {
+    frame_id_ = uint16_t(frame_id_ + 1);
+    cmd_.set_frame_id(frame_id_);
     for (int i = 0; i < n_; ++i) {
       cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
       cmd_.mutable_actuators(i)->set_torque_joint(torque[i]);
+      cmd_.mutable_actuators(i)->set_command_id(frame_id_);
     }
     refresh(cyclic_timeout_);
   }
@@ -372,7 +381,8 @@ void KortexTransport::set_servoing_low_level() {
   // than 0: after a link loss the revert may never have reached the arm, and an
   // actuator still in TORQUE mode would take this seed as "apply nothing" and
   // drop. In POSITION mode the field is ignored. The pumps that follow during a
-  // mode switch hold the same way (set_actuator_modes).
+  // mode switch hold the actuators not yet switched the same way
+  // (set_actuator_modes).
   for (int i = 0; i < I.n_; ++i) {
     auto* a = I.cmd_.add_actuators();
     a->set_position(I.fb_.actuators(i).position());
@@ -381,7 +391,7 @@ void KortexTransport::set_servoing_low_level() {
   I.refresh(kSetupTimeout);
 }
 
-void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
+void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const JointCommand* hold) {
   auto& I = *impl_;
   // Per-actuator SetControlMode (1-indexed device id), pumping the cyclic
   // channel between each call so it does not time out during the switch. A pump
@@ -400,22 +410,37 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   // it picked up. In POSITION mode the field is ignored. One pump
   // goes out before the first switch, so actuator 1 also switches holding it
   // rather than the previous command's torque.
-  std::array<float, kNumJoints> hold{};
-  for (int i = 0; i < I.n_; ++i) hold[i] = -I.fb_.actuators(i).torque();
+  //
+  // With a hold, each actuator gets the hold's torque instead from its own
+  // switch on (as write_command sends a kTorque command), and the least loaded
+  // switches first, so the joints carrying the arm stay stiff in POSITION the
+  // longest (#92). A position hold's torque is zero, so that is joint order, as
+  // is a switch without a hold.
+  std::array<float, kNumJoints> sent{};
+  for (int i = 0; i < I.n_; ++i) sent[i] = -I.fb_.actuators(i).torque();
+  std::array<int, kNumJoints> order;
+  std::iota(order.begin(), order.end(), 0);
+  if (hold) {
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+      return std::make_pair(std::abs(hold->torque[a]), a) <
+             std::make_pair(std::abs(hold->torque[b]), b);
+    });
+  }
   int misses = 0;
   auto pump = [&] {
     try {
-      I.pump(hold);
+      I.pump(sent);
       misses = 0;
     } catch (const TransportTimeout&) {
       if (++misses >= kMaxConsecutiveTimeouts) throw;
     }
   };
   pump();
-  for (int idx = 1; idx <= I.n_; ++idx) {
+  for (int j : order) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
-    cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
-    rpc([&] { I.act_cfg->SetControlMode(cm_msg, idx); });
+    cm_msg.set_control_mode(to_kortex_mode(modes[j]));
+    rpc([&] { I.act_cfg->SetControlMode(cm_msg, j + 1); });
+    if (hold) sent[j] = float(hold->torque[j]);
     pump();
   }
   for (int k = 0; k < 10; ++k) pump();

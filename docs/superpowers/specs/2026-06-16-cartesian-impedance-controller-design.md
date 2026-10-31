@@ -145,7 +145,7 @@ struct CartesianImpedanceParams {
   double   nullspace_kd   = 1.0;     // joint-space posture damping (N·m·s/rad)
   bool     nullspace_on   = true;
   double   torque_limit   = 39.0;    // per-joint clamp (N·m)
-  double   gain_ramp_s    = 0.5;     // ramp gains 0→full over this window on entry
+  double   gain_ramp_s    = 0.1;     // ramp gains 0→full over this window on entry (0.5 until #92)
 };
 ```
 

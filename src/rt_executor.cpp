@@ -218,15 +218,22 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     }
     if (req && req != active) {
       if (active) active->on_exit();
+      // The incoming mode's first command is the switch's hold, and this
+      // cycle's exchange sends it too (#92; see ControlMode::compute and
+      // Transport::set_actuator_modes). That compute ticks the mode's
+      // dt-driven state one extra cycle.
+      req->on_enter(fb);
+      JointFeedback at_rest = fb;
+      at_rest.qd.setZero();
+      req->compute(at_rest, dt_s, cmd);
       // set_actuator_modes performs the pumping handshake; acceptable at a
       // boundary on a mode change only. It survives isolated lost pumps itself,
       // so a TransportTimeout out of it is comms loss.
       try {
-        t_.set_actuator_modes(req->required_modes());
+        t_.set_actuator_modes(req->required_modes(), &cmd);
       } catch (const TransportTimeout& e) {
         comms_lost("cyclic pumps timed out during a mode switch", e.what());
       }
-      req->on_enter(fb);
       active = req;
       last_compute_ns = -1;  // the pumps are not time the new mode lived through
     }

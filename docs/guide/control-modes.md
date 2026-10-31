@@ -135,7 +135,7 @@ headline mode that application developers build on.
   joint-space posture term holds a rest posture *without disturbing the tool*
   (it's projected into the task's nullspace). Turn it off with `nullspace_on =
   false`; tune with `nullspace_kp` / `nullspace_kd`.
-- **Entry ramp.** The spring/damper fade in over `gain_ramp_s` (default 0.5 s) so
+- **Entry ramp.** The spring/damper fade in over `gain_ramp_s` (default 0.1 s) so
   there's no torque jolt at the moment you enter the mode — while gravity is
   applied in full from the very first cycle, so the arm never sags during fade-in.
 - **Torque limit.** Every joint is clamped to `±torque_limit` as a hard safety
@@ -151,7 +151,7 @@ headline mode that application developers build on.
 | `Kx` (trans / rot) | 300 N/m / 30 N·m/rad | Spring stiffness. Raise for tighter tracking, lower for softer compliance. Too high → buzzing/instability. |
 | `Dx` (trans / rot) | 35 / 5 | Damping. Raise if the spring oscillates; roughly scale with √`Kx`. |
 | `nullspace_kp` / `kd` | 0 / 8 | How firmly the elbow holds its rest posture. `kp = 0` means pure damping — resist null-space motion without snapping back. Keep modest. |
-| `gain_ramp_s` | 0.5 s | Longer = gentler entry. |
+| `gain_ramp_s` | 0.1 s | Longer = gentler entry, but the spring is weak while it fades in and the arm can creep (#92). |
 | `torque_limit` | 39 N·m | Lower it for a more conservative cap during bring-up. |
 
 ## Joint-Space Impedance — `JointImpedanceMode`
@@ -432,7 +432,10 @@ way and is the most recent worked example:
 
 1. Implement `ControlMode` in a new `*_mode.h` / `.cpp`. Capture entry state in
    `on_enter`; keep `compute()` allocation-free (preallocate all scratch as
-   members; use fixed-size Eigen types).
+   members; use fixed-size Eigen types). Make the first `compute()` after
+   `on_enter` safe to hold open-loop: it runs before the actuators switch and is
+   held through the switch (~165 ms on the arm). It gets zero joint velocities,
+   so damping drops out, but ramp in spring terms, as both impedance modes do.
 2. Get the rigid-body quantities you need from `Dynamics` (extend it if you need a
    new quantity such as the mass matrix — it's the one place Pinocchio lives).
 3. Add a unit test that recomputes the law independently (see the
