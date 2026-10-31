@@ -217,7 +217,7 @@ void ArmLink::run(std::atomic<bool>& stop) {
       // first start.
       ActuatorModes position;
       position.fill(ActuatorMode::kPosition);
-      t_.set_actuator_modes(position);
+      t_.set_actuator_modes(position, nullptr);  // no incoming mode: hold the measured torque
       set_state(LinkState::kRunning, "");
       commanding = true;
       exec_.run(stop);

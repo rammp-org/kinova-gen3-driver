@@ -218,15 +218,10 @@ void RtExecutor::run(std::atomic<bool>& stop) {
     }
     if (req && req != active) {
       if (active) active->on_exit();
-      // The incoming mode computes its first command BEFORE the actuators switch
-      // (#92): it is the hold for each actuator once switched, and this cycle's
-      // exchange sends it, not the outgoing mode's last command (or, at run
-      // start, the zero seed). It is computed at rest (qd = 0): the hold is
-      // open-loop for up to ~165 ms, and a damper term would keep braking at the
-      // switch-time velocity after the joint stops, then push it back. On a
-      // contact trip the hold is the float mode's command (gravity), not the
-      // measured torque, which carries the contact. That compute ticks the
-      // mode's dt-driven state one extra cycle.
+      // The incoming mode's first command is the switch's hold, and this
+      // cycle's exchange sends it too (#92; see ControlMode::compute and
+      // Transport::set_actuator_modes). That compute ticks the mode's
+      // dt-driven state one extra cycle.
       req->on_enter(fb);
       JointFeedback at_rest = fb;
       at_rest.qd.setZero();

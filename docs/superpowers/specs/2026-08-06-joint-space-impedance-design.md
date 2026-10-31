@@ -125,7 +125,7 @@ Defaults, conservative for a first hardware run:
 | `torque_limit` | 39, 39, 39, 39, 9, 9, 9 | N.m |
 | `max_tracking_error` | 0.35 | rad |
 | `max_ref_speed` | 1.0 | rad/s |
-| `gain_ramp_s` | 0.5 | s |
+| `gain_ramp_s` | 0.1 (0.5 until #92) | s |
 
 ### 4. `PoseTargetSink` — `include/kinova_lowlevel/pose_target_sink.h`
 

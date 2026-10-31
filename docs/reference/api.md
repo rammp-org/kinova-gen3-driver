@@ -135,13 +135,9 @@ Implement this to add a control law. `compute()` must be RT-safe. `dt_s` is
 the wall time since the mode's previous `compute()`, not a constant: see
 `RtExecutor` below. The first `compute()` runs right after `on_enter`, before
 the actuators switch to `required_modes()`, on the same feedback with `qd`
-zeroed: its command is the switch's hold, sent open-loop to each actuator as it
-switches (~165 ms on KORTEX), so it must be safe as a fixed command. The zeroed
-`qd` keeps damper terms out of it. Both impedance modes ramp their spring in
-from zero, so with the ramp on (the default) their first command is gravity.
-With `gain_ramp_s <= 0` it also carries any spring that is not zero at the entry
-state, such as `CartesianImpedanceMode`'s nullspace pull toward a fixed rest
-posture.
+zeroed: its command is the switch's hold (`set_actuator_modes` below), so it must
+be safe as a fixed command. Both impedance modes ramp their spring in from zero,
+so their first command is gravity unless `gain_ramp_s <= 0`.
 
 ### `JointTorqueMode` — `joint_torque_mode.h`
 
@@ -216,7 +212,7 @@ struct CartesianImpedanceParams {
   bool    nullspace_on = true;
   double  pinv_damping = 1e-3;            // λ for the damped pseudo-inverse
   double  torque_limit = 39.0;            // per-joint clamp (N·m)
-  double  gain_ramp_s  = 0.5;             // active-wrench fade-in window (s)
+  double  gain_ramp_s  = 0.1;             // active-wrench fade-in window (s)
 };
 
 CartesianImpedanceMode(Dynamics& dyn, CartesianImpedanceParams p = {});
@@ -523,7 +519,7 @@ class Transport {
   virtual void connect() = 0;
   virtual void set_servoing_low_level() = 0;
   // hold: the incoming mode's first command; nullptr = hold the measured torque
-  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand* hold = nullptr) = 0;
+  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand* hold) = 0;
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;
@@ -544,12 +540,9 @@ inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 ```
 
 - **`set_actuator_modes(modes, hold)`** switches the actuators one at a time.
-  `RtExecutor` calls it at every mode change with `hold` = the incoming mode's
-  first command, computed on the boundary's feedback with `qd` zeroed, before
-  the switch; that
-  command is also the first one exchanged after it. `ArmLink`'s re-entry passes
-  no hold. On KORTEX the switch takes ~165 ms, and every keep-alive pump sends
-  measured positions plus, per actuator:
+  `RtExecutor` passes the incoming mode's first command as `hold`; `ArmLink`'s
+  re-entry passes `nullptr`. On KORTEX the switch takes ~165 ms, and every
+  keep-alive pump sends measured positions plus, per actuator:
   - **not yet switched:** the torque it was measured applying, read once before
     the first switch. The actuator's torque loop tracks its own biased sensor,
     so echoing the reading cancels the sensor offset; never add a torque offset
@@ -559,13 +552,10 @@ inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
     not cancel the sensor offset (up to ~1.9 N·m on j3 before offset calibration,
     #88).
 
-  Actuators in POSITION ignore the torque field. The order comes from
-  `actuator_switch_order(modes, hold_torque, outgoing_torque)`
-  (`actuator_switch_order.h`, header-only): into TORQUE/CURRENT the largest
-  `|hold torque|` switches last, so the loaded joints stay stiff in POSITION
-  longest; into POSITION/VELOCITY the largest `|outgoing torque|` (the measured
-  torque) switches first, so they stop holding open-loop soonest. Ties keep joint
-  order. Without a hold the measured torque stands in for the hold torque.
+  Actuators in POSITION ignore the torque field. With a hold, the actuators
+  switch in ascending `|hold torque|`, ties in joint order, so the loaded joints
+  stay stiff in POSITION longest. A switch into POSITION (zero hold torque) or
+  without a hold goes in joint order.
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No

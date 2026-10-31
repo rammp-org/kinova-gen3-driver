@@ -37,7 +37,7 @@ struct JointImpedanceParams {
   // hardware can actually do — a cap under hand speed accumulates lag that only
   // unwinds when the operator slows down, which reads as mush.
   JointVec max_ref_speed = JointVec::Constant(std::numeric_limits<double>::infinity());
-  double gain_ramp_s = 0.5;  // fade the spring in over this window on entry
+  double gain_ramp_s = 0.1;  // fade the spring in over this window on entry
   // Staleness watchdog for streamed targets. 0 DISABLES it, which is the default
   // and preserves the behaviour every existing caller relies on.
   double cmd_timeout_s = 0.0;

@@ -206,10 +206,7 @@ may still be in TORQUE mode, and the first commands of a new run carry zero
 torque. On the first start this is redundant but harmless. The switch switches
 one actuator at a time, and its keep-alive pumps hold each joint's torque
 measured at the start of the switch, as the seed frame does. Before 2026-10-30
-they sent 0, so the joints still in TORQUE dropped until their turn (#92). The
-re-entry passes no hold command (there is no incoming mode), so every joint
-keeps its measured torque, and the joints measured carrying the most switch to
-POSITION first (`actuator_switch_order`).
+they sent 0, so the joints still in TORQUE dropped until their turn (#92).
 
 **`clear_faults()`** is unchanged. It re-enters low-level only if the transport
 is still in it, which is what teleop relies on. `ArmLink` always calls it after
@@ -396,7 +393,7 @@ Every recovery held the arm within 0.0001° over 3 s.
 - In which actuator mode the arm leaves the actuators after a cable pull.
 - That a cable pull while holding in impedance mode no longer sags on the
   reconnect now that the mode-switch pumps hold the measured torque
-  (2026-10-30) and switch the most loaded joints first.
+  (2026-10-30).
 
 Attended validation (with Swapnil): arm off at start then powered on; cable pull
 while holding; e-stop → controller drive → `/clear_faults`; web app forcing

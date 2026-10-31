@@ -9,16 +9,18 @@
 #include <TransportClientTcp.h>
 #include <TransportClientUdp.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
-#include "kinova_lowlevel/actuator_switch_order.h"
 #include "kinova_lowlevel/arm_route.h"
 #include "kinova_lowlevel/rt_system.h"
 #include "kinova_lowlevel/units.h"
@@ -390,39 +392,33 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const Joint
   // only keeps the channel alive, so a lost one is skipped;
   // kMaxConsecutiveTimeouts in a row rethrows the TransportTimeout.
   //
-  // Nothing is closed-loop through the switch: an actuator in TORQUE mode takes
-  // a pump's torque as its command, open-loop, for the ~165 ms the switch takes.
-  // Never send 0 there, which drops the arm (#92). Per actuator, each pump sends:
-  //  - not yet switched: the torque measured once, here, before the first switch
-  //    (reaction-signed, so negated, as the seed does). The actuator's torque
-  //    loop tracks its own biased sensor (measured in the gravity-model
-  //    campaign, #91), so echoing the reading reproduces the torque the joint
-  //    was applying, sensor offset included: do not add a torque offset here.
-  //    Not re-read each pump: a hold that follows the reading has nothing
-  //    pulling it back, so it would keep any disturbance or tracking error it
-  //    picked up.
-  //  - switched: the hold's torque, converted as write_command converts a
-  //    kTorque command's (a kCurrent one would need current_motor; no mode uses
-  //    it), so the joint already applies the incoming mode's first
-  //    command (RtExecutor computes it before the switch). That command is
-  //    model-based and does not cancel the sensor offset the way the reading
-  //    does. Without a hold, the measured torque, as for one not yet switched.
-  // Positions are the measured passthrough throughout; in POSITION mode the
-  // torque field is ignored. One pump goes out before the first switch, so the
-  // first actuator also switches holding the measured torque rather than the
-  // previous command's.
+  // Every pump commands the torque measured once, here, before the first switch
+  // (reaction-signed, so negated, as the seed does) rather than 0: an actuator
+  // in TORQUE mode takes a pump's torque as its command, so one left in TORQUE
+  // would drop until its own turn, one switched to it until the switch ends
+  // (#92). The actuator's torque loop tracks its own biased sensor (measured in
+  // the gravity-model campaign, #91), so echoing the reading reproduces the
+  // torque the joint was applying, sensor offset included: do not add a torque
+  // offset here. Not re-read each pump: a hold that follows the reading has
+  // nothing pulling it back, so it would keep any disturbance or tracking error
+  // it picked up. In POSITION mode the field is ignored. One pump
+  // goes out before the first switch, so actuator 1 also switches holding it
+  // rather than the previous command's torque.
   //
-  // Order (actuator_switch_order): into torque, the largest |hold torque|
-  // switches last, so the joints carrying the arm stay stiff in position the
-  // longest; into position, the largest |measured torque| switches first, so
-  // the joints carrying the most stop holding open-loop soonest. On a re-entry
-  // (no hold) that is the most loaded joints to POSITION first.
+  // With a hold, each actuator gets the hold's torque instead from its own
+  // switch on (as write_command sends a kTorque command), and the least loaded
+  // switches first, so the joints carrying the arm stay stiff in POSITION the
+  // longest (#92). A position hold's torque is zero, so that is joint order, as
+  // is a switch without a hold.
   std::array<float, kNumJoints> sent{};
-  JointVec measured, incoming;
-  for (int i = 0; i < I.n_; ++i) {
-    sent[i] = -I.fb_.actuators(i).torque();
-    measured[i] = double(sent[i]);
-    incoming[i] = hold ? hold->torque[i] : measured[i];
+  for (int i = 0; i < I.n_; ++i) sent[i] = -I.fb_.actuators(i).torque();
+  std::array<int, kNumJoints> order;
+  std::iota(order.begin(), order.end(), 0);
+  if (hold) {
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+      return std::make_pair(std::abs(hold->torque[a]), a) <
+             std::make_pair(std::abs(hold->torque[b]), b);
+    });
   }
   int misses = 0;
   auto pump = [&] {
@@ -434,7 +430,7 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes, const Joint
     }
   };
   pump();
-  for (int j : actuator_switch_order(modes, incoming, measured)) {
+  for (int j : order) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[j]));
     rpc([&] { I.act_cfg->SetControlMode(cm_msg, j + 1); });

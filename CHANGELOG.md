@@ -117,10 +117,15 @@ that heading to the new version and bumps `package.xml`.
 
 ### Changed
 
-- **Breaking for `Transport` implementers:** the override is now
-  `set_actuator_modes(const ActuatorModes&, const JointCommand* hold = nullptr)`
-  (#92); the hold is the incoming mode's first command (see Fixed). Callers are
-  unaffected. No downstream repo implements `Transport`.
+- **Breaking (`Transport`):** `set_actuator_modes(const ActuatorModes&, const
+  JointCommand* hold)` takes the command to hold through the switch, or
+  `nullptr` (#92; see Fixed). Implementers and callers must pass it. No
+  downstream repo implements or calls it.
+- **Impedance entry ramp default 0.5 s → 0.1 s** (`gain_ramp_s`, both impedance
+  modes; #92, from #94). With the compute-first switch the entry error is about
+  0.1 mm, and the long fade left the spring too weak to stop slow creep. Joint
+  impedance startup creep on dojo: 3.6 mm → 0.2 mm, measured with #88's sensor
+  offsets on; expect more on `dev` until #88 merges.
 
 - **`ArmState::ee_wrench` comes from the momentum observer when one runs**
   (#112). With a `ContactMonitor` attached, its observer settled and the RT loop
@@ -250,27 +255,12 @@ that heading to the new version and bumps `package.xml`.
   no change. Into TORQUE, the joints already switched now hold the incoming
   mode's first command instead (next entry).
 - **A mode switch holds with the incoming mode's first command, and switches
-  the loaded joints in load order** (#92; carries #94's switch order and
-  compute-first hold onto `dev` without #88). On a mode change `RtExecutor` now
-  runs the incoming mode's `on_enter` and one `compute` before
-  `set_actuator_modes`, and passes that command as the hold. That `compute` gets
-  the feedback with `qd` zeroed, so no damper term is held open-loop at the
-  switch-time velocity. Through the switch
-  each actuator already switched gets the hold's torque, and each one not yet
-  switched keeps its measured torque, as above. The exchange after the switch
-  sends the same command, so a run that starts in a torque mode no longer sends
-  the executor's zero seed for one cycle, and a mid-run switch no longer sends
-  the outgoing mode's last command. The actuators switch in the order
-  `actuator_switch_order` gives: into TORQUE the most loaded switch last, into
-  POSITION (including `ArmLink`'s re-entry) first. On a contact trip from a
-  position-type mode the hold is `FloatMode`'s first command (gravity), not the
-  measured torque, which included the
-  contact torque, so the joints no longer push toward the contact through the
-  switch. Tradeoff: the model-based hold does not cancel the
-  actuator's sensor offset the way the measured torque did, so a joint entering
-  TORQUE holds up to ~1.9 N·m off (j3) until the loop closes; offset calibration
-  is #88. The mode's pre-switch `compute` ticks its dt-driven state one extra
-  nominal cycle; the first `compute` after the switch still gets the nominal dt.
+  the least loaded joints first** (#92; #94's compute-first hold and switch
+  order, without #88). `RtExecutor` computes that command, with `qd` zeroed,
+  before `set_actuator_modes` and sends it on the exchange after, so a
+  torque-mode start no longer sends zero torque for a cycle and a contact trip
+  holds float's gravity, not the contact torque. The model-based hold does not
+  cancel sensor offsets (~1.9 N·m on j3) until #88.
 - **Mode timers now count the time lost to missed exchanges** (#103).
   `RtExecutor` passed `compute()` a fixed `1 / rate_hz`, so each ~20 ms miss
   went uncounted and a 100 ms `cmd_timeout_s` could stretch to ~180 ms before
