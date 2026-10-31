@@ -8,7 +8,9 @@
 namespace kinova {
 // Order in which a transport switches actuator control modes one at a time (#92).
 // Through the switch, nothing is closed-loop: a switched actuator receives the
-// fixed hold, and one not yet switched keeps what it received before.
+// fixed hold, and one not yet switched keeps holding as before the switch (on
+// KORTEX, the torque it was measured applying). KortexTransport's pumps write
+// only the torque field, so a CURRENT actuator is not held (no mode uses it).
 //  - Into torque/current, a switched joint holds open-loop with the hold torque
 //    while an unswitched position-mode joint stays stiff, so the joints with the
 //    largest |hold_torque| switch LAST.

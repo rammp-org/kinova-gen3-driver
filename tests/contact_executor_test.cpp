@@ -182,7 +182,8 @@ TEST(ContactExecutor, PositionModeTripAdoptsFloat) {
   EXPECT_EQ(w.bench.switches[0].second, all(ActuatorMode::kPosition));
   EXPECT_EQ(w.bench.switches[1].first, k + 2);
   EXPECT_EQ(w.bench.switches[1].second, all(ActuatorMode::kTorque));
-  // The switch holds with float's first command: gravity alone. The measured
+  // The switch holds with float's first command: gravity alone at rest (the sim
+  // does not move, so FloatMode's damping adds nothing). The measured
   // torque (g0 - push here) carries the contact, so holding it would keep
   // pushing toward the contact through the switch.
   ASSERT_EQ(w.bench.holds.size(), 2u);

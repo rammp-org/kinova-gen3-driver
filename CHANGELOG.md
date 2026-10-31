@@ -261,9 +261,10 @@ that heading to the new version and bumps `package.xml`.
   the outgoing mode's last command. The actuators switch in the order
   `actuator_switch_order` gives: into TORQUE the most loaded switch last, into
   POSITION (including `ArmLink`'s re-entry) first. On a contact trip from a
-  position-type mode the hold is `FloatMode`'s gravity, not the measured torque,
-  which included the contact torque, so the joints no longer push toward the
-  contact through the switch. Tradeoff: the model-based hold does not cancel the
+  position-type mode the hold is `FloatMode`'s first command (gravity, minus its
+  damping at the trip velocity), not the measured torque, which included the
+  contact torque, so the joints no longer push toward the contact through the
+  switch. Tradeoff: the model-based hold does not cancel the
   actuator's sensor offset the way the measured torque did, so a joint entering
   TORQUE holds up to ~1.9 N·m off (j3) until the loop closes; offset calibration
   is #88. The mode's pre-switch `compute` ticks its dt-driven state one extra

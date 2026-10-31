@@ -90,7 +90,10 @@ class RtExecutor {
   // (kDefaultCyclicTimeoutMs + period). Throws CommsLost on comms loss (see ExecutorConfig);
   // any other exception propagates as before. With exit_on_fault, throws
   // ArmFault on a confirmed fault. May be called again after it returns or throws:
-  // a mode requested in between is adopted by the new run.
+  // a mode requested in between is adopted by the new run. A mode change runs the
+  // incoming mode's on_enter and first compute() before set_actuator_modes; if
+  // that throws, the mode is not adopted and its on_exit is not called (nor is
+  // the active mode's when run() ends).
   void run(std::atomic<bool>& stop);
   const ExecutorConfig& config() const noexcept { return cfg_; }
 

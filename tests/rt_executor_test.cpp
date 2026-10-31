@@ -18,7 +18,7 @@ using namespace kinova;
 
 namespace {
 // Records what the executor hands the transport around mode switches: the hold
-// command for each switch and the first command exchanged after the first one.
+// command for each switch and the first command exchanged after each one.
 // Optionally requests a second mode mid-run, then stops the loop after a fixed
 // number of exchanges so the test is deterministic, no sleeps.
 struct RecordingTransport : Transport {
@@ -28,8 +28,7 @@ struct RecordingTransport : Transport {
   ControlMode* next_mode = nullptr;  // requested after the 3rd exchange, if set
   std::vector<std::string>* log = nullptr;
   std::vector<JointCommand> holds;
-  bool saw_first_after_switch = false;
-  JointCommand first_after_switch;
+  std::vector<JointCommand> firsts;  // firsts[n] = first exchange after switch n
   int exchanges = 0;
 
   void connect() override {}
@@ -43,10 +42,7 @@ struct RecordingTransport : Transport {
     holds.push_back(*h);
   }
   void exchange(const JointCommand& c, JointFeedback& fb) override {
-    if (!holds.empty() && !saw_first_after_switch) {
-      saw_first_after_switch = true;
-      first_after_switch = c;
-    }
+    if (firsts.size() < holds.size()) firsts.push_back(c);
     fb = state;
     ++exchanges;
     if (exchanges == 3 && next_mode) ex->request_mode(next_mode);
@@ -113,9 +109,8 @@ TEST(RtExecutor, ModeSwitchHoldsWithIncomingModesFirstCommand) {
   EXPECT_TRUE(t.holds[0].torque.isApprox(g, 1e-9)) << t.holds[0].torque.transpose();
   // And the first cycle after the switch must not fall back to the executor's
   // zero-initialized hold either.
-  ASSERT_TRUE(t.saw_first_after_switch);
-  EXPECT_TRUE(t.first_after_switch.torque.isApprox(g, 1e-9))
-      << t.first_after_switch.torque.transpose();
+  ASSERT_EQ(t.firsts.size(), 1u);
+  EXPECT_TRUE(t.firsts[0].torque.isApprox(g, 1e-9)) << t.firsts[0].torque.transpose();
 }
 
 // A mid-run switch reuses the executor's JointCommand: the hold must be the
@@ -136,6 +131,11 @@ TEST(RtExecutor, MidRunSwitchHoldsWithIncomingModeNotOutgoing) {
   EXPECT_EQ(t.holds[0].mode, ActuatorMode::kPosition);
   EXPECT_EQ(t.holds[1].mode, ActuatorMode::kTorque);
   EXPECT_TRUE(t.holds[1].torque.isApprox(g, 1e-9)) << t.holds[1].torque.transpose();
+  // The exchange right after the switch sends the incoming command too, not the
+  // position mode's last one.
+  ASSERT_EQ(t.firsts.size(), 2u);
+  EXPECT_EQ(t.firsts[1].mode, ActuatorMode::kTorque);
+  EXPECT_TRUE(t.firsts[1].torque.isApprox(g, 1e-9)) << t.firsts[1].torque.transpose();
 }
 
 // Both impedance modes enter with the spring ramped to zero, so their hold is

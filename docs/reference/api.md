@@ -133,7 +133,11 @@ using ActuatorModes = std::array<ActuatorMode, 7>;
 
 Implement this to add a control law. `compute()` must be RT-safe. `dt_s` is
 the wall time since the mode's previous `compute()`, not a constant: see
-`RtExecutor` below.
+`RtExecutor` below. The first `compute()` runs right after `on_enter`, on the
+same feedback, before the actuators switch to `required_modes()`: its command is
+the switch's hold, sent open-loop to each actuator as it switches (~165 ms on
+KORTEX), so it must be safe as a fixed command. Both impedance modes ramp their
+spring in from zero, so their first command is gravity.
 
 ### `JointTorqueMode` — `joint_torque_mode.h`
 
@@ -413,7 +417,8 @@ class RtExecutor {
     and the exchange after the handshake sends it, so the freeze is never sent.
     Through the switch (~165 ms on KORTEX, the #92 window) each pump sends the
     measured position; each joint already switched to TORQUE holds float's first
-    command (gravity), and each one not yet switched, still in POSITION, ignores
+    command (gravity, minus `FloatMode`'s damping at the trip-cycle velocity),
+    and each one not yet switched, still in POSITION, ignores
     the torque field. The torque measured on the trip cycle includes the contact
     torque the position loop was resisting, so it is not used as the hold.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left

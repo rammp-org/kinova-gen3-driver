@@ -222,7 +222,8 @@ void RtExecutor::run(std::atomic<bool>& stop) {
       // (#92): it is the hold for each actuator once switched, and this cycle's
       // exchange sends it, not the outgoing mode's last command (or, at run
       // start, the zero seed). On a contact trip the hold is the float mode's
-      // gravity, not the measured torque, which carries the contact. That compute
+      // command (gravity, damped at the trip velocity), not the measured torque,
+      // which carries the contact. That compute
       // ticks the mode's dt-driven state one extra cycle.
       req->on_enter(fb);
       req->compute(fb, dt_s, cmd);
