@@ -129,10 +129,7 @@ that heading to the new version and bumps `package.xml`.
   run start and clear (latched or not), while the RT loop is stopped (the
   status is frozen), and on a torn status read, the pump publishes the
   quasi-static estimate as before. NaN under a fault either way. New
-  `ContactStatus::settled` and `ContactMonitor::status_version()`. New
-  `ArmState::ee_wrench_source` (`WrenchSource`
-  `kQuasiStatic = 0` / `kObserver = 1`, the `EeState.WRENCH_SOURCE_*` wire
-  values) says which one a state carries.
+  `ContactStatus::settled` and `ContactMonitor::status_version()`.
 
 - **Behaviour change:** a `Preemption::kQueue` trajectory goal sent while
   another goal is active is now refused (#84): it settles `kInvalidGoal` with

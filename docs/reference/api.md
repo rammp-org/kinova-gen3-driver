@@ -101,12 +101,12 @@ Vector6 ee_wrench_from_residual(const Jacobian6& J, const JointVec& tau_ext,
 Eigen-only. Maps an external joint-torque residual to the EE wrench that
 explains it, with a hard amplification cap of `1/(2λ)` near singular poses. The
 Supervisor's pump uses it to fill `ArmState::ee_wrench` with one of two
-`τ_ext` estimates, and records which in `ArmState::ee_wrench_source`:
+`τ_ext` estimates:
 
-| `WrenchSource` | `τ_ext` | when |
+| estimate | `τ_ext` | when |
 | --- | --- | --- |
-| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached, `ContactStatus::settled`, and the status was stored since the pump's previous iteration |
-| `kQuasiStatic = 0` | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, the 5/K settle after each run start and clear (latched or not), the RT loop stopped (`status_version()` unchanged), or a torn status read |
+| observer | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached, `ContactStatus::settled`, and the status was stored since the pump's previous iteration |
+| quasi-static | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, the 5/K settle after each run start and clear (latched or not), the RT loop stopped (`status_version()` unchanged), or a torn status read |
 
 Both are external torque, positive as the environment applies it. The observer
 models `M q̈ + C q̇`, so it stays accurate in motion, and trails by about 25 ms

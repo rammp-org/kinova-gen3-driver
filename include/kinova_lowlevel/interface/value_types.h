@@ -160,8 +160,6 @@ struct TrajectoryResult {
 // matching Dynamics::jacobian: a world-aligned frame at the tool, NOT the body frame.
 // Deliberately not read from the arm's own tool_twist: that would be a different frame
 // and a different model from the ee_pose beside it, and the two would silently disagree.
-// Which estimate ArmState::ee_wrench carries.
-enum class WrenchSource : uint8_t { kQuasiStatic = 0, kObserver = 1 };
 struct ArmState {
   // tau is in the one normalized convention -- see JointFeedback::tau.
   JointVec q = JointVec::Zero(), qd = JointVec::Zero(), tau = JointVec::Zero();
@@ -169,12 +167,12 @@ struct ArmState {
   Vector6 ee_twist = Vector6::Zero();
   // Measured external wrench at the tool: what the ENVIRONMENT applies to the EE,
   // [force; torque] in N / N*m, same frame/model/sample doctrine as ee_twist above.
-  // F = pinv(J^T) tau_ext, with tau_ext from one of two estimates (ee_wrench_source):
-  //   - kObserver: the contact monitor's momentum-observer residual r, whenever a
+  // F = pinv(J^T) tau_ext, with tau_ext from one of two estimates:
+  //   - observer: the contact monitor's momentum-observer residual r, whenever a
   //     monitor is attached, its observer has settled and the RT loop is stepping
   //     it. Models the arm's own inertia, so it stays accurate in motion; first-
   //     order (1/K = 40 ms), measured ~25 ms behind the quasi-static on hand taps.
-  //   - kQuasiStatic: g(q) - tau, otherwise (no monitor, the 5/K settle after each
+  //   - quasi-static: g(q) - tau, otherwise (no monitor, the 5/K settle after each
   //     run start and clear, the RT loop stopped, or a torn status read). Exact at
   //     rest, no lag, but M qdd + C qd reads as external force while the arm moves.
   // Both read a held payload as external force. Contact-detection grade, not
@@ -182,7 +180,6 @@ struct ArmState {
   // Derivation, accuracy floor, and why KORTEX's own wrench is unusable (kortex#52):
   // docs/superpowers/specs/2026-10-04-ee-wrench-design.md.
   Vector6 ee_wrench = Vector6::Zero();
-  WrenchSource ee_wrench_source = WrenchSource::kQuasiStatic;
   bool fault = false;
   double stamp_s = 0.0;
   // The runtime speed override currently in force. Populated by the

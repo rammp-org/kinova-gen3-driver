@@ -151,7 +151,6 @@ void Supervisor::pump_loop() {
       // measurement", not a confident garbage number beside a fault flag.
       ContactStatus cs;
       const bool observer = contact_ && contact_live && contact_->status(cs) && cs.settled;
-      s.ee_wrench_source = observer ? WrenchSource::kObserver : WrenchSource::kQuasiStatic;
       if (fb.fault)
         s.ee_wrench.setConstant(std::numeric_limits<double>::quiet_NaN());
       else if (observer)

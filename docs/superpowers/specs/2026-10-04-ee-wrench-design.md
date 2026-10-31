@@ -148,9 +148,8 @@ once it is trusted, and falls back to the quasi-static estimate otherwise.
   unchanged: the RT loop is stopped, e.g. ArmLink in `kFaulted`, which still
   delivers feedback, so a frozen `r` would be published as live), or a torn
   status read: `ee_wrench_from_residual(J, g(q) − τ)`, exactly as before. Under a fault,
-  NaN whichever the source. `ArmState::ee_wrench_source` (`kQuasiStatic = 0`,
-  `kObserver = 1`) records which one a state carries; the ROS message carries it
-  as `EeState.wrench_source`.
+  NaN whichever the source. Neither `ArmState` nor `EeState` says which estimate
+  a state carries: the conditions above decide it.
 - **Sign.** Both are the external torque, positive as the environment applies
   it. The observer's dynamics are `M q̈ + C q̇ + g = τ + τ_ext`
   (`momentum_observer.h`), so at rest `r → g − τ`, the quasi-static residual.

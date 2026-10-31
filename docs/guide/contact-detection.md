@@ -88,7 +88,7 @@ the node's [interface doc](https://github.com/rammp-org/kinova-gen3-ros2/blob/de
    `--debounce-ms 5`.
 3. `observe`, still arm, slow hand pushes on the forearm and the tool: record `r`
    against the `/ee_state` wrench. This maps `θ` to force. While the monitor runs,
-   that wrench is `r` mapped through the Jacobian (`wrench_source` observer, #112);
+   that wrench is `r` mapped through the Jacobian (#112);
    for the quasi-static estimate, which is exact at rest, compute `g(q) − τ` from
    `/joint_states`.
 4. `enforce`, slow move, hand push: trip, float, latch, `-11` on the goal,

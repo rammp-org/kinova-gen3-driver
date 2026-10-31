@@ -220,8 +220,10 @@ ArmState publish_after(ContactFix& f, const JointVec& tau_ext, int cycles,
   seen.tau -= tau_ext;
   f.mon.on_run_start();
   for (int i = 0; i < cycles; ++i) f.mon.step(seen, 0.001, false);
-  f.sup.start();
+  // Before start: the pump's first iteration must see both this sample and the
+  // monitor's last status as new (nothing steps the monitor after this).
   f.snap.store(fb);
+  f.sup.start();
   sleep_ms(80);
   const ArmState s = f.sup.on_query_state();
   f.sup.stop();
@@ -461,7 +463,6 @@ TEST(ContactWrench, ArmedPublishesTheObserverResidual) {
   const ArmState s = publish_after(f, push_j2(8.0), 600, fb);  // under θ: armed, not latched
   const ContactStatus st = f.status();
   ASSERT_EQ(st.phase, ContactPhase::kArmed);
-  EXPECT_EQ(s.ee_wrench_source, WrenchSource::kObserver);
   EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, st.r), 1e-12))
       << s.ee_wrench.transpose() << " != " << wrench_of(fb.q, st.r).transpose();
   // fb carries no push, so the quasi-static estimate would be ~0.
@@ -474,7 +475,6 @@ TEST(ContactWrench, LatchedPublishesTheObserverResidual) {
   const ArmState s = publish_after(f, push_j2(24.0), 600, fb);  // over θ: latches
   const ContactStatus st = f.status();
   ASSERT_EQ(st.phase, ContactPhase::kLatched);
-  EXPECT_EQ(s.ee_wrench_source, WrenchSource::kObserver);
   EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, st.r), 1e-12));
   EXPECT_GT(s.ee_wrench.norm(), 1.0);
 }
@@ -485,7 +485,6 @@ TEST(ContactWrench, SettlingPublishesQuasiStatic) {
   fb.tau -= push_j2(8.0);
   const ArmState s = publish_after(f, push_j2(8.0), 10, fb);  // 10 ms into the 200 ms settle
   ASSERT_EQ(f.status().phase, ContactPhase::kSettling);
-  EXPECT_EQ(s.ee_wrench_source, WrenchSource::kQuasiStatic);
   EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(fb.q, push_j2(8.0)), 1e-9))
       << s.ee_wrench.transpose() << " != " << wrench_of(fb.q, push_j2(8.0)).transpose();
 }
@@ -501,7 +500,6 @@ TEST(ContactWrench, LatchedRestartPublishesQuasiStaticUntilSettled) {
   ASSERT_TRUE(f.mon.latched());
   const ArmState s = publish_after(f, push_j2(24.0), 10, pushed);  // 10 ms into the re-settle
   ASSERT_EQ(f.status().phase, ContactPhase::kLatched);
-  EXPECT_EQ(s.ee_wrench_source, WrenchSource::kQuasiStatic);
   EXPECT_TRUE(s.ee_wrench.isApprox(wrench_of(pushed.q, push_j2(24.0)), 1e-9));
 }
 
@@ -515,20 +513,20 @@ TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
   seen.tau -= push_j2(8.0);
   f.mon.on_run_start();
   for (int i = 0; i < 600; ++i) f.mon.step(seen, 0.001, false);
+  // The pump sees no push, the observer a push: the value says which was used.
+  const JointFeedback fb = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
+  f.snap.store(fb);  // before start, as in publish_after
   f.sup.start();
-  f.snap.store(seen);
   sleep_ms(80);
   const ArmState live = f.sup.on_query_state();
   f.mon.step(seen, 0.001, false);  // the last step, with no feedback published after it
   sleep_ms(80);
-  JointFeedback later = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
-  f.snap.store(later);  // fresh feedback, no monitor step since
+  f.snap.store(fb);  // fresh feedback, no monitor step since
   sleep_ms(80);
   const ArmState stalled = f.sup.on_query_state();
   f.sup.stop();
 
-  EXPECT_EQ(live.ee_wrench_source, WrenchSource::kObserver);
-  EXPECT_EQ(stalled.ee_wrench_source, WrenchSource::kQuasiStatic);
+  EXPECT_GT(live.ee_wrench.norm(), 1.0) << "live: not the observer";
   EXPECT_LT(stalled.ee_wrench.norm(), 1e-9) << stalled.ee_wrench.transpose();
 }
 
@@ -563,7 +561,6 @@ TEST(ContactWrench, EstimatesAgreeOnAStaticPush) {
   f.teardown();
 
   ASSERT_EQ(st.phase, ContactPhase::kArmed);
-  ASSERT_EQ(s.ee_wrench_source, WrenchSource::kObserver);
   const JointVec quasi_static = test_fixtures::gravity(f.sim_dyn, s.q) - s.tau;
   EXPECT_NEAR(quasi_static[1], 8.0, 1e-6);
   EXPECT_NEAR(st.r[1], 8.0, 1e-3);  // same sign: the observer reads +push too
