@@ -141,10 +141,16 @@ struct KortexTransport::Impl {
 
   // Refresh that re-sends current measured positions + the given torque, keeping
   // the cyclic channel alive (used between per-actuator control-mode switches).
+  // Bumps frame_id_ and the command_ids as write_command does: the torque
+  // changes partway through a switch, and a frame id the arm has already seen
+  // could be dropped.
   void pump(const std::array<float, kNumJoints>& torque) {
+    frame_id_ = uint16_t(frame_id_ + 1);
+    cmd_.set_frame_id(frame_id_);
     for (int i = 0; i < n_; ++i) {
       cmd_.mutable_actuators(i)->set_position(fb_.actuators(i).position());
       cmd_.mutable_actuators(i)->set_torque_joint(torque[i]);
+      cmd_.mutable_actuators(i)->set_command_id(frame_id_);
     }
     refresh(cyclic_timeout_);
   }
