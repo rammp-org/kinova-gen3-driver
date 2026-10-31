@@ -67,7 +67,7 @@ struct StreamOpenRequest {
   double timeout_s = 0.1;  // <= 0 is REJECTED at open: no deadline, no safe-stop
   // Compliance for an impedance session, resolved and applied AT OPEN. A
   // non-default spec on a non-impedance open is REJECTED. Mid-session gain
-  // changes are deliberately out of scope for v1.3.0: close and re-open.
+  // changes are deliberately out of scope for v2.0.0: close and re-open.
   ImpedanceGains gains{};
   Token token{};
 };

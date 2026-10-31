@@ -724,7 +724,7 @@ TEST(ExecutorSpeedScale, BackwardsWallClockDoesNotMoveTrajectoryTimeBackwards) {
       << "a backwards wall-clock stamp must never move trajectory time backwards";
 }
 
-// ---- v1.3.0 target feedforward: sample_target + scaled derivatives ----
+// ---- v2.0.0 target feedforward: sample_target + scaled derivatives ----
 namespace {
 // A profiled S-curve: rest -> rest over 2 s with a nonzero mid velocity.
 kinova::interface::Trajectory profiled(bool with_accel) {
