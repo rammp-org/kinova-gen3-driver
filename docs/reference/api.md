@@ -403,7 +403,10 @@ class RtExecutor {
     which runs after that handshake, so the freeze is sent once, after the torque
     switch. Through the switch the arm is held by the handshake's own pumps
     (measured position, and on KORTEX the torque measured at the start of the
-    switch, the #92 window).
+    switch, the #92 window). That torque is read on the trip cycle, so it
+    includes the contact torque the position loop was resisting: each switched
+    joint keeps pushing toward the contact for the switch (~165 ms) and the freeze
+    cycle after it, and pushes the arm on if the contact goes away.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
     the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or

@@ -395,7 +395,9 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
   // (#92). Not re-read each pump: in TORQUE the actuator drives its own sensor
   // to the command, so feeding the reading back would let the sensor offset
   // accumulate. Uncalibrated, the hold is off by each joint's sensor offset for
-  // the length of the switch. In POSITION mode the field is ignored.
+  // the length of the switch. In POSITION mode the field is ignored. One pump
+  // goes out before the first switch, so actuator 1 also switches holding it
+  // rather than the previous command's torque.
   std::array<float, kNumJoints> hold{};
   for (int i = 0; i < I.n_; ++i) hold[i] = -I.fb_.actuators(i).torque();
   int misses = 0;
@@ -407,6 +409,7 @@ void KortexTransport::set_actuator_modes(const ActuatorModes& modes) {
       if (++misses >= kMaxConsecutiveTimeouts) throw;
     }
   };
+  pump();
   for (int idx = 1; idx <= I.n_; ++idx) {
     k_api::ActuatorConfig::ControlModeInformation cm_msg;
     cm_msg.set_control_mode(to_kortex_mode(modes[idx - 1]));
