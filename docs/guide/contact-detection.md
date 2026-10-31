@@ -95,9 +95,10 @@ the node's [interface doc](https://github.com/rammp-org/kinova-gen3-ros2/blob/de
    `/clear_faults`, hold. Then at demo speed.
 5. After a trip: force build-up, the position-mode to float window (look for what
    is left of the #92 droop), and the RT cycle time with and without the monitor (`--rt-csv`).
-   The switch holds the torque measured at the trip, contact included, so also
-   trip from position mode and let go at once: measure how far the arm moves
-   toward where the contact was during the ~165 ms switch.
+   Through the ~165 ms switch each joint already switched holds float's first
+   command (gravity), not the torque measured at the trip, which includes the
+   contact. Check that on the arm: trip from position mode and let go at once,
+   and measure how far the arm moves toward where the contact was.
    Also measure the observer transient at position↔impedance mode switches:
    the monitor steps the observer once over the `set_actuator_modes` handshake,
    capped at `1/K` (40 ms), so look at `r` across each switch.

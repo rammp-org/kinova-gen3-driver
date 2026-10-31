@@ -39,7 +39,7 @@ void SimTransport::connect() {
   }
 }
 void SimTransport::set_servoing_low_level() { ++low_level_entries; }
-void SimTransport::set_actuator_modes(const ActuatorModes&) {}
+void SimTransport::set_actuator_modes(const ActuatorModes&, const JointCommand*) {}
 void SimTransport::safe_shutdown() { ++shutdowns; }
 void SimTransport::release_low_level() { ++releases; }
 bool SimTransport::arm_in_fault() {

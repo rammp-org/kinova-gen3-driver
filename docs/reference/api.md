@@ -408,14 +408,14 @@ class RtExecutor {
     `on_contact`. Otherwise that cycle's command is a freeze (the active mode's
     actuator modes, `position` = measured `q`, zero `velocity`, no `compute`) and
     the loop adopts `on_contact` at the next boundary through
-    `set_actuator_modes`. A cycle's command goes out on the next cycle's exchange,
-    which runs after that handshake, so the freeze is sent once, after the torque
-    switch. Through the switch the arm is held by the handshake's own pumps
-    (measured position, and on KORTEX the torque measured at the start of the
-    switch, the #92 window). That torque is read on the trip cycle, so it
-    includes the contact torque the position loop was resisting: each switched
-    joint keeps pushing toward the contact for the switch (~165 ms) and the freeze
-    cycle after it, and pushes the arm on if the contact goes away.
+    `set_actuator_modes`. Like every mode switch, that boundary computes
+    `on_contact`'s first command before the handshake and passes it as the hold,
+    and the exchange after the handshake sends it, so the freeze is never sent.
+    Through the switch (~165 ms on KORTEX, the #92 window) each pump sends the
+    measured position; each joint already switched to TORQUE holds float's first
+    command (gravity), and each one not yet switched, still in POSITION, ignores
+    the torque field. The torque measured on the trip cycle includes the contact
+    torque the position loop was resisting, so it is not used as the hold.
   - **Requests.** A `request_mode` made while latched, or racing the trip, is left
     pending, not dropped: the latest one is adopted at the first boundary after
     the clear (`ContactMonitor::request_clear`, consumed by the next `step`, or
@@ -513,7 +513,8 @@ class Transport {
  public:
   virtual void connect() = 0;
   virtual void set_servoing_low_level() = 0;
-  virtual void set_actuator_modes(const ActuatorModes&) = 0;
+  // hold: the incoming mode's first command; nullptr = hold the measured torque
+  virtual void set_actuator_modes(const ActuatorModes&, const JointCommand* hold = nullptr) = 0;
   virtual void exchange(const JointCommand&, JointFeedback&) = 0;  // blocking round-trip
   virtual void send(const JointCommand&) = 0;                      // non-blocking
   virtual void receive(JointFeedback&) = 0;
@@ -533,6 +534,28 @@ inline constexpr int kMaxConsecutiveTimeouts = 3;
 inline constexpr uint32_t kDefaultCyclicTimeoutMs = 20;
 ```
 
+- **`set_actuator_modes(modes, hold)`** switches the actuators one at a time.
+  `RtExecutor` calls it at every mode change with `hold` = the incoming mode's
+  first command, computed on the boundary's feedback before the switch; that
+  command is also the first one exchanged after it. `ArmLink`'s re-entry passes
+  no hold. On KORTEX the switch takes ~165 ms, and every keep-alive pump sends
+  measured positions plus, per actuator:
+  - **not yet switched:** the torque it was measured applying, read once before
+    the first switch. The actuator's torque loop tracks its own biased sensor,
+    so echoing the reading cancels the sensor offset; never add a torque offset
+    to it.
+  - **already switched:** `hold`'s torque, or without a hold the measured torque.
+    `hold` comes from the dynamics model, so for a joint entering TORQUE it does
+    not cancel the sensor offset (up to ~1.9 N·m on j3 before offset calibration,
+    #88).
+
+  Actuators in POSITION ignore the torque field. The order comes from
+  `actuator_switch_order(modes, hold_torque, outgoing_torque)`
+  (`actuator_switch_order.h`, header-only): into TORQUE/CURRENT the largest
+  `|hold torque|` switches last, so the loaded joints stay stiff in POSITION
+  longest; into POSITION/VELOCITY the largest `|outgoing torque|` (the measured
+  torque) switches first, so they stop holding open-loop soonest. Ties keep joint
+  order. Without a hold the measured torque stands in for the hold torque.
 - **`SimTransport(const JointFeedback& initial, int latency_us = 0)`**
   (`sim_transport.h`) — fake robot for tests/benchmarks. Echoes state, advances a
   frame counter, optionally busy-waits `latency_us` to mimic the round-trip. No

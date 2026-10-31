@@ -24,7 +24,7 @@ class KortexTransport : public Transport {
   ~KortexTransport() override;
   void connect() override;
   void set_servoing_low_level() override;
-  void set_actuator_modes(const ActuatorModes&) override;
+  void set_actuator_modes(const ActuatorModes&, const JointCommand* hold) override;
   void exchange(const JointCommand&, JointFeedback&) override;
   void send(const JointCommand&) override;
   void receive(JointFeedback&) override;
