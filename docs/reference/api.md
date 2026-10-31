@@ -105,7 +105,7 @@ Supervisor's pump uses it to fill `ArmState::ee_wrench` with one of two
 
 | `WrenchSource` | `τ_ext` | when |
 | --- | --- | --- |
-| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached, `ContactStatus::settled`, and the status was stored since the pump's last publish |
+| `kObserver = 1` | the observer residual `r` from `ContactMonitor::status()` | a monitor is attached, `ContactStatus::settled`, and the status was stored since the pump's previous iteration |
 | `kQuasiStatic = 0` | `g(q) − τ` (the normalized convention — see `JointFeedback::tau`) | otherwise: no monitor, the 5/K settle after each run start and clear (latched or not), the RT loop stopped (`status_version()` unchanged), or a torn status read |
 
 Both are external torque, positive as the environment applies it. The observer

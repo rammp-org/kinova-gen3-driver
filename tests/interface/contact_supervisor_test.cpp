@@ -506,7 +506,9 @@ TEST(ContactWrench, LatchedRestartPublishesQuasiStaticUntilSettled) {
 }
 
 // The RT loop stopped (ArmLink in kFaulted keeps feedback flowing, but nothing
-// steps the monitor): its last status is frozen, so the pump falls back.
+// steps the monitor): its last status is frozen, so the pump falls back. The
+// monitor's last step comes after the last publish, as when feedback stops
+// before the loop does: that status is no fresher at the next publish.
 TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
   ContactFix f;
   JointFeedback seen = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
@@ -517,6 +519,8 @@ TEST(ContactWrench, StalledMonitorPublishesQuasiStatic) {
   f.snap.store(seen);
   sleep_ms(80);
   const ArmState live = f.sup.on_query_state();
+  f.mon.step(seen, 0.001, false);  // the last step, with no feedback published after it
+  sleep_ms(80);
   JointFeedback later = test_fixtures::at_rest(f.q0, test_fixtures::gravity(f.sim_dyn, f.q0));
   f.snap.store(later);  // fresh feedback, no monitor step since
   sleep_ms(80);

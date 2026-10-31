@@ -144,7 +144,7 @@ once it is trusted, and falls back to the quasi-static estimate otherwise.
   the pump's Jacobian at `fb.q`, so the frame, model and λ above are unchanged.
 - **Fallback.** No monitor (`contact_detection: off`), not settled (5/K = 200 ms
   after each `RtExecutor::run` start and each contact clear), a status not
-  stored since the pump's last publish (`ContactMonitor::status_version()`
+  stored since the pump's previous iteration (`ContactMonitor::status_version()`
   unchanged: the RT loop is stopped, e.g. ArmLink in `kFaulted`, which still
   delivers feedback, so a frozen `r` would be published as live), or a torn
   status read: `ee_wrench_from_residual(J, g(q) − τ)`, exactly as before. Under a fault,
