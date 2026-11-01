@@ -254,6 +254,11 @@ inputs (e.g. a zero entry in `max_qd`, where the scale factor is undefined),
 but in the normal case it is a no-op — the uniform scale already brought every
 joint inside its cap.
 
+The global speed scale `s` (`set_speed_scale`, #114) multiplies the command
+**after** `limit()`, so the result never exceeds `s × max_qd` and keeps the
+direction `limit()` preserved. Scaling before `limit()` would let an over-cap
+command be clamped back to the full cap.
+
 ## See also
 
 - [Control Modes guide](../guide/control-modes.md) — conceptual overview.
