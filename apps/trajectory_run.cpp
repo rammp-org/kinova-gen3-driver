@@ -382,17 +382,22 @@ int main(int argc, char** argv) {
 
     const auto t0 = std::chrono::steady_clock::now();
     const auto period = std::chrono::duration<double>(1.0 / tick_hz);
-    JointVec q_meas = entry.q;  // last good measured q; the tap seeds it from the entry read
-    double last_applied = 1.0;  // so the slew ramp prints only when it moves
+    JointVec q_meas = entry.q;     // last good measured q; the tap seeds it from the entry read
+    double last_applied = 1.0;     // so the slew ramp prints only when it moves
+    double override_slewed = 1.0;  // the dial after slew_scale, as the Supervisor's sampler runs it
+    double last_now_s = 0.0;
     while (!g_stop.load(std::memory_order_acquire)) {
       const double now_s =
           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
       JointFeedback fb;
       if (snapshot.load(fb)) q_meas = fb.q;  // else keep last good q (no spurious abort)
-      // The operator's dial: 1.0 until scale_at_t, then scale_at_s. The executor
-      // slews toward it rather than stepping, so applied_scale() lags this.
+      // The operator's dial: 1.0 until scale_at_t, then scale_at_s. Slewed here,
+      // as the Supervisor's sampler does (the executor has no slew of its own),
+      // so applied_scale() lags this.
       const double override_scale = (scale_at_t >= 0.0 && now_s >= scale_at_t) ? scale_at_s : 1.0;
-      const interface::ExecStatus st = exec.tick(now_s, q_meas, override_scale);
+      override_slewed = interface::slew_scale(override_slewed, override_scale, now_s - last_now_s);
+      last_now_s = now_s;
+      const interface::ExecStatus st = exec.tick(now_s, q_meas, override_slewed);
       const double applied = exec.applied_scale();
       if (std::abs(applied - last_applied) > 1e-3) {
         std::printf("[traj]   t=%.2f s  override=%.3f  applied=%.3f (slewing)\n", now_s,

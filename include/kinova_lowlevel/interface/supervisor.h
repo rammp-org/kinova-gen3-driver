@@ -144,17 +144,17 @@ class Supervisor : public CommandSink,
   void on_gripper_setpoint(const GripperSetpoint&) override;
   GripperState on_query_gripper() override;
 
-  // Runtime speed override (called on the backend thread; read by the sampler).
-  // Refused, not clamped, outside [kMinSpeedScale, 1.0] -- see speed_override_
-  // below. `may_raise` decides DIRECTION (the Arbiter decides only
-  // AUTHORISATION -- see arbiter.cpp): false refuses a set that is not a
-  // lowering relative to the CURRENT speed_override_, decided atomically
-  // with the store itself so there is no stale-read window to race. Defaults
-  // to true so an already-trusted direct caller (a test, or a backend with no
-  // Arbiter in front of it) is unrestricted, exactly as before this
-  // parameter existed.
-  SpeedResult set_speed_override(double s, bool may_raise = true);
+  // Global speed scale (#114): one number that scales every arm motion --
+  // trajectories, joint velocity and twist streams (stiff and compliant), and
+  // joint position streams. Not joint torque streams, not the gripper. Anyone
+  // may raise or lower it (no token, e-stop or not). Refused, not clamped,
+  // outside [kMinSpeedScale, 1.0]. Any thread.
+  SpeedResult set_speed_override(double s);
+  // The TARGET the last accepted set asked for.
   double speed_override() const { return speed_override_.load(); }
+  // The value actually in force: speed_override() slewed at kScaleSlewPerSec by
+  // the sampler, which hands this one value to every consumer each tick.
+  double applied_speed_scale() const { return speed_applied_.load(); }
 
   // Test/diagnostic: is a streaming session currently admitting setpoints?
   bool stream_is_open() const { return stream_open_.load(); }
@@ -239,9 +239,15 @@ class Supervisor : public CommandSink,
   ControlModeKind traj_bound_kind_ = ControlModeKind::kPosition;
   std::atomic<bool> in_flight_{false};  // read by on_trajectory_goal
 
-  // Written by the backend thread, read by the sampler. Only ever slows the
-  // arm: values outside [kMinSpeedScale, 1.0] are refused, not clamped.
+  // The global speed scale's TARGET. Written by any caller of
+  // set_speed_override, read by the sampler. Only ever slows the arm: values
+  // outside [kMinSpeedScale, 1.0] are refused, not clamped.
   std::atomic<double> speed_override_{1.0};
+  // The slewed value in force. Sampler-written (slew_scale toward
+  // speed_override_ once per tick, then pushed into pos_, imp_, vel_ and used
+  // by the trajectory executor and the compliant-velocity step); atomic only
+  // so it can be read back from other threads.
+  std::atomic<double> speed_applied_{1.0};
   static_assert(std::atomic<double>::is_always_lock_free,
                 "speed_override_ is read from the sampler thread; must be lock-free");
 

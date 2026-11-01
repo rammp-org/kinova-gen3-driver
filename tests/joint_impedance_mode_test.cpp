@@ -761,3 +761,30 @@ TEST(JointImpedance, StalenessFreezeZeroesTheFeedforward) {
   // Frozen at measured q with zero measured velocity: pure gravity hold.
   for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.torque[i], g[i], 1e-9);
 }
+
+// #114: the global speed scale shrinks both the reference rate cap and the
+// velocity feedforward clamp to speed_scale * max_ref_speed.
+TEST(JointImpedance, SpeedScaleShrinksTheRateCapAndTheFeedforwardClamp) {
+  Dynamics dyn(URDF_PATH);
+  JointImpedanceParams p = static_params();
+  p.max_ref_speed.setConstant(0.5);
+  JointImpedanceMode m(dyn, p);
+  JointFeedback fb;
+  fb.q = sample_q();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_speed_scale(0.25);
+  JointTarget t;
+  t.q = JointVec(fb.q.array() + 1.0);  // far: the cap binds
+  t.qd = JointVec::Constant(1000.0);   // absurd rate: the clamp binds
+  t.has_velocity = true;
+  m.set_joint_target(t);
+  const JointVec before = m.reference();
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) {
+    double step = m.reference()[i] - before[i];
+    EXPECT_NEAR(std::abs(wrap_to_pi(step)), 0.25 * 0.5 * 0.001, 1e-12) << "joint " << i;
+    EXPECT_NEAR(m.last_ref_velocity()[i], 0.25 * 0.5, 1e-12) << "joint " << i;
+  }
+}

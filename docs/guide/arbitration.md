@@ -52,14 +52,10 @@ are never gated: reads are always open, in every state, including under an
 e-stop latch, because a read that requires ownership is a read nobody can use
 to work out why they were refused. `on_halt()` is never gated either — it is a
 bare pass-through in `Arbiter::on_halt` — because a safety stop must never
-wait on who holds the token. `on_set_speed_override()` is gated
-**asymmetrically**: *lowering* the effective override is ungated, even under
-an e-stop latch — it can only ever reduce speed, so it can never make the arm
-do something it was not already doing, and an operator reaching for the dial
-must never be refused because someone else holds the token — but *raising* it
-requires the live token, exactly like every other gated command (`admit()`
-checks the token and the e-stop latch together), because raising it can undo
-another operator's deliberate slow-down of a moving arm. Cancel *is* gated: a
+wait on who holds the token. `on_set_speed_override()` (the
+global speed scale, #114) is never gated either, in either direction, e-stop
+latch included: it is a setting anyone may raise or lower, like a speed knob
+on the UI settings page. (Before #114, raising it needed the token.) Cancel *is* gated: a
 stranger must not be able to stop your motion. The emergency path is e-stop,
 not cancel.
 

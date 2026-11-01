@@ -1685,34 +1685,11 @@ TEST(SupervisorSpeed, BelowFloorOverrideIsRefusedNotSpedUpToTheFloor) {
   EXPECT_DOUBLE_EQ(f.sup.speed_override(), 1.0) << "a refused set changes nothing";
 }
 
-// Re-review finding on top of fix wave finding 3: the Arbiter's on_query_state()
-// comparison could be up to one pump period (10 ms @ pump_hz=100) stale, which
-// let an unauthenticated raise race a real lower and land as a raise. Direction
-// is now decided HERE, in Supervisor::set_speed_override, as one
-// compare-and-store against speed_override_ itself -- no separate read of a
-// snapshot, so no window to race. These three tests describe that contract
-// directly, at the level where it is actually enforced.
-TEST(SupervisorSpeed, LoweringWithoutMayRaiseSucceeds) {
+// #114: the global speed scale has no direction gate -- anyone may raise it.
+TEST(SupervisorSpeed, RaisingIsAccepted) {
   SupFix f;
-  EXPECT_TRUE(f.sup.set_speed_override(0.5, /*may_raise=*/false).accepted);
-  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.5);
-}
-
-TEST(SupervisorSpeed, RaisingWithoutMayRaiseIsRefusedAndLeavesThePreviousValueIntact) {
-  SupFix f;
-  ASSERT_TRUE(
-      f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);  // establish a lower value
-  const SpeedResult r = f.sup.set_speed_override(0.6, /*may_raise=*/false);
-  EXPECT_FALSE(r.accepted);
-  EXPECT_FALSE(r.message.empty());
-  EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.3)
-      << "a refused raise must not touch the stored value";
-}
-
-TEST(SupervisorSpeed, RaisingWithMayRaiseSucceeds) {
-  SupFix f;
-  ASSERT_TRUE(f.sup.set_speed_override(0.3, /*may_raise=*/true).accepted);
-  EXPECT_TRUE(f.sup.set_speed_override(0.6, /*may_raise=*/true).accepted);
+  ASSERT_TRUE(f.sup.set_speed_override(0.3).accepted);
+  EXPECT_TRUE(f.sup.set_speed_override(0.6).accepted);
   EXPECT_DOUBLE_EQ(f.sup.speed_override(), 0.6);
 }
 
@@ -1809,7 +1786,7 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
   ASSERT_TRUE(f.sup.set_speed_override(0.25).accepted);         // slam it down mid-flight
 
   // 550 ms after ACCEPT: 150 ms past the goal's own unscaled 400 ms duration.
-  // If tick() never received speed_override_.load(), the goal would have
+  // If tick() never received the slewed override, the goal would have
   // finished on schedule regardless of the override.
   std::this_thread::sleep_for(std::chrono::milliseconds(450));
   EXPECT_EQ(f.be.result_count(), 0u)
@@ -1825,6 +1802,273 @@ TEST(SupervisorSpeed, DroppingTheOverrideMidFlightStretchesTheRemainingDuration)
   EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
   EXPECT_GT(elapsed_s, 0.6)
       << "not meaningfully stretched -- the override may not be reaching tick()";
+}
+
+// ---- #114 global speed scale: one slewed value, every arm-motion surface ----
+namespace {
+using Clock = std::chrono::steady_clock;
+double secs(Clock::time_point a, Clock::time_point b) {
+  return std::chrono::duration<double>(b - a).count();
+}
+}  // namespace
+
+// A set before start() (the deployment default) is in force from the first
+// tick, not ramped into, and reaches every consumer.
+TEST(SupervisorSpeed, AStartupScaleIsInForceFromTheFirstTick) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.4).accepted);
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_DOUBLE_EQ(f.sup.applied_speed_scale(), 0.4);
+  EXPECT_DOUBLE_EQ(f.pos.speed_scale(), 0.4);
+  EXPECT_DOUBLE_EQ(f.imp.speed_scale(), 0.4);
+  EXPECT_DOUBLE_EQ(f.vel.speed_scale(), 0.4);
+  f.sup.stop();
+  f.teardown();
+}
+
+// A live change ramps at kScaleSlewPerSec -- never faster -- and arrives within
+// one slew period, |change| / kScaleSlewPerSec, in both directions. Every mode
+// sees the same ramp.
+TEST(SupervisorSpeed, ALiveChangeRampsIntoEveryConsumerWithinOneSlewPeriod) {
+  SupFix f;
+  f.sup.start();
+  f.run_rt();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  for (const double target : {0.2, 1.0}) {
+    const double from = f.sup.applied_speed_scale();
+    const double period = std::abs(target - from) / kScaleSlewPerSec;  // 0.4 s
+    const auto t_set = Clock::now();
+    ASSERT_TRUE(f.sup.set_speed_override(target).accepted);
+    bool arrived = false;
+    double t_arrived = 0.0;
+    while (secs(t_set, Clock::now()) < period + 0.3) {
+      // Read BEFORE the stamp: a value can only be older than its stamp says.
+      const double vals[] = {f.sup.applied_speed_scale(), f.pos.speed_scale(), f.imp.speed_scale(),
+                             f.vel.speed_scale()};
+      const double t = secs(t_set, Clock::now());
+      for (double v : vals) {
+        // Never further from `from` than the slew allows by now. 10 ms of slack: the
+        // first tick after the set integrates a dt that began before it.
+        EXPECT_LE(std::abs(v - from), kScaleSlewPerSec * (t + 0.01))
+            << "stepped instead of ramping at t=" << t;
+      }
+      if (!arrived && vals[0] == target) {
+        arrived = true;
+        t_arrived = t;
+      }
+      std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
+    EXPECT_TRUE(arrived) << "never reached " << target;
+    EXPECT_GT(t_arrived, period * 0.9) << "arrived faster than the slew rate allows";
+    EXPECT_LT(t_arrived, period + 0.1) << "took longer than one slew period (+ jitter)";
+    EXPECT_DOUBLE_EQ(f.pos.speed_scale(), target);
+    EXPECT_DOUBLE_EQ(f.imp.speed_scale(), target);
+    EXPECT_DOUBLE_EQ(f.vel.speed_scale(), target);
+  }
+  f.sup.stop();
+  f.teardown();
+}
+
+// #114: the trajectory and the mode cap shrink together, so a goal at 0.5
+// takes 2x its planned duration, not 4x.
+TEST(SupervisorSpeed, AHalfScaleGoalTakesTwiceItsDurationNotFourTimes) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.5).accepted);
+  f.sup.start();
+  f.run_rt();
+  TrajectoryGoal g;
+  g.trajectory = ramp7(0.0, 0.18, 0.4);  // 0.45 rad/s: 90% of the 0.5 rad/s position cap
+  g.control_mode = ControlModeKind::kPosition;
+  g.preemption = Preemption::kLatestWins;
+  g.path_tolerance = JointVec::Constant(-1.0);  // SimTransport is a static echo
+  GoalId id{};
+  id[0] = 1;
+  ASSERT_EQ(f.sup.on_trajectory_goal(g), GoalResponse::kAccept);
+  const auto t0 = Clock::now();
+  f.sup.on_trajectory_accepted(id, g);
+  for (int i = 0; i < 300 && f.be.result_count() == 0u; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  const double elapsed_s = secs(t0, Clock::now());
+  f.sup.stop();
+  f.teardown();
+  ASSERT_EQ(f.be.result_count(), 1u) << "goal never completed";
+  EXPECT_EQ(f.be.last_result().error_code, result_code::kSuccessful);
+  EXPECT_GT(elapsed_s, 0.75);
+  EXPECT_LT(elapsed_s, 1.2) << "slowed twice: 4x would be 1.6 s";
+  EXPECT_NEAR(f.sim.last_command().position[0], 0.18, 1e-6) << "the reference reached the goal";
+}
+
+namespace {
+interface::StreamOpenRequest stream_req(interface::SetpointKind k, ControlModeKind m) {
+  interface::StreamOpenRequest r;
+  r.kind = k;
+  r.control_mode = m;
+  r.timeout_s = 1.0;
+  return r;
+}
+}  // namespace
+
+TEST(SupervisorSpeed, AStiffJointVelocityStreamSlowsByTheScale) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.5).accepted);
+  f.sup.start();
+  f.run_rt();
+  ASSERT_TRUE(f.sup
+                  .on_stream_open(stream_req(interface::SetpointKind::kJointVelocity,
+                                             ControlModeKind::kVelocity))
+                  .accepted);
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);  // well under every cap
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();  // freeze commanded() before close zeroes it
+  const JointVec cmd = f.vel.commanded();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(cmd[i], 0.025, 1e-12) << "joint " << i;
+}
+
+TEST(SupervisorSpeed, AStiffTwistStreamNeverExceedsScaleTimesTheCap) {
+  SupFix f(0.2);
+  ASSERT_TRUE(f.sup.set_speed_override(0.3).accepted);
+  f.sup.start();
+  f.run_rt();
+  ASSERT_TRUE(
+      f.sup
+          .on_stream_open(stream_req(interface::SetpointKind::kEeTwist, ControlModeKind::kVelocity))
+          .accepted);
+  interface::TwistSetpoint sp;
+  sp.twist = Vector6::Zero();
+  sp.twist[0] = 5.0;  // 5 m/s: over every joint's rating
+  for (int i = 0; i < 20; ++i) {
+    f.sup.on_setpoint_twist(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const JointVec cmd = f.vel.commanded();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  const JointVec cap = f.vel.params().max_qd;
+  double worst = 0.0;
+  for (int i = 0; i < kNumJoints; ++i) worst = std::max(worst, std::abs(cmd[i]) / cap[i]);
+  EXPECT_NEAR(worst, 0.3, 1e-9) << "the fastest joint sits at exactly scale * its cap";
+}
+
+TEST(SupervisorSpeed, ACompliantVelocityStreamIntegratesAtTheScaledRate) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.5).accepted);
+  f.sup.start();
+  f.run_rt();
+  const auto t0 = Clock::now();
+  ASSERT_TRUE(f.sup
+                  .on_stream_open(stream_req(interface::SetpointKind::kJointVelocity,
+                                             ControlModeKind::kImpedance))
+                  .accepted);
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.05);
+  for (int i = 0; i < 50; ++i) {
+    f.sup.on_setpoint_joint_velocity(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const double t_upper = secs(t0, Clock::now());
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  // 0.5 * 0.05 = 0.025 rad/s for at most t_upper. Unscaled would be twice that.
+  EXPECT_LE(ref[0], 0.5 * 0.05 * t_upper + 1e-4);
+  EXPECT_GT(ref[0], 0.5 * 0.05 * 0.3) << "the stream never moved the reference";
+}
+
+// No absolute rate to check a resolved twist against, so compare the same
+// stream at two scales: the reference must advance at the ratio of the scales.
+TEST(SupervisorSpeed, ACompliantTwistStreamSlowsByTheScale) {
+  auto rate = [](double scale) {
+    SupFix f(0.2);
+    EXPECT_TRUE(f.sup.set_speed_override(scale).accepted);
+    f.sup.start();
+    f.run_rt();
+    EXPECT_TRUE(f.sup
+                    .on_stream_open(
+                        stream_req(interface::SetpointKind::kEeTwist, ControlModeKind::kImpedance))
+                    .accepted);
+    interface::TwistSetpoint sp;
+    sp.twist = Vector6::Zero();
+    sp.twist[0] = 0.02;  // 2 cm/s: well under the caps and the leash for 0.4 s
+    const auto t0 = Clock::now();
+    for (int i = 0; i < 40; ++i) {
+      f.sup.on_setpoint_twist(sp);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    f.teardown();
+    const double t = secs(t0, Clock::now());
+    const double moved = (f.imp.reference() - f.init.q).cwiseAbs().maxCoeff();
+    f.sup.on_stream_close({});
+    f.sup.stop();
+    return moved / t;
+  };
+  const double full = rate(1.0), quarter = rate(0.25);
+  ASSERT_GT(full, 0.0);
+  EXPECT_NEAR(quarter / full, 0.25, 0.1);
+}
+
+TEST(SupervisorSpeed, AJointPositionStreamInPositionModeIsCappedAtTheScaledRate) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.2).accepted);
+  f.sup.start();
+  f.run_rt();
+  const auto t0 = Clock::now();
+  ASSERT_TRUE(f.sup
+                  .on_stream_open(stream_req(interface::SetpointKind::kJointPosition,
+                                             ControlModeKind::kPosition))
+                  .accepted);
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.3);  // far: the cap binds the whole time
+  for (int i = 0; i < 30; ++i) {
+    f.sup.on_setpoint_joint_position(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const double t_upper = secs(t0, Clock::now());
+  const double ref = f.sim.last_command().position[0];
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  const double cap = 0.2 * f.pos.params().max_ref_speed[0];  // 0.1 rad/s
+  EXPECT_LE(ref, cap * t_upper + 1e-4) << "faster than scale * max_ref_speed";
+  EXPECT_GT(ref, cap * 0.2) << "the stream never moved the reference";
+}
+
+TEST(SupervisorSpeed, AJointPositionStreamInImpedanceModeIsCappedAtTheScaledRate) {
+  SupFix f;
+  ASSERT_TRUE(f.sup.set_speed_override(0.2).accepted);
+  f.sup.start();
+  f.run_rt();
+  const auto t0 = Clock::now();
+  ASSERT_TRUE(f.sup
+                  .on_stream_open(stream_req(interface::SetpointKind::kJointPosition,
+                                             ControlModeKind::kImpedance))
+                  .accepted);
+  interface::JointSetpoint sp;
+  sp.values = JointVec::Constant(0.3);
+  for (int i = 0; i < 30; ++i) {
+    f.sup.on_setpoint_joint_position(sp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  f.teardown();
+  const double t_upper = secs(t0, Clock::now());
+  const JointVec ref = f.imp.reference();
+  f.sup.on_stream_close({});
+  f.sup.stop();
+  const JointVec max_ref = f.imp.params().max_ref_speed;
+  for (int i = 0; i < kNumJoints; ++i) {
+    const double cap = 0.2 * max_ref[i];
+    EXPECT_LE(std::abs(ref[i]), cap * t_upper + 1e-4) << "joint " << i;
+    EXPECT_GT(std::abs(ref[i]), cap * 0.1) << "joint " << i << " never moved";
+  }
 }
 
 // ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----

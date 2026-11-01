@@ -103,6 +103,14 @@ class JointVelocityMode : public ControlMode {
   // s >= 0 arms with s; s < 0 restores params().cmd_timeout_s.
   void set_command_timeout(double s) noexcept;
 
+  // Global speed scale (#114), in [0, 1]. The limited command (joint velocity or
+  // resolved twist) is multiplied by it, so it never exceeds speed_scale * max_qd. Set by the
+  // Supervisor's sampler every tick (any one non-RT thread), loaded once per compute(). An atomic,
+  // not a params field: params() is the deployment's configuration and stays
+  // unscaled; the scale changes at 1 kHz while it ramps.
+  void set_speed_scale(double s) noexcept { speed_scale_.store(s, std::memory_order_relaxed); }
+  double speed_scale() const noexcept { return speed_scale_.load(std::memory_order_relaxed); }
+
   // ACTIVE parameters, i.e. after URDF seeding and clamping -- not necessarily
   // what was passed in. Read this back when a speed request seems ignored.
   JointVelocityParams params() const noexcept;
@@ -141,6 +149,9 @@ class JointVelocityMode : public ControlMode {
   std::atomic<int> tw_active_{0};
 
   CommandWatchdog wd_;
+  // Global speed scale (#114). Lock-free for the same reason as the watchdog's
+  // timeout: compute() loads it on the RT thread.
+  std::atomic<double> speed_scale_{1.0};
   // RT-owned. Latched rather than recomputed per cycle so DISARMING the watchdog
   // cannot un-freeze and resurrect a target nobody is maintaining.
   bool frozen_ = false;

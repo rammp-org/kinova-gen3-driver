@@ -708,7 +708,13 @@ TEST(RtSafety, JointVelocityModeTwistNoMajorFaultsSteadyState) {
     std::thread measure_watch([&] {
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
       mode.set_twist_target(V);
-      std::this_thread::sleep_for(std::chrono::milliseconds(480));
+      // A live global speed scale (#114), as the Supervisor's sampler drives it:
+      // a ramp down and back, one store per millisecond.
+      for (int i = 0; i < 400; ++i) {
+        mode.set_speed_scale(1.0 - 0.8 * (i < 200 ? i : 400 - i) / 200.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(80));
       measure_stop.store(true);
     });
     ex.run(measure_stop);
@@ -934,12 +940,13 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
   ASSERT_TRUE(sup.on_stream_open(r).accepted);
 
   // ~200 Hz of setpoints, comfortably inside the 1 s deadline, for the whole
-  // warm-up + measured window. Zero is where the arm already is (SimTransport is a
-  // static echo), so this measures the WRITE traffic, not any motion.
+  // warm-up + measured window. 0.2 rad off where the arm is (SimTransport is a
+  // static echo), so the reference walks at the speed-scaled rate cap and the
+  // leash bounds it: the scale changes below are exercised, not idle.
   std::atomic<bool> stop_writer{false};
   std::thread writer([&] {
     JointSetpoint sp;
-    sp.values = JointVec::Zero();
+    sp.values = JointVec::Constant(0.2);
     while (!stop_writer.load(std::memory_order_acquire)) {
       sup.on_setpoint_joint_position(sp);
       std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -960,7 +967,14 @@ TEST(RtSafety, SupervisorStreamingInLoopNoMajorFaultsSteadyState) {
     ex.request_mode(&pos);  // the warm-up run consumed the previous request
     std::atomic<bool> measure_stop{false};
     std::thread measure_watch([&] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+      // Change the global speed scale (#114) while the stream runs: the sampler
+      // slews it and pushes it into the mode's atomic every tick, and compute()
+      // loads it every cycle. Each change is mid-slew for part of the window.
+      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+      sup.set_speed_override(0.2);
+      std::this_thread::sleep_for(std::chrono::milliseconds(700));
+      sup.set_speed_override(1.0);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1000));
       measure_stop.store(true);
     });
     ex.run(measure_stop);

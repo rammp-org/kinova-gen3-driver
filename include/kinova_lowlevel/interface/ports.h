@@ -24,14 +24,11 @@ class CommandSink {
   virtual void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) = 0;
   virtual CancelResponse on_trajectory_cancel(const CancelRequest&) = 0;
   virtual GainsResult on_set_gains(const GainsRequest&) = 0;
-  // Slow everything down at runtime, or (with authorization) undo a
-  // slow-down. Lowering the effective override is NOT token-gated: it can
-  // only reduce speed, so it can never make the arm do something it was not
-  // already doing. Raising it past the arm's current effective override IS
-  // gated -- see Arbiter::on_set_speed_override -- because that can undo
-  // another operator's deliberate slow-down. Non-pure so existing
-  // implementers keep compiling; the default refuses, which is honest for a
-  // sink that cannot honour it.
+  // The global speed scale (#114): slows every arm motion -- trajectories,
+  // velocity/twist and position streams -- by one factor in
+  // [kMinSpeedScale, 1.0]. Never token-gated, in either direction. Non-pure
+  // so existing implementers keep compiling; the default refuses, which is
+  // honest for a sink that cannot honour it.
   virtual SpeedResult on_set_speed_override(const SpeedOverrideRequest&) {
     return {false, "speed override not supported by this sink"};
   }

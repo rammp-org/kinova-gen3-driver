@@ -682,30 +682,51 @@ TEST(ExecutorSpeedScale, LatestWinsLatchesToTheNewGoalsScaleBothWays) {
   EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-9) << "must latch down, not ramp from 1.0";
 }
 
-TEST(ExecutorSpeedScale, AnOverrideChangeRampsRatherThanSteps) {
+// #114: the slew moved out of the executor into slew_scale, run once per tick
+// by the Supervisor's sampler so every consumer reads the same value. The
+// executor takes the override it is handed as-is: min(goal, override).
+TEST(ExecutorSpeedScale, UsesTheGivenOverrideWithNoSlewOfItsOwn) {
   RecordingSink sink;
   TrajectoryExecutor ex(sink);
   ex.submit(ramp(10.0), ControlModeKind::kPosition, Preemption::kLatestWins,
-            kinova::JointVec::Constant(-1.0), 1.0);
+            kinova::JointVec::Constant(-1.0), 0.5);
   ex.tick(0.0, vec7(0.0), 1.0);
-  EXPECT_NEAR(ex.applied_scale(), 1.0, 1e-9);
-
-  // Slam the override to 0.1 and step 10 ms. A step would move the reference
-  // discontinuously; the slew limit must keep the change bounded. Pinned to
-  // the actual constant (kScaleSlewPerSec = 2.0 -> max_step = 2.0 * 0.01 =
-  // 0.02, so applied_ = 1.0 - 0.02 = 0.98) rather than a loose (0.1, 1.0)
-  // bound: that bound also passes a constant ten times too large -- a
-  // full-range change in 50 ms, exactly the step this feature exists to
-  // prevent.
+  EXPECT_NEAR(ex.applied_scale(), 0.5, 1e-12) << "the goal's own scale is the ceiling";
   ex.tick(0.01, vec7(0.0), 0.1);
-  EXPECT_NEAR(ex.applied_scale(), 0.98, 1e-9);
-
-  for (double t = 0.02; t < 3.0; t += 0.01) ex.tick(t, vec7(0.0), 0.1);
-  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-6) << "and must get there";
+  EXPECT_NEAR(ex.applied_scale(), 0.1, 1e-12) << "no ramp inside the executor";
+  ex.tick(0.02, vec7(0.0), 0.8);
+  EXPECT_NEAR(ex.applied_scale(), 0.5, 1e-12);
+  // Trajectory time advanced by dt * min(goal, override) each tick:
+  // 0.01*0.1 + 0.01*0.5 = 0.006 s of a 10 s ramp.
+  ExecStatus st = ex.tick(0.02, vec7(0.0), 0.8);  // dt = 0: no advance
+  EXPECT_NEAR(st.fraction, 0.006 / 10.0, 1e-12);
 }
 
-// Fix wave, finding 8: a negative dt_wall correctly freezes applied_ (via
-// max_step = 0), but traj_t is an ACCUMULATOR now -- unlike the old
+TEST(SlewScale, StepsAtExactlyTheSlewRate) {
+  using kinova::interface::kScaleSlewPerSec;
+  using kinova::interface::slew_scale;
+  // kScaleSlewPerSec = 2.0: 10 ms moves 0.02. Pinned to the constant, not a
+  // loose bound, so a rate ten times too fast fails here.
+  EXPECT_NEAR(slew_scale(1.0, 0.1, 0.01), 1.0 - kScaleSlewPerSec * 0.01, 1e-12);
+  EXPECT_NEAR(slew_scale(0.1, 1.0, 0.01), 0.1 + kScaleSlewPerSec * 0.01, 1e-12);
+  EXPECT_NEAR(slew_scale(0.5, 0.505, 0.01), 0.505, 1e-12) << "lands on the target, no overshoot";
+  double s = 1.0;
+  int ticks = 0;
+  while (s != 0.2 && ticks < 10000) {
+    s = slew_scale(s, 0.2, 0.001);
+    ++ticks;
+  }
+  EXPECT_NEAR(ticks, 400, 1) << "1.0 -> 0.2 at 2.0/s takes 0.4 s of 1 ms ticks (+1 for rounding)";
+}
+
+TEST(SlewScale, HoldsOnAZeroOrNegativeDt) {
+  using kinova::interface::slew_scale;
+  EXPECT_DOUBLE_EQ(slew_scale(0.7, 0.1, 0.0), 0.7);
+  EXPECT_DOUBLE_EQ(slew_scale(0.7, 0.1, -0.5), 0.7);
+  EXPECT_DOUBLE_EQ(slew_scale(0.7, 1.0, -0.5), 0.7);
+}
+
+// Fix wave, finding 8: traj_t is an ACCUMULATOR -- unlike the old
 // `now_s - start_time` form, an un-guarded `traj_t += dt_wall * applied_`
 // would walk it backwards permanently rather than self-correcting on the
 // next forward tick. Unreachable today (secs_since uses steady_clock), but

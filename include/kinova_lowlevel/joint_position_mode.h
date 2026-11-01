@@ -114,6 +114,14 @@ class JointPositionMode : public ControlMode, public JointTargetSink, public Pos
   // mode's own configured default (params().cmd_timeout_s).
   void set_command_timeout(double s) noexcept;
 
+  // Global speed scale (#114), in [0, 1]. The reference rate cap is
+  // speed_scale * max_ref_speed, for trajectories and streams alike. Set by the Supervisor's
+  // sampler every tick (any one non-RT thread), loaded once per compute(). An atomic, not a params
+  // field: params() is the deployment's configuration and stays unscaled; the scale changes at 1
+  // kHz while it ramps.
+  void set_speed_scale(double s) noexcept { speed_scale_.store(s, std::memory_order_relaxed); }
+  double speed_scale() const noexcept { return speed_scale_.load(std::memory_order_relaxed); }
+
   // Returns the ACTIVE parameters, i.e. after URDF seeding and clamping — not
   // necessarily what was passed in. Worth reading back when a speed request
   // seems to have been ignored: it was probably clamped to the hardware limit.
@@ -158,6 +166,9 @@ class JointPositionMode : public ControlMode, public JointTargetSink, public Pos
   // Staleness detection for the streamed target. The RESPONSE -- freezing the
   // reference at measured q -- is this mode's contract and lives in compute().
   CommandWatchdog wd_;
+  // Global speed scale (#114). Lock-free for the same reason as the watchdog's
+  // timeout: compute() loads it on the RT thread.
+  std::atomic<double> speed_scale_{1.0};
 
   JointVec q_ref_ = JointVec::Zero();  // integrated reference configuration
 

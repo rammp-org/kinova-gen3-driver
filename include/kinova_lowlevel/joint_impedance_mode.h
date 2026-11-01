@@ -86,6 +86,14 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   // mode's own configured default (params().cmd_timeout_s).
   void set_command_timeout(double s) noexcept;
 
+  // Global speed scale (#114), in [0, 1]. The reference rate cap AND the velocity
+  // feedforward clamp become speed_scale * max_ref_speed. Set by the Supervisor's sampler
+  // every tick (any one non-RT thread), loaded once per compute(). An atomic,
+  // not a params field: set_gains replaces the whole parameter set at every
+  // impedance goal and stream open, and its double buffer is single-writer.
+  void set_speed_scale(double s) noexcept { speed_scale_.store(s, std::memory_order_relaxed); }
+  double speed_scale() const noexcept { return speed_scale_.load(std::memory_order_relaxed); }
+
   // RT-thread-owned state, for tests and post-stop inspection. NOT synchronized:
   // do not call these from another thread while the RT loop is running.
   JointVec reference() const noexcept { return q_d_; }
@@ -141,6 +149,9 @@ class JointImpedanceMode : public ControlMode, public PoseTargetSink, public Joi
   // RESPONSE -- freezing the reference at measured q -- is this mode's contract
   // and lives in compute().
   CommandWatchdog wd_;
+  // Global speed scale (#114). Lock-free for the same reason as the watchdog's
+  // timeout: compute() loads it on the RT thread.
+  std::atomic<double> speed_scale_{1.0};
 
   // RT-owned. True once the watchdog has reported staleness, cleared only by a
   // fresh command (or on_enter). Latched rather than recomputed per cycle so that

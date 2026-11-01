@@ -236,3 +236,62 @@ TEST(SimHardwareParity, SimTransportReportsWrappedAngles) {
   EXPECT_LE(fb.q[2], kPi);
   EXPECT_GT(fb.q[2], -kPi);
 }
+
+// #114: ONE slewed speed scale drives both the executor's clock and the mode's
+// rate cap, as the Supervisor's sampler wires them. At scale s the reference
+// moves at s x planned speed against a cap of s x max_ref_speed, so the
+// headroom is the full-speed headroom. The plan here runs at 90% of the cap,
+// with a tight path tolerance: a cap that shrank by s twice (s^2), or one that
+// stepped to a new value while the executor was still ramping, would bite
+// first and trip PATH_TOLERANCE_VIOLATED.
+namespace {
+struct ScaledRun {
+  ExecStatus st{};
+  double t_done = -1.0;
+};
+template <class Dial>
+ScaledRun run_scaled(Dial dial) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionMode mode(dyn);  // default params: 0.5 rad/s cap, 0.35 leash
+  TrajectoryExecutor exec(mode);
+  const JointVec q0 = vecn({0.1, 0.3, -0.2, 0.8, 0.5, -0.4, 0.2});
+  const JointVec q1 = q0 + JointVec::Constant(0.36);  // 0.36 rad in 0.8 s = 0.45 rad/s
+  JointFeedback fb;
+  fb.q = q0;
+  fb.qd.setZero();
+  mode.on_enter(fb);
+  EXPECT_EQ(exec.submit(line(q0, q1, 0.8), ControlModeKind::kPosition, Preemption::kLatestWins,
+                        JointVec::Constant(0.01)),
+            kinova::interface::SubmitResult::kAccepted);
+  ScaledRun r;
+  double speed = dial(0.0);  // the sampler starts AT the target
+  JointCommand cmd;
+  for (int step = 0; step < 10000; ++step) {
+    const double t = step * kDt;
+    speed = kinova::interface::slew_scale(speed, dial(t), kDt);
+    mode.set_speed_scale(speed);
+    r.st = exec.tick(t, fb.q, speed);
+    mode.compute(fb, kDt, cmd);
+    fb.q = cmd.position;  // ideal position servo
+    if (r.st.completed) {
+      r.t_done = t;
+      break;
+    }
+  }
+  return r;
+}
+}  // namespace
+
+TEST(ExecutionIntegration, HalfScaleTakesTwiceThePlannedDurationNotFourTimes) {
+  const ScaledRun r = run_scaled([](double) { return 0.5; });
+  ASSERT_TRUE(r.st.completed);
+  EXPECT_EQ(r.st.error_code, ExecStatus::kOk) << "the scaled cap bit before the scaled plan";
+  EXPECT_NEAR(r.t_done, 1.6, 2 * kDt) << "0.8 s planned at scale 0.5";
+}
+
+TEST(ExecutionIntegration, ChangingTheScaleMidGoalDoesNotTripThePathTolerance) {
+  const ScaledRun r = run_scaled([](double t) { return (t >= 0.2 && t < 1.0) ? 0.3 : 1.0; });
+  ASSERT_TRUE(r.st.completed);
+  EXPECT_EQ(r.st.error_code, ExecStatus::kOk)
+      << "the mode's cap and the executor's clock disagreed mid-ramp";
+}
