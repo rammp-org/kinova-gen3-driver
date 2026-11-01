@@ -14,6 +14,21 @@ that heading to the new version and bumps `package.xml`.
 
 ### Added
 
+- **Global speed scale (#114).** The runtime speed override now scales every
+  arm motion, not just trajectories: joint velocity and EE twist streams
+  (stiff and compliant) and joint position streams follow it too. Pose
+  streams: the joint-rate cap follows the scale; end-effector speed is not
+  defined. Joint torque streams and the gripper are unaffected. The
+  Supervisor's sampler slews it once per tick with the new free
+  `slew_scale(cur, target, dt)` (next to `kScaleSlewPerSec`) and hands the one
+  value to every consumer, read back with `Supervisor::applied_speed_scale()`.
+  `JointPositionMode`, `JointImpedanceMode` and `JointVelocityMode` take it
+  through the new `set_speed_scale(double)` (an atomic, RT-safe):
+  position and impedance cap their reference rate at `scale × max_ref_speed`
+  (impedance clamps its velocity feedforward to the same); velocity
+  multiplies its capped command. A value set before `start()` is in force
+  from the first tick.
+
 - **`contact_replay`**, an offline tool that replays a recorded joint-state CSV
   through the `ContactMonitor` (observe mode) to tune contact thresholds between
   arm sessions, and `tools/contact/parity.py`, which checks its residual against
@@ -116,6 +131,16 @@ that heading to the new version and bumps `package.xml`.
   before. An all-zero token is refused without disturbing the current owner.
 
 ### Changed
+
+- **Anyone may raise the speed override (#114).** The token gate on raising
+  it is gone, e-stop latch included: `Arbiter::on_set_speed_override` forwards
+  unconditionally. Out-of-range and non-finite values are still refused.
+  **Breaking:** `SpeedOverrideRequest::may_raise` is removed and
+  `Supervisor::set_speed_override` takes only the scale.
+- **`TrajectoryExecutor::tick` no longer slews the override (#114).** It runs
+  at `min(goal scale, override_scale)` and expects the caller to pass an
+  already-slewed value (`slew_scale`); the Supervisor and `trajectory_run` do.
+  A direct caller that passed a raw, stepping override now gets the step.
 
 - **Breaking (`Transport`):** `set_actuator_modes(const ActuatorModes&, const
   JointCommand* hold)` takes the command to hold through the switch, or

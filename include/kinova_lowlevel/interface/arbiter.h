@@ -44,9 +44,7 @@ class Arbiter : public CommandSink, public StreamSink, public GripperSink, publi
   void on_trajectory_accepted(const GoalId&, const TrajectoryGoal&) override;
   CancelResponse on_trajectory_cancel(const CancelRequest&) override;
   GainsResult on_set_gains(const GainsRequest&) override;
-  // Decides AUTHORISATION only (sets SpeedOverrideRequest::may_raise from
-  // admit()) and forwards unconditionally; the Supervisor decides DIRECTION
-  // against its own atomic -- see arbiter.cpp.
+  // Never gated -- anyone may raise or lower the global speed scale (#114).
   SpeedResult on_set_speed_override(const SpeedOverrideRequest&) override;
   ArmState on_query_state() override;  // never gated -- reads are always open
   // Gated: retuning the detector is a command like any other.

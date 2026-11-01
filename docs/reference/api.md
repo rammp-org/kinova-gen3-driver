@@ -781,39 +781,34 @@ is refused at `on_trajectory_goal`. A goal delivered straight to
 
 ### `CommandSink::on_set_speed_override(const SpeedOverrideRequest&)` / `Supervisor::set_speed_override(double)`
 
-A runtime override an operator can use to slow every in-flight goal down,
-independent of what the goal itself requested. `SpeedOverrideRequest{scale,
+The **global speed scale** (#114): one number in `[kMinSpeedScale, 1.0]` that
+slows every arm motion the driver commands. `SpeedOverrideRequest{scale,
 sender_id, token}` mirrors `GainsRequest`'s shape. Returns
 `SpeedResult{accepted, message}`; a scale outside `[kMinSpeedScale, 1.0]`
-(including non-finite) is refused and leaves the current override unchanged,
-for the same floor reason as `speed_scale` above. The effective scale applied
-by the executor is `min(goal.speed_scale, override)`, clamped to
-`[kMinSpeedScale, 1.0]` and slew-limited at `kScaleSlewPerSec` — see the
-[speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale).
+(including non-finite) is refused and leaves the current value unchanged, for
+the same floor reason as `speed_scale` above. **Anyone may raise or lower it**:
+it is not token-gated in either direction, e-stopped or not (v1.2.0 required
+the token to raise it; that gate is gone). `Supervisor::speed_override()` reads
+back the last accepted value, and `ArmState::speed_override` reports it.
 
-`on_set_speed_override` is gated **asymmetrically**, unlike every other
-`CommandSink` method, and the two decisions live in two different places.
-`Arbiter::on_set_speed_override` decides **authorisation only**: it sets
-`SpeedOverrideRequest::may_raise = admit(token)` (which already checks both
-the live token and the e-stop latch) and forwards the request
-**unconditionally** — it never refuses the call itself. `may_raise` is
-always overwritten on the way in; a client setting it has no effect.
-`Supervisor::set_speed_override` decides **direction**: it refuses a request
-where `may_raise` is false and `scale` is not strictly less than the
-*current* `speed_override_`, comparing and storing as **one atomic
-compare-and-store** against that value — not a separate load, compare, and
-store, which would leave a window for a concurrent write to land in and make
-the comparison stale. (An earlier version of this feature decided direction
-in the `Arbiter`, against a copy of `ArmState::speed_override` — a snapshot
-the pump loop refreshes only at `pump_hz`, up to one pump period stale. That
-let an unauthenticated caller's request race a real lower and land as a
-raise; deciding direction where the value is authoritative, atomically with
-the store, closes the window.) *Lowering* is unaffected by `may_raise`: it
-can only ever slow the arm down further, so it can never make the arm do
-something it was not already doing, and gating it would let one client's
-ownership block another operator's hand on the speed dial. *Raising* without
-`may_raise` is refused: it can undo another operator's deliberate slow-down
-of a moving arm, so an unauthenticated caller must not be able to do it.
+The Supervisor's sampler slews the value toward the last accepted set at
+`kScaleSlewPerSec` (2.0/s, `slew_scale()`) once per tick, and every consumer
+reads that one slewed value (`Supervisor::applied_speed_scale()`):
+
+| Surface | What the scale does |
+|---|---|
+| Trajectories and planned moves | The executor runs at `min(goal.speed_scale, scale)`; see the [speed scale deep-dive](../deep-dive/trajectory-interpolation.md#speed-scale) |
+| Joint velocity and EE twist streams, stiff (`kVelocity`) | `JointVelocityMode` multiplies the capped command by it, so it never exceeds `scale × max_qd` |
+| Joint velocity and EE twist streams, compliant (`kImpedance`) | The sampler multiplies the capped `qd` by it before integrating the reference |
+| Joint position streams (position or impedance mode) | The mode's reference rate cap becomes `scale × max_ref_speed` (in impedance, the feedforward clamp too) |
+| Pose streams | The joint-rate cap follows the scale; end-effector speed is not defined |
+| Joint torque streams, gripper | **Unaffected** |
+
+The modes take it through `set_speed_scale(double)`, an atomic the sampler
+stores every tick and `compute()` loads once per cycle: not through
+`set_params`/`set_gains`, whose buffers are single-writer and replaced whole at
+every impedance goal and stream open. A value set before `Supervisor::start()`
+(a deployment default) is in force from the first tick rather than ramped into.
 
 ### `CommandSink::on_halt(HaltReason)`
 
@@ -913,15 +908,12 @@ the monitor's `ContactStatus` (on a torn read, the last whole one).
 
 ### Gating
 
-Every `CommandSink` method is gated except two outright, plus one that is
-gated in only one of its two directions: `on_query_state()` (reads are always
-open), `on_halt()` (a bare forward to the downstream `Supervisor` —
+Every `CommandSink` method is gated except three: `on_query_state()` (reads
+are always open), `on_halt()` (a bare forward to the downstream `Supervisor` —
 `Arbiter::on_halt` takes no lock and never calls `admit()`), and
-`on_set_speed_override()`, which is ungated when *lowering* the effective
-override and gated (token + e-stop latch, via `admit()`) when *raising* it —
-see above. Halting is a safety action, one step stronger than the
-lowering-a-speed-override reasoning: gating it would mean the arm could not be
-stopped by whoever does not currently hold the token. `on_trajectory_accepted()`
+`on_set_speed_override()` (the global speed scale is a setting anyone may
+raise or lower — see above). Halting is a safety action: gating it would mean
+the arm could not be stopped by whoever does not currently hold the token. `on_trajectory_accepted()`
 re-checks the token on the goal rather than trusting that a matching
 `on_trajectory_goal()` preceded it. `CancelRequest` exists so that cancel
 carries a token too. `on_set_contact_thresholds()` is gated like `on_set_gains()`

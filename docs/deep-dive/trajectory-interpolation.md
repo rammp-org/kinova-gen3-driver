@@ -233,7 +233,15 @@ changes the runtime override mid-flight at `t = T`, printing the applied scale
 as it ramps. The second is the one that shows the slew limiter below, since a
 goal-level scale is in force from the first tick and so never ramps.
 
-A change in the effective scale **mid-goal** is slew-limited at
+The runtime override is the **global speed scale** (#114), and it is slewed
+**once, outside the executor**: the Supervisor's sampler runs
+`slew_scale(cur, target, dt)` (next to `kScaleSlewPerSec`) every tick and hands
+the one slewed value to the executor's `tick()`, to the compliant-velocity
+step, and into the modes' `set_speed_scale()`. The executor has no slew of its
+own; it applies `min(goal_scale, slewed)`. `trajectory_run` drives an executor
+directly, so it runs the same `slew_scale` step on its `--scale-at` dial.
+
+A change in the override **mid-goal** is therefore slew-limited at
 `kScaleSlewPerSec` (2.0/s) rather than applied instantly, so the *commanded
 velocity* never steps the way a bare change of clock rate would. That
 guarantee is scoped to mid-goal changes: at a goal **boundary** — a fresh
@@ -256,6 +264,18 @@ manufactured gap is exactly what trips `PATH_TOLERANCE_VIOLATED`. Slowing a
 goal down is a `speed_scale`/override problem, not a `max_ref_speed` one:
 dilate the clock feeding `sample()`, don't throttle the mode consuming its
 output.
+
+The global speed scale does shrink the modes' cap too — to
+`scale × max_ref_speed`, so a position or impedance *stream* slows with
+everything else — and that is safe for trajectories only because the cap and
+the clock read the **same slewed value**. At scale `s` the trajectory moves at
+`s ×` its planned speed against a cap of `s × max_ref_speed`: both shrink by
+the same factor at the same instant, so the headroom is exactly the
+full-speed headroom, and a goal at 0.5 takes twice its planned duration, not
+four times. A separate, unslewed cap would drop the moment the override was
+set while the executor was still ramping down, and produce exactly the
+manufactured gap described above (`ExecutionIntegration.ChangingTheScale…`
+pins this).
 
 ## Where the profile comes from
 

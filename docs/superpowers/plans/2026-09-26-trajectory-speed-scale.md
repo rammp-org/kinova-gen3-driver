@@ -1,5 +1,7 @@
 # Trajectory Speed Scale — Implementation Plan
 
+> **Superseded in part by #114 (global speed scale).** The override no longer needs the token to raise (`may_raise` is gone), and its slew moved out of `TrajectoryExecutor` into the Supervisor's sampler (`slew_scale`), which also drives the stream surfaces. See `docs/reference/api.md` and `docs/deep-dive/trajectory-interpolation.md#speed-scale`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A trajectory goal can ask to be executed slower, and an operator can slow everything down at runtime, by dilating the executor's clock rather than by rewriting waypoints or throttling the follower.

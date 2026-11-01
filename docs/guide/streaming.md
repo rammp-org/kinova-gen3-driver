@@ -64,6 +64,27 @@ is the single source of truth for exactly which combinations those are.
 
 `timeout_s <= 0` is also refused at open, independent of the pair — see below.
 
+## The global speed scale
+
+One setting, `Supervisor::set_speed_override` (ROS: the `global_speed_scale`
+parameter), scales every arm motion the driver commands — trajectories and
+these streams alike — by one factor in `[0.01, 1.0]`. Anyone may change it; no
+token is needed. A change ramps in at 2.0/s rather than stepping, whether a
+session is open or not. How each pair follows it:
+
+| Setpoint kind × control mode | Effect of scale `s` |
+|---|---|
+| joint velocity / EE twist × velocity | The commanded (capped) joint velocity is multiplied by `s`: never above `s × max_qd` |
+| joint velocity / EE twist × impedance | The capped joint velocity is multiplied by `s` before it integrates into the reference |
+| joint position × position or impedance | The reference rate cap becomes `s × max_ref_speed` |
+| EE pose × position or impedance | The joint-rate cap follows the scale; end-effector speed is not defined |
+| joint torque × torque | **Unaffected** |
+
+The gripper is unaffected too. A velocity stream at `s = 0.5` moves at half
+the commanded rate; a position stream at `s = 0.5` reaches a far target at
+half the capped rate, while a target already inside the cap's reach in one
+cycle is tracked as before.
+
 ## `JointVelocityMode` specifics
 
 Streaming into velocity mode inherits two things worth knowing before you rely

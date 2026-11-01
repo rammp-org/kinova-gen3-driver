@@ -36,6 +36,16 @@ holds for every mode, including the ones that do not command position — the fi
 is never left holding a previous mode's setpoint, and it is never written as zero
 (zero is not "unset", it is "all joints at 0 rad").
 
+Three modes also take the **global speed scale** (#114) through
+`set_speed_scale(double)`, an atomic the Supervisor's sampler stores every
+tick and `compute()` loads once per cycle: `JointPositionMode` and
+`JointImpedanceMode` cap their reference rate at `scale × max_ref_speed`
+(impedance clamps its velocity feedforward to the same), and
+`JointVelocityMode` multiplies its capped command by it. `params()` still
+reports the configured, unscaled caps. The torque, float and Cartesian
+impedance modes ignore it: joint torque streams are not speed-scaled. See
+[Streaming](streaming.md#the-global-speed-scale).
+
 Three modes implement `PoseTargetSink` (a single `set_target(Pose)` method) —
 both impedance modes and `JointPositionMode` — so anything that drives the arm
 from a stream of Cartesian targets — the teleop server, for one — works against

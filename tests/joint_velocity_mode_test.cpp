@@ -558,3 +558,46 @@ TEST(VelocityReference, TwistDlsDefaultsMatchJointVelocityParams) {
   EXPECT_DOUBLE_EQ(d.posture_gain, p.posture_gain);
   EXPECT_TRUE(d.q_rest.isApprox(p.q_rest));
 }
+
+// #114: the global speed scale multiplies the LIMITED command. An in-range
+// command slows by exactly the scale; an over-cap one never exceeds
+// scale * max_qd and keeps its direction.
+TEST(JointVelocityMode, SpeedScaleMultipliesTheLimitedCommand) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityParams p;
+  p.max_qd = JointVec::Constant(0.1);
+  JointVelocityMode m(dyn, p);
+  m.on_enter(fb_at(JointVec::Zero()));
+  m.set_speed_scale(0.5);
+  JointVec qd = JointVec::Zero();
+  qd[0] = 0.04;  // in range
+  m.set_velocity_target(qd);
+  JointCommand out;
+  m.compute(fb_at(JointVec::Zero()), 0.001, out);
+  EXPECT_NEAR(m.commanded()[0], 0.02, 1e-12);
+
+  qd[0] = 1.0;
+  qd[1] = 0.5;  // over the cap, 2:1
+  m.set_velocity_target(qd);
+  m.compute(fb_at(JointVec::Zero()), 0.001, out);
+  const JointVec cmd = m.commanded();
+  EXPECT_NEAR(cmd[0], 0.05, 1e-12) << "scale * cap";
+  EXPECT_NEAR(cmd[1], 0.025, 1e-12) << "direction preserved";
+}
+
+TEST(JointVelocityModeTwist, SpeedScaleBoundsTheResolvedTwist) {
+  Dynamics dyn(URDF_PATH);
+  JointVelocityMode m(dyn);  // max_qd = URDF ratings
+  const JointVec q = nominal_q();
+  m.on_enter(fb_at(q));
+  m.set_speed_scale(0.3);
+  Vector6 V = Vector6::Zero();
+  V[0] = 5.0;  // 5 m/s: far over every joint's rating
+  m.set_twist_target(V);
+  JointCommand out;
+  m.compute(fb_at(q), 0.001, out);
+  const JointVec cap = m.params().max_qd;
+  double worst = 0.0;
+  for (int i = 0; i < kNumJoints; ++i) worst = std::max(worst, std::abs(m.commanded()[i]) / cap[i]);
+  EXPECT_NEAR(worst, 0.3, 1e-9) << "the fastest joint sits at exactly scale * its cap";
+}

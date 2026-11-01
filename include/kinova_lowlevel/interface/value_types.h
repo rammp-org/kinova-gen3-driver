@@ -182,11 +182,9 @@ struct ArmState {
   Vector6 ee_wrench = Vector6::Zero();
   bool fault = false;
   double stamp_s = 0.0;
-  // The runtime speed override currently in force. Populated by the
-  // Supervisor's pump loop from the same atomic the sampler reads (NOT the
-  // authoritative value itself -- see SpeedOverrideRequest::may_raise for why
-  // gating no longer reads this). An operator-visible answer to "did my
-  // slow-down get undone?".
+  // The global speed scale last set (its target; the sampler slews toward
+  // it). Populated by the Supervisor's pump loop. An operator-visible answer
+  // to "did my slow-down get undone?".
   double speed_override = 1.0;
 };
 struct GainsRequest {
@@ -197,22 +195,12 @@ struct GainsResult {
   bool accepted = false;
   std::string message;
 };
-// Mirrors GainsRequest's shape: a value carried alongside the capability
-// token that authorizes it, so the Arbiter can gate on the token without
-// widening CommandSink's on_set_speed_override signature into two arguments.
+// The global speed scale (#114). Not token-gated: anyone may raise or lower
+// it. token/sender_id are kept on the wire for callers that already send them.
 struct SpeedOverrideRequest {
   double scale = 1.0;
   std::string sender_id;
   Token token{};
-  // Set by the arbitration layer (Arbiter::on_set_speed_override) from
-  // admit(token) -- which already covers the e-stop latch -- and ALWAYS
-  // OVERWRITTEN before the request is forwarded downstream; a caller setting
-  // this field itself has no effect. True means "this caller is authorised
-  // to raise the effective override, not just lower it." The Arbiter decides
-  // AUTHORISATION only; the Supervisor decides DIRECTION, atomically against
-  // its own speed_override_, because it is the only place that value is
-  // authoritative -- see Supervisor::set_speed_override.
-  bool may_raise = false;
 };
 struct SpeedResult {
   bool accepted = false;

@@ -176,6 +176,10 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
                                        // and nothing downstream may treat it as a posture
   auto last_tick = clock::now();       // for the compliant-velocity integration dt
   bool was_latched = false;            // the contact latch as of the last iteration
+  // The global speed scale in force (#114). Starts AT the target, so a
+  // deployment default set before start() is in force from the first tick
+  // rather than ramped into.
+  double speed = speed_override_.load();
   while (running_.load(std::memory_order_acquire)) {
     // Measured wall dt, one per iteration. The loop paces with sleep_for, so the
     // real period jitters above 1/sampler_hz under load; integrating with the
@@ -185,6 +189,16 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
     const auto tick_now = clock::now();
     const double tick_dt = std::chrono::duration<double>(tick_now - last_tick).count();
     last_tick = tick_now;
+    // ONE slewed speed scale per tick, read by every consumer: the executor
+    // below, the compliant-velocity step, and (through these atomics) the
+    // modes' caps at 1 kHz. Pushed every tick, not only while a stream is open,
+    // so there is no state to reset on close, halt or link drop -- and the
+    // trajectory and its cap shrink together, never one before the other.
+    speed = slew_scale(speed, speed_override_.load(), tick_dt);
+    speed_applied_.store(speed);
+    pos_.set_speed_scale(speed);
+    imp_.set_speed_scale(speed);
+    vel_.set_speed_scale(speed);
     // 0-) the RT loop latched a contact stop (and is already floating): one
     //     kContact halt per rising edge, taken by step 0 in this same iteration.
     //     A clear resets the edge: this thread can miss the unlatched spell (a
@@ -297,6 +311,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
         // scaled to the URDF rating, loudly bounded instead of silently
         // integrated at whatever rate the leash lets it drag the arm.
         kinova::limit_joint_velocity(v_max_, qd);
+        qd *= speed;  // global speed scale (#114), on the limited command as in the stiff path
         const JointVec q_ref_prev = stream_q_ref_;
         integrate_leashed_reference(stream_q_ref_, qd, tick_dt, q_meas, kinova::kVelocityRefMaxLead,
                                     continuous_, q_lower_, q_upper_);
@@ -519,7 +534,7 @@ void Supervisor::sampler_loop() {  // fleshed out in Tasks 6-9
       const bool ok = snap_.load(fb);  // sequence the read; don't rely on arg eval order
       have_q_meas = have_q_meas || ok;
       q_meas = sampled_q(ok, fb.q, q_meas);  // failed read -> reuse last-good q (no phantom zero)
-      const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed_override_.load());
+      const ExecStatus st = traj_->tick(secs_since(t0), q_meas, speed);
       TrajectoryFeedback fbk;
       fbk.actual = q_meas;
       fbk.fraction_complete = st.fraction;
@@ -713,31 +728,20 @@ GainsResult Supervisor::on_set_gains(const GainsRequest& r) {
   return {true, ""};
 }
 SpeedResult Supervisor::on_set_speed_override(const SpeedOverrideRequest& r) {
-  return set_speed_override(r.scale, r.may_raise);
+  return set_speed_override(r.scale);
 }
-SpeedResult Supervisor::set_speed_override(double s, bool may_raise) {
+SpeedResult Supervisor::set_speed_override(double s) {
   if (!std::isfinite(s)) return {false, "speed override must be finite"};
   // Same floor as on_trajectory_goal, and for the same reason: below
   // kMinSpeedScale, effective_scale()'s internal clamp would silently run the
   // arm FASTER than the caller asked for. Refuse it here too, so the floor is
-  // unreachable from outside at either accept site. Ahead of the direction
-  // check below: a below-floor or above-1.0 request is invalid regardless of
-  // who is asking.
+  // unreachable from outside at either accept site.
   if (s < kMinSpeedScale || s > 1.0)
     return {false, "speed override must be in [" + std::to_string(kMinSpeedScale) + ", 1.0]; got " +
                        std::to_string(s)};
-  // Compare-and-store as ONE atomic operation against speed_override_, not a
-  // load, then a separate compare, then a separate store: that would leave a
-  // window between reading "current" and writing "new" for a concurrent
-  // caller's store to land in, making the comparison stale by the time the
-  // store happens -- which is exactly the race a caller-side snapshot
-  // comparison reopened (see Arbiter::on_set_speed_override). Do not
-  // "simplify" this back into a plain load-then-store.
-  double cur = speed_override_.load(std::memory_order_acquire);
-  do {
-    if (!may_raise && s >= cur)
-      return {false, "raising the speed override requires the current token"};
-  } while (!speed_override_.compare_exchange_weak(cur, s));
+  // No direction check: anyone may raise or lower the global scale (#114). The
+  // sampler slews toward it, so a raise still ramps instead of stepping.
+  speed_override_.store(s);
   return {true, ""};
 }
 ContactThresholdsResult Supervisor::on_set_contact_thresholds(const ContactThresholdsRequest& r) {

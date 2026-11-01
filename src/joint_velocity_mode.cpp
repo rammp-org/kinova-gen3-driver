@@ -128,6 +128,10 @@ void JointVelocityMode::compute(const JointFeedback& fb, double dt_s, JointComma
       solve_twist(fb.q, twist_target_, p, qd_cmd_);
     }
     limit(p, qd_cmd_);
+    // Global speed scale (#114), applied to the LIMITED command: a command over
+    // the cap is first scaled onto it, then slowed with everything else, so the
+    // result never exceeds speed_scale * max_qd and keeps its direction.
+    qd_cmd_ *= speed_scale_.load(std::memory_order_relaxed);
   }
 
   // Integrate the (limited) velocity into the position reference -- the shared

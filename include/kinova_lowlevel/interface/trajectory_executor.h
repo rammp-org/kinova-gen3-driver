@@ -73,6 +73,19 @@ inline constexpr double kMinSpeedScale = 0.01;
 // full 1.0 -> 0.0 change takes half a second.
 inline constexpr double kScaleSlewPerSec = 2.0;
 
+// One slew step of the global speed scale: `cur` moved toward `target` by at
+// most kScaleSlewPerSec * dt. dt <= 0 (a stalled or backwards clock) holds
+// `cur`. The Supervisor's sampler runs this once per tick and every consumer
+// reads the one result, so the executor and the modes' caps never disagree
+// mid-ramp (#114); apps/trajectory_run.cpp drives an executor directly and
+// runs the same step itself.
+inline double slew_scale(double cur, double target, double dt) {
+  const double max_step = kScaleSlewPerSec * (dt > 0.0 ? dt : 0.0);
+  if (target > cur + max_step) return cur + max_step;
+  if (target < cur - max_step) return cur - max_step;
+  return target;
+}
+
 // The slower of the goal's own scale and the runtime override, clamped into
 // (0, 1]. Free and inline so it is unit-testable without threads. A non-finite
 // input is treated as "no request" rather than propagated: NaN compares false
@@ -112,6 +125,10 @@ class TrajectoryExecutor {
                       const kinova::JointVec& path_tol, double speed_scale = 1.0);
   bool is_active() const { return active_.has_value(); }
   ControlModeKind active_mode() const { return mode_; }
+  // `override_scale` is the global speed scale, ALREADY slewed by the caller
+  // (slew_scale). The executor runs at min(goal scale, override_scale) and
+  // has no slew of its own: a second one would lag the modes' caps, which
+  // read the same slewed value.
   ExecStatus tick(double now_s, const kinova::JointVec& q_meas, double override_scale = 1.0);
   double applied_scale() const { return applied_; }
 
@@ -132,7 +149,7 @@ class TrajectoryExecutor {
   std::optional<Active> active_;
   kinova::JointVec path_tol_ = kinova::JointVec::Zero();  // guards the ACTIVE trajectory
   double scale_ = 1.0;                                    // the ACTIVE goal's own requested scale
-  double applied_ = 1.0;  // the scale actually in force (slew-limited, Task 3)
+  double applied_ = 1.0;  // the scale in force at the last tick: min(goal, override)
 };
 
 }  // namespace kinova::interface

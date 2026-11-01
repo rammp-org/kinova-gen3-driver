@@ -133,24 +133,15 @@ ExecStatus TrajectoryExecutor::tick(double now_s, const kinova::JointVec& q_meas
     a.last_now_s = now_s;
     a.traj_t = 0.0;
     a.started = true;
-    // A goal submitted at a slow scale must start at it, not ramp down from
-    // whatever was previously in force.
-    applied_ = effective_scale(scale_, override_scale);
   }
   const double dt_wall = now_s - a.last_now_s;
   a.last_now_s = now_s;
-  const double want = effective_scale(scale_, override_scale);
-  const double max_step = kScaleSlewPerSec * (dt_wall > 0.0 ? dt_wall : 0.0);
-  if (want > applied_ + max_step)
-    applied_ += max_step;
-  else if (want < applied_ - max_step)
-    applied_ -= max_step;
-  else
-    applied_ = want;
-  // A backwards wall-clock stamp already freezes applied_ above (max_step is
-  // 0 when dt_wall <= 0); it must not also walk traj_t backwards. Unlike the
-  // old `now_s - start_time` form, traj_t is an ACCUMULATOR now, so an
-  // un-guarded decrement here would never self-correct on the next tick.
+  // No slew here: override_scale arrives already slewed (slew_scale, run by
+  // the caller), and the goal's own scale is fixed for the whole goal, so a
+  // goal submitted slow starts slow.
+  applied_ = effective_scale(scale_, override_scale);
+  // traj_t is an ACCUMULATOR, so a backwards wall-clock stamp must not walk
+  // it backwards: an un-guarded decrement would never self-correct.
   if (dt_wall > 0.0) a.traj_t += dt_wall * applied_;
   const double elapsed = a.traj_t;
   const double dur = a.tr.duration_s();

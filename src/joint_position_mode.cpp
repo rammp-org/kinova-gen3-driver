@@ -94,6 +94,7 @@ void JointPositionMode::on_enter(const JointFeedback& fb) {
 
 void JointPositionMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
   const JointPositionParams p = params();  // own a snapshot for the whole cycle
+  const double speed = speed_scale_.load(std::memory_order_relaxed);  // global scale (#114)
 
   // Staleness: the stream stopped, so stop chasing it. Freeze where the arm
   // actually IS -- both the reference and the target for this cycle. Parking at
@@ -196,7 +197,7 @@ void JointPositionMode::compute(const JointFeedback& fb, double dt_s, JointComma
     // the wrong direction -- which on the arm is the joint spinning.
     double err = tgt - q_ref_[i];
     if (continuous_[i]) err = wrap_to_pi(err);
-    const double max_step = p.max_ref_speed[i] * dt_s;
+    const double max_step = speed * p.max_ref_speed[i] * dt_s;
     q_ref_[i] += std::clamp(err, -max_step, max_step);
 
     // Leash the reference to the MEASURED position. A no-op whenever the arm is

@@ -641,3 +641,26 @@ TEST(JointPositionModePose, ReanchorsTheSeedOnTheTransitionBackIntoPose) {
   EXPECT_TRUE(m.last_ik().converged);
   EXPECT_LT(m.last_ik().pos_err, 1e-4);
 }
+
+// #114: the global speed scale shrinks the reference rate cap to
+// speed_scale * max_ref_speed, and a live change applies on the next cycle.
+TEST(JointPosition, SpeedScaleShrinksTheRateCap) {
+  Dynamics dyn(URDF_PATH);
+  JointPositionParams p;
+  p.max_ref_speed.setConstant(0.5);
+  p.max_following_error = 0.0;  // isolate the rate limit
+  JointPositionMode m(dyn, p);
+  JointFeedback fb;
+  fb.q.setZero();
+  fb.qd.setZero();
+  m.on_enter(fb);
+  m.set_target(JointVec::Constant(1.0));
+  m.set_speed_scale(0.2);
+  JointCommand c;
+  m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.position[i], 0.2 * 0.5 * 0.001, 1e-12);
+  m.set_speed_scale(0.6);
+  m.compute(fb, 0.001, c);
+  for (int i = 0; i < kNumJoints; ++i) EXPECT_NEAR(c.position[i], (0.2 + 0.6) * 0.5 * 0.001, 1e-12);
+  EXPECT_DOUBLE_EQ(m.params().max_ref_speed[0], 0.5) << "the configured cap is not rewritten";
+}

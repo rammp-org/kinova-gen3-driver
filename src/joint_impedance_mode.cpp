@@ -81,6 +81,7 @@ void JointImpedanceMode::on_enter(const JointFeedback& fb) {
 
 void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointCommand& out) {
   const JointImpedanceParams p = params();  // own a snapshot for the whole cycle
+  const double speed = speed_scale_.load(std::memory_order_relaxed);  // global scale (#114)
 
   // Staleness: the stream stopped, so stop chasing it. Freeze the reference at
   // the MEASURED configuration -- the spring error collapses to zero and the arm
@@ -151,7 +152,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   // full turn at max_ref_speed -- on the arm, the joint visibly spinning the
   // long way round until the divergence guard aborts the goal.
   for (int i = 0; i < kNumJoints; ++i) {
-    const double max_step = p.max_ref_speed[i] * dt_s;
+    const double max_step = speed * p.max_ref_speed[i] * dt_s;
     double step = q_d_[i] - q_prev[i];
     if (continuous_[i]) step = wrap_to_pi(step);
     q_d_[i] = q_prev[i] + std::clamp(step, -max_step, max_step);
@@ -166,7 +167,7 @@ void JointImpedanceMode::compute(const JointFeedback& fb, double dt_s, JointComm
   // feed forward a motion faster than the reference is allowed to make.
   if (ff_velocity) {
     for (int i = 0; i < kNumJoints; ++i)
-      qd_ref_[i] = std::clamp(qd_cmd[i], -p.max_ref_speed[i], p.max_ref_speed[i]);
+      qd_ref_[i] = std::clamp(qd_cmd[i], -speed * p.max_ref_speed[i], speed * p.max_ref_speed[i]);
   } else {
     qd_ref_.setZero();
   }
