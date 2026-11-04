@@ -659,7 +659,7 @@ TEST(JointImpedanceMode, AFreshCommandReleasesTheFreeze) {
   EXPECT_GT(std::abs(m.reference()[0]), 1e-6);  // tracking again
 }
 
-// ---- v1.3.0 target feedforward: damp the velocity error, not the velocity ----
+// ---- v2.0.0 target feedforward: damp the velocity error, not the velocity ----
 TEST(JointImpedance, ProfiledTargetCancelsDampingAtReferenceVelocity) {
   Dynamics dyn(URDF_PATH);
   JointImpedanceMode m(dyn, static_params());

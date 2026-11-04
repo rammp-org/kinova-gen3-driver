@@ -210,7 +210,7 @@ scale — the path it interpolates is byte-for-byte the plan the goal carried.
 Running the same geometric path at a slower clock means every derivative the
 planner's polynomial carries scales with the clock rate: commanded velocity
 scales with `s`, acceleration with `s²`, straight out of the chain rule for a
-time-reparameterised curve. Since the v1.3 feedforward port the executor is
+time-reparameterised curve. Since the 2.0.0 feedforward port the executor is
 the one place that applies it: the tick scales the sampled `qd` by the
 effective scale and `qdd` by its square before handing the target to
 `JointTargetSink`, so the damper and `M(q)·qdd` term always describe the
