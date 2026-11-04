@@ -12,7 +12,7 @@ that heading to the new version and bumps `package.xml`.
 
 ## [Unreleased]
 
-## [2.0.0] — 2026-11-02
+## [2.0.0] — 2026-11-04
 
 A major release. Seven threads of work land together: one gains contract on every
 impedance surface, with target feedforward and compliant velocity and twist
