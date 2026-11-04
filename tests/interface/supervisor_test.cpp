@@ -2071,7 +2071,7 @@ TEST(SupervisorSpeed, AJointPositionStreamInImpedanceModeIsCappedAtTheScaledRate
   }
 }
 
-// ---- v1.3.0 gains contract: per-command gains, no leakage, loud rejection ----
+// ---- v2.0.0 gains contract: per-command gains, no leakage, loud rejection ----
 namespace {
 interface::TrajectoryGoal imp_goal(double to, interface::ImpedanceGains spec = {}) {
   interface::TrajectoryGoal g;
